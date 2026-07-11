@@ -58,16 +58,56 @@ serve(async (req: Request) => {
     const patientState = await stateResponse.json()
     console.log(`Successfully retrieved patient facts: ${patientState.current_facts?.length || 0} facts found.`)
 
-    // TODO: Task 8, 9, 10
-    // 4. Pass the facts to the LLM Reasoning layer
-    // 5. Run PaperTrail verification
-    // 6. Save final rendered briefing
+    // 4. (Task 8) Pass the facts to the LLM Reasoning layer
+    console.log('Calling LLM Reasoning engine (Task 8)...')
+    const OPENROUTER_API_KEY = Deno.env.get('OPENROUTER_API_KEY')
+    const LLM_MODEL = 'anthropic/claude-3-haiku' // OpenRouter ID for Claude Haiku (or any other fast reasoning model)
+
+    const systemPrompt = `You are an expert medical AI assisting a caregiver. Your job is to generate a concise, highly readable medical briefing.
+You will be provided with the patient's CURRENT medical facts (medications, conditions, labs).
+The audience for this briefing is: ${briefing.audience}.
+Format the output in clean Markdown. Include:
+1. Executive Summary (TL;DR for the ${briefing.audience})
+2. Active Medications
+3. Active Conditions
+4. Recent Lab Values
+5. Key concerns or questions to ask the doctor.
+Keep it strictly factual based ON THE PROVIDED FACTS. Do NOT hallucinate.`
+
+    const userPrompt = `Patient Facts from Knowledge Graph:
+${JSON.stringify(patientState.current_facts, null, 2)}
+
+Please generate the briefing now.`
+
+    const llmResponse = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${OPENROUTER_API_KEY}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        model: LLM_MODEL,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt }
+        ]
+      })
+    })
+
+    if (!llmResponse.ok) {
+      throw new Error(`LLM API error: ${llmResponse.statusText}`)
+    }
+
+    const llmData = await llmResponse.json()
+    const generatedBriefing = llmData.choices[0].message.content
+
+    // 5. TODO: Task 9 (PaperTrail verification)
     
-    // For now, just mark the job and briefing as complete (stub)
+    // 6. Save final rendered briefing
     await supabaseClient.from('briefings').update({
       status: 'complete',
       completed_at: new Date().toISOString(),
-      briefing_text: `# Draft Briefing\nPatient state retrieved. Details to be generated.`
+      briefing_text: generatedBriefing
     }).eq('id', briefingId)
 
     // Mark Job as complete
