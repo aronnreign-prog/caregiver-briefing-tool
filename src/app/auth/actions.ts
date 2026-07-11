@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
+import { createClient as createSupabaseClient } from '@supabase/supabase-js'
 
 export async function login(formData: FormData) {
   const supabase = await createClient()
@@ -41,8 +42,13 @@ export async function signup(formData: FormData) {
   }
 
   if (authData.user) {
-    // Insert into caregivers table
-    const { error: dbError } = await supabase.from('caregivers').insert({
+    // Insert into caregivers table using service role to bypass RLS
+    const adminSupabase = createSupabaseClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    )
+
+    const { error: dbError } = await adminSupabase.from('caregivers').insert({
       auth_user_id: authData.user.id,
       email: authData.user.email,
       name: name,
