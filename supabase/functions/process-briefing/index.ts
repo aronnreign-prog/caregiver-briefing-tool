@@ -171,13 +171,107 @@ Rules:
       throw new Error("LLM did not return valid JSON.")
     }
 
+    const generatedBriefing = parsedContent.briefing_text || "Failed to generate briefing text."
+    let claims = parsedContent.claims || []
+    const flaggedConcerns = parsedContent.flagged_concerns || []
+    
+    // --- TASK 10: PaperTrail Verification (Layer 4) ---
+    console.log(`Running PaperTrail Verification on ${claims.length} claims...`)
+    
+    const verifiedClaims = []
+    const rejectedClaims = []
+    
+    for (const claim of claims) {
+      let flag = "UNSUPPORTED"
+      let evidence = null
+      
+      // 1. Medical Knowledge Match (Layer 5 checks)
+      const isContraindication = layer5Results.some(res => 
+        claim.claim_text.toLowerCase().includes(res.medication.toLowerCase()) && 
+        claim.claim_text.toLowerCase().includes("contraindicat")
+      )
+      
+      if (isContraindication) {
+        flag = "MEDICAL_KNOWLEDGE"
+        evidence = { source_doc_id: "DDInter", match_type: "medical_knowledge" }
+      } else {
+        // 2. String Match against Graphiti facts
+        const matchedFact = currentFacts.find((f: any) => {
+          const factText = f.fact.toLowerCase()
+          const expectedQuote = (claim.expected_source || "").toLowerCase()
+          return factText.includes(expectedQuote) || factText.includes(claim.claim_text.toLowerCase())
+        })
+        
+        if (matchedFact) {
+          flag = "SUPPORTED"
+          evidence = {
+            source_doc_id: matchedFact.source_node_uuid,
+            source_quote: matchedFact.fact,
+            match_type: "string"
+          }
+        } else {
+          // 3. Semantic Match (fallback to LLM)
+          console.log(`String match failed for: "${claim.claim_text}". Running semantic match...`)
+          const semanticPrompt = `Does the following evidence semantically support the claim? 
+          Claim: ${claim.claim_text}
+          Evidence Facts: ${JSON.stringify(currentFacts.map((f: any) => f.fact))}
+          
+          Respond ONLY with JSON: {"is_supported": true/false, "confidence": 0.0 to 1.0, "matching_fact": "the matching fact text"}`
+          
+          const semanticResponse = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+            method: "POST",
+            headers: { "Authorization": `Bearer ${OPENROUTER_API_KEY}`, "Content-Type": "application/json" },
+            body: JSON.stringify({
+              model: "anthropic/claude-3-haiku",
+              response_format: { type: "json_object" },
+              messages: [{ role: "user", content: semanticPrompt }]
+            })
+          })
+          
+          if (semanticResponse.ok) {
+            const semanticData = await semanticResponse.json()
+            try {
+              const semanticResult = JSON.parse(semanticData.choices[0].message.content)
+              if (semanticResult.is_supported && semanticResult.confidence > 0.8) {
+                flag = "SUPPORTED"
+                evidence = { source_doc_id: "semantic-match", source_quote: semanticResult.matching_fact, match_type: "semantic" }
+              } else if (semanticResult.is_supported && semanticResult.confidence >= 0.5) {
+                flag = "PARTIALLY SUPPORTED"
+                evidence = { source_doc_id: "semantic-match", source_quote: semanticResult.matching_fact, match_type: "semantic" }
+              }
+            } catch (e) {
+              console.error("Semantic match parse failed.")
+            }
+          }
+        }
+      }
+      
+      const verifiedClaim = { ...claim, flag, evidence }
+      
+      if (flag === "UNSUPPORTED") {
+        rejectedClaims.push(verifiedClaim)
+        console.warn(`[REJECTED] Hallucination detected: ${claim.claim_text}`)
+      } else {
+        verifiedClaims.push(verifiedClaim)
+      }
+    }
+    
+    // 4. Strip UNSUPPORTED claims from the briefing text
+    let finalBriefingText = generatedBriefing
+    for (const rejected of rejectedClaims) {
+      // Very basic stripping (in a real app we'd use robust markdown AST parsing)
+      finalBriefingText = finalBriefingText.replace(rejected.claim_text, "")
+    }
+
+    console.log(`PaperTrail complete: ${verifiedClaims.length} supported, ${rejectedClaims.length} rejected.`)
+
     // Save final rendered briefing
     await supabaseClient.from('briefings').update({
       status: 'complete',
       completed_at: new Date().toISOString(),
-      briefing_text: parsedContent.briefing_text || "Failed to generate briefing text.",
-      claims: parsedContent.claims || [],
-      flagged_concerns: parsedContent.flagged_concerns || []
+      briefing_text: finalBriefingText,
+      claims: verifiedClaims,
+      flagged_concerns: flaggedConcerns
     }).eq('id', briefingId)
 
     // Mark Job as complete
