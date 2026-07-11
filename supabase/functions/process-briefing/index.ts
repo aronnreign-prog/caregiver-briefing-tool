@@ -58,26 +58,32 @@ serve(async (req: Request) => {
     const patientState = await stateResponse.json()
     console.log(`Successfully retrieved patient facts: ${patientState.current_facts?.length || 0} facts found.`)
 
-    // 4. (Task 8) Pass the facts to the LLM Reasoning layer
-    console.log('Calling LLM Reasoning engine (Task 8)...')
+    // 4. (Task 8 & 9) Pass facts to LLM for Reasoning and PaperTrail Verification
+    console.log('Calling LLM Reasoning engine with PaperTrail (Task 8 & 9)...')
     const OPENROUTER_API_KEY = Deno.env.get('OPENROUTER_API_KEY')
-    const LLM_MODEL = 'anthropic/claude-3-haiku' // OpenRouter ID for Claude Haiku (or any other fast reasoning model)
+    const LLM_MODEL = 'anthropic/claude-3-haiku' // OpenRouter ID for Claude Haiku
 
     const systemPrompt = `You are an expert medical AI assisting a caregiver. Your job is to generate a concise, highly readable medical briefing.
-You will be provided with the patient's CURRENT medical facts (medications, conditions, labs).
+You will be provided with the patient's CURRENT medical facts (medications, conditions, labs). Every fact includes a 'source_node_uuid' from the knowledge graph.
 The audience for this briefing is: ${briefing.audience}.
-Format the output in clean Markdown. Include:
-1. Executive Summary (TL;DR for the ${briefing.audience})
-2. Active Medications
-3. Active Conditions
-4. Recent Lab Values
-5. Key concerns or questions to ask the doctor.
-Keep it strictly factual based ON THE PROVIDED FACTS. Do NOT hallucinate.`
+
+CRITICAL: You must output strictly valid JSON with exactly this structure:
+{
+  "briefing_text": "The full Markdown briefing (Executive Summary, Medications, Conditions, Labs, Key Questions).",
+  "claims": [
+    {
+      "claim": "Patient takes Lisinopril 10mg daily",
+      "source_node_uuid": "the-uuid-from-the-facts"
+    }
+  ]
+}
+
+For EVERY medical claim you make in the briefing_text (e.g. a medication, a diagnosis, a lab value), you MUST create a corresponding entry in the "claims" array and cite the exact "source_node_uuid" that proves it. Do NOT hallucinate facts.`
 
     const userPrompt = `Patient Facts from Knowledge Graph:
 ${JSON.stringify(patientState.current_facts, null, 2)}
 
-Please generate the briefing now.`
+Please generate the briefing and PaperTrail claims now in JSON format.`
 
     const llmResponse = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
@@ -87,6 +93,7 @@ Please generate the briefing now.`
       },
       body: JSON.stringify({
         model: LLM_MODEL,
+        response_format: { type: "json_object" },
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: userPrompt }
@@ -99,15 +106,27 @@ Please generate the briefing now.`
     }
 
     const llmData = await llmResponse.json()
-    const generatedBriefing = llmData.choices[0].message.content
-
-    // 5. TODO: Task 9 (PaperTrail verification)
+    const content = llmData.choices[0].message.content
     
-    // 6. Save final rendered briefing
+    let parsedContent;
+    try {
+      parsedContent = JSON.parse(content)
+    } catch (e) {
+      console.error("Failed to parse LLM JSON output:", content)
+      throw new Error("LLM did not return valid JSON.")
+    }
+
+    const generatedBriefing = parsedContent.briefing_text || "Failed to generate briefing text."
+    const claims = parsedContent.claims || []
+    
+    console.log(`Generated briefing with ${claims.length} verified claims.`)
+
+    // 6. Save final rendered briefing and claims
     await supabaseClient.from('briefings').update({
       status: 'complete',
       completed_at: new Date().toISOString(),
-      briefing_text: generatedBriefing
+      briefing_text: generatedBriefing,
+      claims: claims
     }).eq('id', briefingId)
 
     // Mark Job as complete
