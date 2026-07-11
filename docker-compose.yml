@@ -1,0 +1,30 @@
+services:
+  falkordb:
+    image: falkordb/falkordb:latest
+    ports:
+      - "6379:6379"
+      - "3000:3000"
+    volumes:
+      - falkordb_data:/var/lib/falkordb/data
+
+  graphiti-wrapper:
+    build: ./python/graphiti-wrapper
+    ports:
+      - "8000:8000"
+    environment:
+      - FALKORDB_URI=bolt://falkordb:7687
+    depends_on:
+      - falkordb
+
+  postgres:
+    image: postgres:16
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_PASSWORD: dev
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  falkordb_data:
+  postgres_data:
