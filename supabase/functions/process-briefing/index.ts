@@ -36,7 +36,7 @@ serve(async (req: Request) => {
     // 2. Fetch Briefing metadata
     const { data: briefing, error: briefingError } = await supabaseClient
       .from('briefings')
-      .select('patient_id, audience')
+      .select('patient_id, caregiver_id, audience')
       .eq('id', briefingId)
       .single()
 
@@ -279,6 +279,38 @@ Rules:
       status: 'complete',
       completed_at: new Date().toISOString()
     }).eq('id', job.id)
+
+    // 5. Send Email Notification via Resend (Task 11)
+    const RESEND_API_KEY = Deno.env.get('RESEND_API_KEY')
+    if (RESEND_API_KEY) {
+      console.log('Sending email notification to caregiver...')
+      try {
+        const { data: caregiver } = await supabaseClient.from('caregivers').select('auth_user_id').eq('id', briefing.caregiver_id).single()
+        if (caregiver?.auth_user_id) {
+          const { data: authUser } = await supabaseClient.auth.admin.getUserById(caregiver.auth_user_id)
+          const email = authUser?.user?.email
+          
+          if (email) {
+            await fetch('https://api.resend.com/emails', {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${RESEND_API_KEY}`,
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({
+                from: 'Acme Care <onboarding@resend.dev>',
+                to: [email],
+                subject: `Briefing ready for ${patientState.patient?.name || 'your patient'}`,
+                html: `<p>Your requested medical briefing is now ready to view in the dashboard.</p>`
+              })
+            })
+          }
+        }
+      } catch (emailError) {
+        console.error('Failed to send notification email:', emailError)
+        // Non-fatal error, don't throw
+      }
+    }
 
     return new Response(JSON.stringify({ message: 'Success', briefingId }), { status: 200 })
 

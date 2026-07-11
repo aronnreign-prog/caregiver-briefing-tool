@@ -32,6 +32,13 @@ export default async function PatientPage({ params }: { params: { id: string } }
     .eq('patient_id', patientId)
     .order('uploaded_at', { ascending: false })
 
+  // Fetch initial briefings for this patient
+  const { data: briefings } = await supabase
+    .from('briefings')
+    .select('id, audience, status, created_at, completed_at, briefing_text, claims, flagged_concerns')
+    .eq('patient_id', patientId)
+    .order('created_at', { ascending: false })
+
   return (
     <div className="min-h-screen bg-gray-50 p-8">
       <div className="max-w-4xl mx-auto space-y-6">
@@ -50,7 +57,11 @@ export default async function PatientPage({ params }: { params: { id: string } }
           </p>
         </header>
 
-        <PatientDetailClient patient={patient} initialDocuments={documents || []} />
+        <PatientDetailClient 
+          patient={patient} 
+          initialDocuments={documents || []} 
+          initialBriefings={briefings || []}
+        />
       </div>
     </div>
   )
