@@ -127,7 +127,30 @@ Preserve the structure. Output as structured text.`
       processed_at: new Date().toISOString()
     }).eq('id', documentId)
 
-    // 7. Mark Job as complete
+    // 7. (Task 7) Feed text to Graphiti for bi-temporal fact extraction
+    console.log(`Sending to Graphiti for patient ${doc.patient_id}...`)
+    const GRAPHITI_WRAPPER_URL = Deno.env.get("GRAPHITI_WRAPPER_URL") || "http://host.docker.internal:8000"
+    
+    // We send an empty array for entities for now (Task 5 is deferred).
+    // Graphiti's internal LLM will still extract entities from episode_text.
+    const graphitiResponse = await fetch(`${GRAPHITI_WRAPPER_URL}/add-facts`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        patient_id: doc.patient_id,
+        episode_text: extractedText,
+        source_doc_id: documentId,
+        source_doc_date: new Date().toISOString(), // Fallback if no specific doc date found
+        entities: [], 
+        reference_time: new Date().toISOString(),
+      }),
+    })
+
+    if (!graphitiResponse.ok) {
+      throw new Error(`Graphiti wrapper error: ${graphitiResponse.statusText}`)
+    }
+
+    // 8. Mark Job as complete
     await supabaseClient.from('jobs').update({
       status: 'complete',
       completed_at: new Date().toISOString()
