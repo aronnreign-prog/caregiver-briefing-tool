@@ -103,3 +103,28 @@ violates this rule. Before finishing a task, check your work against this list.
   against the production `db-url`. Treat MCP read tools as branch-scoped;
   use MCP `apply_migration` or CLI for production writes.
 
+---
+
+## Rule 7: USE YOUR TOOLS TO RESOLVE PROBLEMS — DON'T LOOP ON GUESSES
+
+When a build/dependency/integration error appears, do NOT retry the same guess
+or hand-edit blindly. Use the tools available to you to find the real answer
+BEFORE editing:
+
+1. **Version-grounded verification.** After pinning/installing a library, verify
+   the actual installed version's API (e.g. `docker run --rm <img> python -c "import
+   pkg; print(pkg.__file__)"` or introspect the module layout). Docs from `main`
+   / latest often describe a DIFFERENT version than what pip resolved — trust the
+   installed package, not the doc.
+2. **Search the web for the exact error.** Paste the real error string
+   (e.g. `ResolutionImpossible`, `ModuleNotFoundError`, dependency conflict) into
+   `websearch` to find how others resolved it. Common fixes (loosen a pin,
+   change an import path) are almost always documented.
+3. **Read the library's own docs/source** for the SPECIFIC version in use, not a
+   generic latest-version doc. An import path valid in v0.29 may not exist in v0.11.
+4. **One diagnosis, then one fix.** Never do >2 blind retries of the same approach.
+   If attempt 2 fails the same way, STOP and use docs/search/introspection.
+
+**Penalty for violation:** repeated blind retries waste context and intelligence.
+A single websearch or a one-line introspection command prevents most loops.
+

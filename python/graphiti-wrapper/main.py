@@ -25,6 +25,8 @@ from graphiti_core import Graphiti
 from graphiti_core.nodes import EpisodeType
 from graphiti_core.llm_client import OpenAIClient, LLMConfig
 from graphiti_core.embedder import OpenAIEmbedder, OpenAIEmbedderConfig
+from graphiti_core.cross_encoder.openai_reranker_client import OpenAIRerankerClient
+from graphiti_core.driver.falkordb_driver import FalkorDriver
 
 from extractor import extract_entities
 
@@ -91,11 +93,21 @@ async def lifespan(app: FastAPI):
         )
     )
 
+    cross_encoder = OpenAIRerankerClient(
+        config=LLMConfig(
+            api_key=OPENROUTER_API_KEY,
+            model=os.getenv("RERANK_MODEL", "deepseek/deepseek-chat-v3-0324:free"),
+            base_url=OPENROUTER_BASE_URL,
+        )
+    )
+
+    falkor_driver = FalkorDriver(host=FALKORDB_HOST, port=FALKORDB_PORT)
+
     graphiti = Graphiti(
-        FALKORDB_HOST,
-        FALKORDB_PORT,
+        graph_driver=falkor_driver,
         llm_client=llm_client,
         embedder=embedder,
+        cross_encoder=cross_encoder,
     )
 
     logger.info("Building Graphiti indices and constraints…")

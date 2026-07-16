@@ -1,40 +1,28 @@
-import spacy
-from spacy.matcher import Matcher
-import httpx
+import os
+import json
 import logging
+import httpx
 
 logger = logging.getLogger(__name__)
 
-# Try loading the med7 model. In Docker, it should be installed via the wheel.
-try:
-    med7 = spacy.load("en_core_med7_lg")
-    # med7 includes standard spaCy components, we can add our Matcher to it.
-    matcher = Matcher(med7.vocab)
-except Exception as e:
-    logger.error(f"Failed to load en_core_med7_lg. Is it installed? Error: {e}")
-    med7 = None
-    matcher = None
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
+OPENROUTER_BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
+EXTRACT_MODEL = os.getenv("ENTITY_EXTRACT_MODEL", "deepseek/deepseek-chat-v3-0324:free")
 
-# Set up the lab value Matcher patterns if med7 loaded successfully.
-if matcher:
-    # Common lab tests to extract
-    lab_tests = [
-        "creatinine", "gfr", "egfr", "hba1c", "wbc", "hemoglobin",
-        "hgb", "sodium", "potassium", "bun", "alt", "ast", "tsh",
-        "inr", "platelets", "hematocrit", "glucose", "ldl", "hdl"
-    ]
+SYSTEM_PROMPT = """You are a clinical entity extraction engine. From the given medical text, extract:
+1. medications — each with a "name" (the drug name) and optional "dosage", "frequency", "route", "form", "strength", "duration".
+2. lab_values — each with "test" (the lab/test name, lowercase), "value" (numeric value as a string), and "unit" (optional).
 
-    # Pattern: [test name] [optional colon/is] [number] [optional unit]
-    pattern = [
-        {"LOWER": {"IN": lab_tests}},
-        {"IS_PUNCT": True, "OP": "?"},
-        {"TEXT": {"REGEX": "^(was|is|of|at)$"}, "OP": "?"},
-        {"LIKE_NUM": True},
-        {"LOWER": {"REGEX": "^(mg|g|mmol|meq|k|iu|miu|%)"}, "OP": "?"},
-        {"IS_PUNCT": True, "OP": "?"},
-        {"LOWER": {"REGEX": "^(dl|l|ul|ml|min)$"}, "OP": "?"}
-    ]
-    matcher.add("LAB_VALUE", [pattern])
+Return ONLY a JSON object with exactly two keys: "medications" (array) and "lab_values" (array).
+If nothing is found, return empty arrays. Do not include any explanatory text outside the JSON."""
+
+HEADERS = {
+    "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+    "Content-Type": "application/json",
+    "HTTP-Referer": "https://caregiver-briefing-tool.local",
+    "X-Title": "Caregiver Briefing Tool",
+}
+
 
 async def fetch_rxnorm_code(drug_name: str) -> str | None:
     """Fetch RxNorm CUI for a given drug name using NIH RxNav API."""
@@ -52,6 +40,7 @@ async def fetch_rxnorm_code(drug_name: str) -> str | None:
         logger.warning(f"Failed to fetch RxNorm for {drug_name}: {e}")
     return None
 
+
 async def fetch_icd10_code(condition_name: str) -> str | None:
     """Fetch ICD-10 code for a given condition using NIH ClinicalTables API."""
     try:
@@ -67,70 +56,53 @@ async def fetch_icd10_code(condition_name: str) -> str | None:
         logger.warning(f"Failed to fetch ICD-10 for {condition_name}: {e}")
     return None
 
+
 async def extract_entities(text: str) -> dict:
     """
-    Extract medications (Med7) and lab values (spaCy Matcher) from text.
+    Extract medications and lab values from text using an OpenRouter LLM.
+    Returns {"medications": [...], "lab_values": [...]}.
     """
-    if not med7 or not matcher:
-        logger.error("Med7 model not loaded. Cannot extract entities.")
+    if not OPENROUTER_API_KEY:
+        logger.error("OPENROUTER_API_KEY not set. Cannot extract entities via LLM.")
         return {"medications": [], "lab_values": []}
 
-    doc = med7(text)
-    
-    # 1. Extract medications
-    medications = []
-    # Med7 entity labels: DRUG, DOSAGE, FREQUENCY, ROUTE, FORM, STRENGTH, DURATION
-    # Group entities by sentence to assemble complex medication regimens
-    for sent in doc.sents:
-        drug = None
-        attrs = {}
-        for ent in sent.ents:
-            if ent.label_ == "DRUG":
-                drug = ent.text
-            elif ent.label_ in ["DOSAGE", "FREQUENCY", "ROUTE", "FORM", "STRENGTH", "DURATION"]:
-                attrs[ent.label_.lower()] = ent.text
-        
-        if drug:
-            # Look up RxNorm
-            rxcui = await fetch_rxnorm_code(drug)
-            med_entry = {
-                "name": drug,
-                "rxcui": rxcui,
-                **attrs
-            }
-            medications.append(med_entry)
-
-    # 2. Extract lab values using Matcher
-    lab_values = []
-    matches = matcher(doc)
-    for match_id, start, end in matches:
-        span = doc[start:end]
-        
-        # Parse the span into test, value, and unit
-        test_name = None
-        value = None
-        unit_parts = []
-        
-        for token in span:
-            if token.lower_ in lab_tests:
-                test_name = token.lower_
-            elif token.like_num:
-                value = token.text
-            elif not token.is_punct and not token.lower_ in ["was", "is", "of", "at"]:
-                # If it's not the test name, not a number, and not a filler/punct, it's likely a unit part
-                if token.lower_ != test_name:
-                    unit_parts.append(token.text)
-        
-        unit = "".join(unit_parts) if unit_parts else None
-        
-        if test_name and value:
-            lab_values.append({
-                "test": test_name,
-                "value": value,
-                "unit": unit
-            })
-
-    return {
-        "medications": medications,
-        "lab_values": lab_values
+    payload = {
+        "model": EXTRACT_MODEL,
+        "messages": [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": text},
+        ],
+        "response_format": {"type": "json_object"},
+        "temperature": 0.0,
     }
+
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                f"{OPENROUTER_BASE_URL}/chat/completions",
+                headers=HEADERS,
+                json=payload,
+                timeout=30.0,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            content = data["choices"][0]["message"]["content"]
+            parsed = json.loads(content)
+
+        medications = parsed.get("medications", [])
+        lab_values = parsed.get("lab_values", [])
+
+        # Enrich medications with RxNorm codes (best-effort, non-blocking).
+        for med in medications:
+            if "name" in med and "rxcui" not in med:
+                rxcui = await fetch_rxnorm_code(med["name"])
+                if rxcui:
+                    med["rxcui"] = rxcui
+
+        return {
+            "medications": medications,
+            "lab_values": lab_values,
+        }
+    except Exception as e:
+        logger.error(f"OpenRouter entity extraction failed: {e}")
+        return {"medications": [], "lab_values": []}
