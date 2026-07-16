@@ -73,37 +73,78 @@ serve(async (req: Request) => {
     // --- TASK 9: LLM Reasoning (Layer 3) + Drug Database Verification (Layer 5) ---
     console.log('Running Layer 5 (Drug Database Verification)...')
     
-    // Extract medications and conditions from current facts for contraindication checks
-    // In a real implementation, we'd parse this robustly. For now we use basic string matching
-    // on the 'fact' field (e.g. "Patient takes Lisinopril")
-    const activeMeds = currentFacts
-      .filter((f: any) => f.fact.toLowerCase().includes("take") || f.fact.toLowerCase().includes("prescrib"))
-      .map((f: any) => f.fact)
-    
-    const activeConditions = currentFacts
-      .filter((f: any) => f.fact.toLowerCase().includes("diagnos") || f.fact.toLowerCase().includes("has"))
-      .map((f: any) => f.fact)
+    // 1. Get clean drug names directly from the DB (extracted deterministically by Med7 in Task 5)
+    const { data: docs } = await supabaseClient
+      .from('documents')
+      .select('extracted_entities')
+      .eq('patient_id', briefing.patient_id)
+
+    const activeMeds = new Set<string>()
+    if (docs) {
+      for (const d of docs) {
+        const meds = d.extracted_entities?.medications || []
+        for (const m of meds) {
+          if (m.name) activeMeds.add(m.name)
+        }
+      }
+    }
 
     const layer5Results: any[] = []
     
-    // Note: Implementing real RxNorm and DDInter API calls here.
-    // For MVT, we simulate the DDInter check if we see Lisinopril/ACE and a CKD/low GFR trend.
-    // In production, we'd loop over activeMeds, hit https://rxnav.nlm.nih.gov/REST/rxcui.json
-    // and hit DDInter endpoints.
-    if (activeMeds.some((m: string) => m.toLowerCase().includes("lisinopril")) && 
-        (activeConditions.some((c: string) => c.toLowerCase().includes("ckd") || c.toLowerCase().includes("kidney")) || trends["GFR"])) {
-      layer5Results.push({
-        type: "drug-disease-contraindication",
-        medication: "Lisinopril",
-        condition: "Chronic Kidney Disease / Low GFR",
-        severity: "High",
-        citation: "DDInter: Drug-disease interaction detected. ACE inhibitors require monitoring with declining GFR."
-      })
+    // 2. Map drugs to RxCUIs via NIH RxNav API
+    const rxcuis: string[] = []
+    const rxcuiToName: Record<string, string> = {}
+    
+    for (const med of Array.from(activeMeds)) {
+      try {
+        const url = \`https://rxnav.nlm.nih.gov/REST/approximateTerm.json?term=\${encodeURIComponent(med)}&maxEntries=1\`
+        const res = await fetch(url)
+        if (res.ok) {
+          const data = await res.json()
+          const candidates = data.approximateGroup?.candidate
+          if (candidates && candidates.length > 0) {
+            const rxcui = candidates[0].rxcui
+            rxcuis.push(rxcui)
+            rxcuiToName[rxcui] = med
+          }
+        }
+      } catch (e) {
+        console.warn(\`Failed to fetch RxCUI for \${med}: \`, e)
+      }
+    }
+
+    // 3. Check for Drug-Drug Interactions via NIH RxNav Interaction API
+    if (rxcuis.length > 1) {
+      try {
+        const ddiUrl = \`https://rxnav.nlm.nih.gov/REST/interaction/list.json?rxcuis=\${rxcuis.join('+')}\`
+        const ddiRes = await fetch(ddiUrl)
+        if (ddiRes.ok) {
+          const ddiData = await ddiRes.json()
+          if (ddiData.fullInteractionTypeGroup) {
+            for (const group of ddiData.fullInteractionTypeGroup) {
+              for (const type of group.fullInteractionType) {
+                for (const interaction of type.interactionPair) {
+                  layer5Results.push({
+                    type: "drug-drug-interaction",
+                    medications: [rxcuiToName[interaction.interactionConcept[0].minConceptItem.rxcui] || "Unknown", 
+                                  rxcuiToName[interaction.interactionConcept[1].minConceptItem.rxcui] || "Unknown"],
+                    severity: interaction.severity,
+                    citation: \`NIH RxNav Interaction API: \${interaction.description}\`
+                  })
+                }
+              }
+            }
+          }
+        }
+      } catch (e) {
+        console.warn("Failed to fetch DDIs from RxNav:", e)
+      }
     }
 
     console.log('Calling LLM Reasoning engine (Task 9)...')
     const OPENROUTER_API_KEY = Deno.env.get('OPENROUTER_API_KEY')
-    const LLM_MODEL = 'anthropic/claude-3-haiku'
+    // Fix: Pull the LLM model from the environment instead of hardcoding
+    const LLM_MODEL = Deno.env.get('LLM_MODEL') || 'anthropic/claude-3-haiku'
 
     const systemPrompt = `You are generating a medical briefing for a caregiver to bring to a doctor.
 
@@ -176,72 +217,142 @@ Rules:
     const flaggedConcerns = parsedContent.flagged_concerns || []
     
     // --- TASK 10: PaperTrail Verification (Layer 4) ---
-    console.log(`Running PaperTrail Verification on ${claims.length} claims...`)
+    console.log(`Running PaperTrail Verification...`)
     
-    const verifiedClaims = []
-    const rejectedClaims = []
-    
-    for (const claim of claims) {
-      let flag = "UNSUPPORTED"
-      let evidence = null
-      
-      // 1. Medical Knowledge Match (Layer 5 checks)
-      const isContraindication = layer5Results.some(res => 
-        claim.claim_text.toLowerCase().includes(res.medication.toLowerCase()) && 
-        claim.claim_text.toLowerCase().includes("contraindicat")
-      )
-      
-      if (isContraindication) {
-        flag = "MEDICAL_KNOWLEDGE"
-        evidence = { source_doc_id: "DDInter", match_type: "medical_knowledge" }
-      } else {
-        // 2. String Match against Graphiti facts
-        const matchedFact = currentFacts.find((f: any) => {
-          const factText = f.fact.toLowerCase()
-          const expectedQuote = (claim.expected_source || "").toLowerCase()
-          return factText.includes(expectedQuote) || factText.includes(claim.claim_text.toLowerCase())
+    // Stage 1: Atomic Claim Decomposition
+    const decomposeClaimsPrompt = `Decompose the following briefing into atomic claims. Each claim should be a single verifiable fact. 
+    Briefing: ${generatedBriefing}
+    Output as JSON array of {claim_id, claim_text, claim_type, expected_evidence}. 
+    claim_type can be "source_document", "medical_knowledge", or "reasoning".`
+
+    let atomicClaims: any[] = []
+    try {
+      const decompRes = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${OPENROUTER_API_KEY}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: LLM_MODEL,
+          response_format: { type: "json_object" },
+          messages: [{ role: "user", content: decomposeClaimsPrompt }]
         })
+      })
+      if (decompRes.ok) {
+        const decompData = await decompRes.json()
+        const parsed = JSON.parse(decompData.choices[0].message.content)
+        atomicClaims = Array.isArray(parsed) ? parsed : (parsed.claims || [])
+      }
+    } catch (e) {
+      console.warn("Failed to decompose claims:", e)
+    }
+
+    // Stage 2: Atomic Evidence Extraction
+    // First, fetch the raw text of all documents for this patient
+    const { data: sourceDocs } = await supabaseClient
+      .from('documents')
+      .select('id, extracted_text')
+      .eq('patient_id', briefing.patient_id)
+      
+    let atomicEvidence: any[] = []
+    
+    if (sourceDocs && sourceDocs.length > 0) {
+      for (const doc of sourceDocs) {
+        if (!doc.extracted_text) continue;
         
-        if (matchedFact) {
-          flag = "SUPPORTED"
-          evidence = {
-            source_doc_id: matchedFact.source_node_uuid,
-            source_quote: matchedFact.fact,
-            match_type: "string"
-          }
-        } else {
-          // 3. Semantic Match (fallback to LLM)
-          console.log(`String match failed for: "${claim.claim_text}". Running semantic match...`)
-          const semanticPrompt = `Does the following evidence semantically support the claim? 
-          Claim: ${claim.claim_text}
-          Evidence Facts: ${JSON.stringify(currentFacts.map((f: any) => f.fact))}
-          
-          Respond ONLY with JSON: {"is_supported": true/false, "confidence": 0.0 to 1.0, "matching_fact": "the matching fact text"}`
-          
-          const semanticResponse = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+        const extractEvidencePrompt = `Extract atomic evidence from the following source document text. Each evidence should be a single fact with the exact source quote. 
+        Document text: ${doc.extracted_text}
+        Output as JSON array of {evidence_id, evidence_text, source_quote, source_doc_id: "${doc.id}"}.`
+        
+        try {
+          const evRes = await fetch("https://openrouter.ai/api/v1/chat/completions", {
             method: "POST",
             headers: { "Authorization": `Bearer ${OPENROUTER_API_KEY}`, "Content-Type": "application/json" },
             body: JSON.stringify({
-              model: "anthropic/claude-3-haiku",
+              model: LLM_MODEL,
               response_format: { type: "json_object" },
-              messages: [{ role: "user", content: semanticPrompt }]
+              messages: [{ role: "user", content: extractEvidencePrompt }]
             })
           })
+          if (evRes.ok) {
+            const evData = await evRes.json()
+            const parsedEv = JSON.parse(evData.choices[0].message.content)
+            const extracted = Array.isArray(parsedEv) ? parsedEv : (parsedEv.evidence || parsedEv.atomic_evidence || [])
+            atomicEvidence = atomicEvidence.concat(extracted)
+          }
+        } catch (e) {
+          console.warn(`Failed to extract evidence for doc ${doc.id}:`, e)
+        }
+      }
+    }
+
+    // Stage 3 & 4: Claim-Evidence Matching & Flagging
+    const verifiedClaims = []
+    const rejectedClaims = []
+    
+    for (const claim of atomicClaims) {
+      let flag = "UNSUPPORTED"
+      let evidence = null
+      
+      // Strategy C: Medical Knowledge
+      if (claim.claim_type === "medical_knowledge") {
+        const isContraindication = layer5Results.find(res => 
+          claim.claim_text.toLowerCase().includes(res.medications[0]?.toLowerCase()) || 
+          claim.claim_text.toLowerCase().includes(res.medications[1]?.toLowerCase())
+        )
+        if (isContraindication) {
+          flag = "MEDICAL_KNOWLEDGE"
+          evidence = { source: "RxNav", entry_text: isContraindication.citation, match_type: "medical_knowledge" }
+        }
+      } 
+      // Strategy A: String Match
+      else {
+        const expectedQuote = (claim.expected_evidence || claim.claim_text).toLowerCase()
+        const matchedEv = atomicEvidence.find(ev => 
+          (ev.source_quote && ev.source_quote.toLowerCase().includes(expectedQuote)) || 
+          (ev.evidence_text && ev.evidence_text.toLowerCase().includes(expectedQuote))
+        )
+        
+        if (matchedEv) {
+          flag = "SUPPORTED"
+          evidence = {
+            source_doc_id: matchedEv.source_doc_id,
+            source_quote: matchedEv.source_quote,
+            match_type: "exact",
+            confidence: 1.0
+          }
+        } 
+        // Strategy B: Semantic Match
+        else if (atomicEvidence.length > 0) {
+          console.log(`String match failed for: "${claim.claim_text}". Running semantic match...`)
+          const semanticPrompt = `Does the following evidence semantically support the claim? 
+          Claim: ${claim.claim_text}
+          Evidence Pool: ${JSON.stringify(atomicEvidence.map(e => e.evidence_text))}
           
-          if (semanticResponse.ok) {
-            const semanticData = await semanticResponse.json()
-            try {
+          Respond ONLY with JSON: {"is_supported": true/false, "confidence": 0.0 to 1.0, "matching_fact": "the matching fact text"}`
+          
+          try {
+            const semanticResponse = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+              method: "POST",
+              headers: { "Authorization": `Bearer ${OPENROUTER_API_KEY}`, "Content-Type": "application/json" },
+              body: JSON.stringify({
+                model: LLM_MODEL,
+                response_format: { type: "json_object" },
+                messages: [{ role: "user", content: semanticPrompt }]
+              })
+            })
+            
+            if (semanticResponse.ok) {
+              const semanticData = await semanticResponse.json()
               const semanticResult = JSON.parse(semanticData.choices[0].message.content)
               if (semanticResult.is_supported && semanticResult.confidence > 0.8) {
                 flag = "SUPPORTED"
-                evidence = { source_doc_id: "semantic-match", source_quote: semanticResult.matching_fact, match_type: "semantic" }
+                evidence = { source_doc_id: "semantic-match", source_quote: semanticResult.matching_fact, match_type: "semantic", confidence: semanticResult.confidence }
               } else if (semanticResult.is_supported && semanticResult.confidence >= 0.5) {
                 flag = "PARTIALLY SUPPORTED"
-                evidence = { source_doc_id: "semantic-match", source_quote: semanticResult.matching_fact, match_type: "semantic" }
+                evidence = { source_doc_id: "semantic-match", source_quote: semanticResult.matching_fact, match_type: "semantic", confidence: semanticResult.confidence }
               }
-            } catch (e) {
-              console.error("Semantic match parse failed.")
             }
+          } catch (e) {
+            console.warn("Semantic match failed:", e)
           }
         }
       }
@@ -256,10 +367,9 @@ Rules:
       }
     }
     
-    // 4. Strip UNSUPPORTED claims from the briefing text
+    // Strip UNSUPPORTED claims from the briefing text
     let finalBriefingText = generatedBriefing
     for (const rejected of rejectedClaims) {
-      // Very basic stripping (in a real app we'd use robust markdown AST parsing)
       finalBriefingText = finalBriefingText.replace(rejected.claim_text, "")
     }
 

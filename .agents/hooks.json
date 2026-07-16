@@ -1,0 +1,16 @@
+{
+  "post-edit-typecheck": {
+    "PostToolUse": [
+      {
+        "matcher": "edit_file|write_file|multi_replace_file_content|replace_file_content|write_to_file",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "C:\\Users\\Dell\\caregiver-briefing-tool\\scripts\\post-edit-check.bat",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}

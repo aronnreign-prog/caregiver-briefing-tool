@@ -26,6 +26,8 @@ from graphiti_core.nodes import EpisodeType
 from graphiti_core.llm_client import OpenAIClient, LLMConfig
 from graphiti_core.embedder import OpenAIEmbedder, OpenAIEmbedderConfig
 
+from extractor import extract_entities
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -46,6 +48,10 @@ class TemporalQueryRequest(BaseModel):
     patient_id: str
     entity_name: str               # e.g. "GFR", "Lisinopril"
     valid_at: Optional[str] = None # ISO date; None = "right now"
+
+
+class ExtractEntitiesRequest(BaseModel):
+    text: str                      # Text to extract entities from
 
 
 # ---------------------------------------------------------------------------
@@ -278,3 +284,16 @@ async def temporal_query(req: TemporalQueryRequest):
             for r in results
         ],
     }
+
+
+@app.post("/extract-entities")
+async def api_extract_entities(req: ExtractEntitiesRequest):
+    """
+    Extract medical entities (medications, labs) from raw text.
+    """
+    try:
+        entities = await extract_entities(req.text)
+        return entities
+    except Exception as e:
+        logger.error(f"Error in extract-entities: {e}")
+        raise HTTPException(status_code=500, detail="Internal Server Error during extraction")

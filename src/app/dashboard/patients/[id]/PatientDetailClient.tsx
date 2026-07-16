@@ -11,6 +11,7 @@ type Document = {
   filename: string
   status: string
   uploaded_at: string
+  storage_path?: string
 }
 
 type Briefing = {
@@ -163,19 +164,38 @@ export default function PatientDetailClient({
     }
   }
 
+  const handleDocClick = async (e: React.MouseEvent, docId: string, page?: number) => {
+    e.preventDefault();
+    const doc = documents.find(d => d.id === docId);
+    if (!doc || !doc.storage_path) {
+      alert("Document not found or storage path missing");
+      return;
+    }
+    const { data, error } = await supabase.storage.from('medical_records').createSignedUrl(doc.storage_path, 60);
+    if (error || !data) {
+      alert("Failed to open document: " + (error?.message || "Unknown error"));
+      return;
+    }
+    
+    // Open in new tab, optionally appending page hash
+    const url = page ? \`\${data.signedUrl}#page=\${page}\` : data.signedUrl;
+    window.open(url, '_blank');
+  }
+
   const renderCitationChip = (claim: any) => {
     if (!claim.evidence) return null;
     
     if (claim.flag === 'MEDICAL_KNOWLEDGE') {
+      const searchUrl = \`https://mobius.nlm.nih.gov/RxNav/search?searchBy=String&searchTerm=\${encodeURIComponent(claim.claim_text)}\`;
       return (
-        <a href="#" className="inline-flex items-center ml-2 px-2 py-0.5 rounded text-[10px] font-bold bg-purple-100 text-purple-800 hover:bg-purple-200" title={claim.evidence.source_quote}>
-          💊 DDInter
+        <a href={searchUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center ml-2 px-2 py-0.5 rounded text-[10px] font-bold bg-purple-100 text-purple-800 hover:bg-purple-200" title={claim.evidence.entry_text || "View on NIH RxNav"}>
+          💊 RxNav
         </a>
       )
     }
     
     return (
-      <a href="#" className="inline-flex items-center ml-2 px-2 py-0.5 rounded text-[10px] font-bold bg-blue-100 text-blue-800 hover:bg-blue-200" title={claim.evidence.source_quote}>
+      <a href="#" onClick={(e) => handleDocClick(e, claim.evidence.source_doc_id, claim.evidence.source_page)} className="inline-flex items-center ml-2 px-2 py-0.5 rounded text-[10px] font-bold bg-blue-100 text-blue-800 hover:bg-blue-200" title={claim.evidence.source_quote}>
         📄 Doc
       </a>
     )

@@ -120,19 +120,71 @@ Preserve the structure. Output as structured text.`
     const data = await response.json()
     const extractedText = data.choices[0].message.content
 
-    // 6. Save extracted text and update status
+    // 5.5 Extract Document Metadata (Task 5)
+    const metaResponse = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${OPENROUTER_API_KEY}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        model: MODEL,
+        response_format: { type: "json_object" },
+        messages: [
+          {
+            role: "system",
+            content: `Extract metadata from this medical document as JSON.
+Required fields:
+- document_date: ISO date (YYYY-MM-DD). Date of service/lab draw.
+- document_type: e.g. "lab result", "visit note", "prescription", "discharge summary".
+- provider_name: Name of the doctor/provider who wrote it.
+Output valid JSON only.`
+          },
+          { role: "user", content: extractedText }
+        ]
+      })
+    })
+    
+    let metadata = { document_date: new Date().toISOString().split('T')[0], document_type: 'unknown', provider_name: 'unknown' }
+    if (metaResponse.ok) {
+      const metaDataJSON = await metaResponse.json()
+      try {
+        metadata = JSON.parse(metaDataJSON.choices[0].message.content)
+      } catch (e) {
+        console.warn("Failed to parse metadata JSON", e)
+      }
+    }
+
+    // 6. Extract Medical Entities via Python Wrapper (Task 5)
+    const GRAPHITI_WRAPPER_URL = Deno.env.get("GRAPHITI_WRAPPER_URL") || "http://host.docker.internal:8000"
+    
+    console.log(`Extracting entities via ${GRAPHITI_WRAPPER_URL}/extract-entities...`)
+    const entityResponse = await fetch(`${GRAPHITI_WRAPPER_URL}/extract-entities`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: extractedText }),
+    })
+    
+    let extractedEntities = { medications: [], lab_values: [] }
+    if (entityResponse.ok) {
+      extractedEntities = await entityResponse.json()
+    } else {
+      console.warn("Entity extraction failed:", entityResponse.statusText)
+    }
+
+    // 6.5 Save extracted text, entities, and metadata to DB
     await supabaseClient.from('documents').update({
       extracted_text: extractedText,
+      extracted_entities: extractedEntities,
+      document_date: metadata.document_date || new Date().toISOString(),
+      document_type: metadata.document_type || 'unknown',
+      provider_name: metadata.provider_name || 'unknown',
       status: 'extracted',
       processed_at: new Date().toISOString()
     }).eq('id', documentId)
 
-    // 7. (Task 7) Feed text to Graphiti for bi-temporal fact extraction
+    // 7. (Task 7) Feed text and entities to Graphiti for bi-temporal fact extraction
     console.log(`Sending to Graphiti for patient ${doc.patient_id}...`)
-    const GRAPHITI_WRAPPER_URL = Deno.env.get("GRAPHITI_WRAPPER_URL") || "http://host.docker.internal:8000"
-    
-    // We send an empty array for entities for now (Task 5 is deferred).
-    // Graphiti's internal LLM will still extract entities from episode_text.
     const graphitiResponse = await fetch(`${GRAPHITI_WRAPPER_URL}/add-facts`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -140,8 +192,8 @@ Preserve the structure. Output as structured text.`
         patient_id: doc.patient_id,
         episode_text: extractedText,
         source_doc_id: documentId,
-        source_doc_date: new Date().toISOString(), // Fallback if no specific doc date found
-        entities: [], 
+        source_doc_date: metadata.document_date || new Date().toISOString(),
+        entities: [...(extractedEntities.medications || []), ...(extractedEntities.lab_values || [])],
         reference_time: new Date().toISOString(),
       }),
     })
