@@ -8,6 +8,9 @@ description: >
 
 # Model Routing — Caregiver Briefing Tool
 
+> **Runtime (pipeline) models** (OpenRouter, env-driven) are defined in
+> `.agents/MODELS.md`. This skill covers only *which coding agent* to use.
+
 ## Quick Reference
 
 | Signal in task | → Use |

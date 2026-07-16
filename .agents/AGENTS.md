@@ -6,6 +6,9 @@
 
 ## Model Routing — When to Switch
 
+> **Runtime pipeline models** (OpenRouter, env-driven) live in `.agents/MODELS.md`.
+> This section is about *which coding agent* to use, not runtime LLM calls.
+
 The user runs THREE tools: **ZCode (DeepSeek V4 Pro)**, **Claude Sonnet (Antigravity CLI)**, and **Gemini (Antigravity CLI)**.
 Each has different strengths and costs. The agent MUST recommend a switch at the start of any task where a different model would be more efficient.
 

@@ -81,7 +81,7 @@ serve(async (req: Request) => {
 
     // 5. Call OpenRouter API to structure the medical text
     const OPENROUTER_API_KEY = Deno.env.get('OPENROUTER_API_KEY')
-    const MODEL = 'qwen/qwen-2-vl-7b-instruct:free' // Using the free OpenRouter model recommended
+    const MODEL = Deno.env.get('LAYER_1_VISION_MODEL') || 'qwen/qwen-2-vl-7b-instruct:free' // OpenRouter model, override via env
 
     const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
