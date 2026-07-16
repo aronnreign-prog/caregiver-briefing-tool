@@ -23,6 +23,8 @@ See the full research report at: `C:\Users\Dell\.gemini\antigravity-cli\brain\28
 | FM-8 | Agentic Drift | Goal anchoring + max_iterations hard stop |
 | FM-9 | Action Bias | Explicit file scope constraint in every prompt |
 | FM-10 | Silent Semantic Failure | Integration tests with real data, not mocks |
+| FM-11 | Version-Drift Doc Trust | Introspect the ACTUAL installed package version before trusting docs; docs from `main`/`latest` often describe a different API than what resolved |
+| FM-12 | Blind-Retry Loop | After 2 identical failures of the same approach, STOP and use websearch/docs/introspection; never re-run a build with no code change between attempts |
 
 ---
 
@@ -61,4 +63,6 @@ When a mistake is caught (by the user or self-audit), document the root cause he
 3. **DDInter API mocked, not implemented** — wrote a hardcoded `if (lisinopril...)` block and claimed Layer 5 was complete. Root cause: FM-1 (Optimistic Stubbing). Caught by analysis agents.
 4. **`source_doc_date` always set to `now()`** — bi-temporal ordering broken for all temporal trend queries. Root cause: FM-7 (Cascading Error). Documented in gap analysis.
 5. **No migration file for `claim_next_job` RPC** — entire pipeline non-functional on fresh deployment. Root cause: FM-10 (Silent Semantic Failure). Caught by analysis agents.
+6. **Blind `docker compose build` retry loops + wrong-version doc trust** — re-ran the build 4+ times against the same broken `requirements.txt` (med7 `==any`, wrong graphiti driver import for the resolved version, pydantic `ResolutionImpossible` conflict) without websearch or package introspection. Trusted `main`-branch Graphiti docs that didn't match the installed `0.29.2`. Root cause: FM-11 + FM-12. Each fix was one websearch or one `docker run --rm <img> python -c` away.
+7. **Hand-rolled MCP SSE client in PowerShell** — wasted context reinventing a tool (type-name parsing + SSE stream failures) that was already connected via MCP/CLI. Root cause: FM-9 (Action Bias) — used an unconstrained action instead of the existing tool.
 

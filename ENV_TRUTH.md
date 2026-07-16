@@ -34,3 +34,22 @@
 4. `FALKORDB_URI` in `.env.local` is `bolt://` but the stack uses Redis `host:port` (6379) — do not trust that key for the running wrapper.
 5. `.agents/MODELS.md` default models are out of date vs code fallbacks — trust the `|| "..."` in `index.ts`, not the doc.
 6. Disk vs deployed Edge Function: the Supabase-deployed `index.ts` may differ from local (edited by another assistant) — diff with `supabase functions list` / dashboard before assuming parity.
+
+## Lessons (ingrained from post-mortem)
+
+- **Introspect, don't trust docs.** `graphiti-core` resolved to `0.29.2`; `main`-branch
+  docs (`graphiti_core.driver.falkordb`) were wrong — actual path is
+  `graphiti_core.driver.falkordb_driver.FalkorDriver`. Before any import, run
+  `docker run --rm <img> python -c "import graphiti_core.driver; print([m for m in dir(graphiti_core.driver) if 'falkor' in m.lower()])"`.
+- **websearch the EXACT error first.** `ResolutionImpossible: graphiti-core 0.29.2
+  depends on pydantic>=2.11.5` is a documented, one-line fix (loosen the pin). The
+  session instead re-ran `docker compose build` 4+ times on the same broken file.
+- **Hard stop after 2 identical failures.** No code change between builds = blind
+  retry. Use websearch/docs/introspection instead.
+- **Use connected tools.** Don't hand-roll an MCP SSE client in PowerShell — the MCP
+  tools + `supabase` CLI already work.
+- **MCP scope:** `apply_migration`=branch, `execute_sql`/`list_tables`=prod/main.
+  `public.jobs` "missing" in a branch context is expected, not a bug.
+- **med7 caveat:** the `en_core_med7_lg` model was REMOVED from `requirements.txt`
+  this session (was `==any` ghost from a stale BuildKit layer). Entity extraction
+  now uses OpenRouter LLM only — do not re-add med7 without resolving the wheel URL.
