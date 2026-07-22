@@ -119,7 +119,7 @@ async def lifespan(app: FastAPI):
         )
     )
 
-    falkor_driver = FalkorDriver(host=FALKORDB_HOST, port=FALKORDB_PORT, password=FALKORDB_PASSWORD)
+    falkor_driver = FalkorDriver(host=FALKORDB_HOST, port=FALKORDB_PORT, password=FALKORDB_PASSWORD, username="falkordb")
 
     graphiti = Graphiti(
         graph_driver=falkor_driver,
