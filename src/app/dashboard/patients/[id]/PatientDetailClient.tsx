@@ -178,7 +178,7 @@ export default function PatientDetailClient({
     }
     
     // Open in new tab, optionally appending page hash
-    const url = page ? \`\${data.signedUrl}#page=\${page}\` : data.signedUrl;
+    const url = page ? `${data.signedUrl}#page=${page}` : data.signedUrl;
     window.open(url, '_blank');
   }
 
