@@ -186,7 +186,7 @@ export default function PatientDetailClient({
     if (!claim.evidence) return null;
     
     if (claim.flag === 'MEDICAL_KNOWLEDGE') {
-      const searchUrl = \`https://mobius.nlm.nih.gov/RxNav/search?searchBy=String&searchTerm=\${encodeURIComponent(claim.claim_text)}\`;
+      const searchUrl = `https://mobius.nlm.nih.gov/RxNav/search?searchBy=String&searchTerm=${encodeURIComponent(claim.claim_text)}`;
       return (
         <a href={searchUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center ml-2 px-2 py-0.5 rounded text-[10px] font-bold bg-purple-100 text-purple-800 hover:bg-purple-200" title={claim.evidence.entry_text || "View on NIH RxNav"}>
           💊 RxNav
