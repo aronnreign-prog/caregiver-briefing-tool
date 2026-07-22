@@ -5,8 +5,4 @@ pydantic>=2.11.5
 python-dotenv==1.0.1
 httpx>=0.28.1
 pymupdf==1.24.10
-medspacy>=1.0.0
-# Med7 v1.1.0 — clinical NER (DRUG, DOSAGE, FREQUENCY, ROUTE, FORM, STRENGTH, DURATION)
-# Compatible with spaCy 3.8.x, Python 3.12. No GPU/transformers needed.
-# Uses @ URL specifier (PEP 440 compliant) — avoids the 'any' version field bug in legacy wheel.
-en-core-med7-lg @ https://huggingface.co/kormilitzin/en_core_med7_lg/resolve/main/en_core_med7_lg-1.1.0-py3-none-any.whl
+

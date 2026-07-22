@@ -28,26 +28,9 @@ logger = logging.getLogger(__name__)
 #                  not yet downloaded). Never relied on as primary extractor.
 # ---------------------------------------------------------------------------
 
-# ── Med7 (lazy-loaded so app starts fast even if model isn't ready yet) ──────
-_med7 = None
-
-def _get_med7():
-    global _med7
-    if _med7 is None:
-        try:
-            import spacy
-            _med7 = spacy.load("en_core_med7_lg")
-            logger.info("Med7 (en_core_med7_lg) loaded successfully.")
-        except OSError:
-            logger.warning(
-                "Med7 model not found. Run: "
-                "pip install https://huggingface.co/kormilitzin/en_core_med7_lg/resolve/main/en_core_med7_lg-any-py3-none-any.whl"
-            )
-            _med7 = False
-        except Exception as e:
-            logger.warning(f"Med7 load error: {e}")
-            _med7 = False
-    return _med7 if _med7 is not False else None
+# ── Med7 Hugging Face API Configuration ──────────────────────────────────────
+HF_TOKEN = os.getenv("HF_TOKEN")
+HF_API_URL = "https://api-inference.huggingface.co/models/kormilitzin/en_core_med7_lg"
 
 
 # ── spaCy Matcher for lab values (deterministic rules) ───────────────────────
@@ -163,42 +146,59 @@ def _extract_labs_with_matcher(text: str) -> list[dict]:
     return labs
 
 
-def _extract_meds_with_med7(text: str) -> list[dict]:
-    """Extract medications using Med7 NER model (local ML, no API)."""
-    nlp = _get_med7()
-    if nlp is None:
+async def _extract_meds_with_med7_api(text: str) -> list[dict]:
+    """Extract medications using Hugging Face Inference API for Med7."""
+    if not HF_TOKEN:
+        logger.warning("HF_TOKEN not set — cannot extract medications via Hugging Face API.")
         return []
-    doc = nlp(text[:100_000])
-    meds = []
-    seen_drugs = set()
-    current_drug = {}
-    for ent in doc.ents:
-        if ent.label_ == "DRUG":
+    
+    headers = {"Authorization": f"Bearer {HF_TOKEN}", "Content-Type": "application/json"}
+    payload = {"inputs": text[:30_000]} # Keep payload size reasonable for API
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(HF_API_URL, headers=headers, json=payload, timeout=30.0)
+            if resp.status_code != 200:
+                logger.warning(f"HF API returned {resp.status_code}: {resp.text}")
+                return []
+            
+            entities = resp.json()
+            meds = []
+            seen_drugs = set()
+            current_drug = {}
+            for ent in entities:
+                label = ent.get("entity_group", "")
+                word = ent.get("word", "").strip()
+                
+                if label == "DRUG":
+                    if current_drug and "name" in current_drug:
+                        name_lower = current_drug["name"].lower()
+                        if name_lower not in seen_drugs:
+                            seen_drugs.add(name_lower)
+                            meds.append({**current_drug, "source": "med7-hf-api"})
+                    current_drug = {"name": word}
+                elif label == "DOSAGE":
+                    current_drug["dosage"] = word
+                elif label == "FREQUENCY":
+                    current_drug["frequency"] = word
+                elif label == "ROUTE":
+                    current_drug["route"] = word
+                elif label == "FORM":
+                    current_drug["form"] = word
+                elif label == "STRENGTH":
+                    current_drug["strength"] = word
+                elif label == "DURATION":
+                    current_drug["duration"] = word
+                    
+            # Flush last drug
             if current_drug and "name" in current_drug:
                 name_lower = current_drug["name"].lower()
                 if name_lower not in seen_drugs:
-                    seen_drugs.add(name_lower)
-                    meds.append({**current_drug, "source": "med7"})
-            current_drug = {"name": ent.text.strip()}
-        elif ent.label_ == "DOSAGE":
-            current_drug["dosage"] = ent.text.strip()
-        elif ent.label_ == "FREQUENCY":
-            current_drug["frequency"] = ent.text.strip()
-        elif ent.label_ == "ROUTE":
-            current_drug["route"] = ent.text.strip()
-        elif ent.label_ == "FORM":
-            current_drug["form"] = ent.text.strip()
-        elif ent.label_ == "STRENGTH":
-            current_drug["strength"] = ent.text.strip()
-        elif ent.label_ == "DURATION":
-            current_drug["duration"] = ent.text.strip()
-    # Flush last drug
-    if current_drug and "name" in current_drug:
-        name_lower = current_drug["name"].lower()
-        if name_lower not in seen_drugs:
-            meds.append({**current_drug, "source": "med7"})
-    logger.info(f"Med7 found {len(meds)} medications.")
-    return meds
+                    meds.append({**current_drug, "source": "med7-hf-api"})
+            logger.info(f"Med7 HF API found {len(meds)} medications.")
+            return meds
+    except Exception as e:
+        logger.warning(f"Med7 HF API extraction failed: {e}")
+        return []
 
 
 # ── OpenRouter LLM (fallback only) ───────────────────────────────────────────
@@ -302,11 +302,11 @@ async def extract_entities(text: str) -> dict:
     # --- Step 1: Deterministic lab value extraction (spaCy Matcher) ---
     labs = _extract_labs_with_matcher(text)
 
-    # --- Step 2: Medication extraction (Med7 ML model) ---
-    meds = _extract_meds_with_med7(text)
+    # --- Step 2: Medication extraction (Med7 via Hugging Face Inference API) ---
+    meds = await _extract_meds_with_med7_api(text)
 
-    # --- Step 3: LLM fallback only if Med7 unavailable ---
-    if not meds and _get_med7() is None:
+    # --- Step 3: LLM fallback only if Med7 API fails ---
+    if not meds:
         logger.info("Med7 unavailable — using LLM fallback for medication extraction.")
         llm_meds, llm_labs = await _llm_extract_fallback(text)
         # Merge LLM labs with Matcher labs (deduplicate by test name)

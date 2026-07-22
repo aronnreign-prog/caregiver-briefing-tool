@@ -37,6 +37,7 @@ services:
       - EMBED_MODEL=gemini-embedding-001
       - EMBED_DIM=768
       - LAYER_1_VISION_MODEL=google/gemma-4-26b-a4b-it:free
+      - HF_TOKEN=${HF_TOKEN}
     depends_on:
       falkordb:
         condition: service_healthy
