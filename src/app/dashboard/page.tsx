@@ -38,7 +38,7 @@ export default async function DashboardPage() {
           <h1 className="text-3xl font-bold tracking-tight text-gray-900">
             Welcome, {caregiver?.name || 'Caregiver'}
           </h1>
-          <form action={logout}>
+          <form action={async () => { await logout(); }}>
             <Button variant="outline" type="submit">Log out</Button>
           </form>
         </header>
@@ -74,7 +74,7 @@ export default async function DashboardPage() {
                 <CardTitle>Add Patient</CardTitle>
                 <CardDescription>Create a profile to organize medical records.</CardDescription>
               </CardHeader>
-              <form action={addPatient}>
+              <form action={async (formData) => { await addPatient(formData); }}>
                 <CardContent className="space-y-4">
                   <div className="space-y-2">
                     <Label htmlFor="name">Full Name</Label>
