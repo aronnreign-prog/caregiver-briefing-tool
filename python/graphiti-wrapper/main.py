@@ -82,7 +82,8 @@ EMBED_MODEL = os.getenv("EMBED_MODEL", "gemini-embedding-001")
 EMBED_DIM = int(os.getenv("EMBED_DIM", "768"))
 
 FALKORDB_HOST = os.getenv("FALKORDB_HOST", "localhost")
-FALKORDB_PORT = int(os.getenv("FALKORDB_PORT", "6379"))
+FALKORDB_PORT = int(os.getenv("FALKORDB_PORT", "49277"))
+FALKORDB_PASSWORD = os.getenv("FALKORDB_PASSWORD")
 
 graphiti: Graphiti | None = None
 
@@ -118,7 +119,7 @@ async def lifespan(app: FastAPI):
         )
     )
 
-    falkor_driver = FalkorDriver(host=FALKORDB_HOST, port=FALKORDB_PORT)
+    falkor_driver = FalkorDriver(host=FALKORDB_HOST, port=FALKORDB_PORT, password=FALKORDB_PASSWORD)
 
     graphiti = Graphiti(
         graph_driver=falkor_driver,
