@@ -1,6 +1,12 @@
 {
   "version": 1,
   "skills": {
+    "expose-localhost": {
+      "source": "ngrok/agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/expose-localhost/SKILL.md",
+      "computedHash": "23bb658284f387e0d9d52fd4cca61a68ce7a571d96f00c893c6d3509e56c015a"
+    },
     "supabase": {
       "source": "supabase/agent-skills",
       "sourceType": "github",

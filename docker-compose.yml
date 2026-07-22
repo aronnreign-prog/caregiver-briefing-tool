@@ -32,8 +32,11 @@ services:
       - FALKORDB_PORT=6379
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
       - OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
-      - ENTITY_EXTRACT_MODEL=deepseek/deepseek-chat-v3-0324:free
-      - EMBED_MODEL=text-embedding-3-small
+      - ENTITY_EXTRACT_MODEL=deepseek/deepseek-chat-v3-0324
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - EMBED_MODEL=gemini-embedding-001
+      - EMBED_DIM=768
+      - LAYER_1_VISION_MODEL=google/gemma-4-26b-a4b-it:free
     depends_on:
       falkordb:
         condition: service_healthy

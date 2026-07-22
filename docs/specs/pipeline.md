@@ -33,8 +33,8 @@ Both run as Supabase Edge Functions (TypeScript, 150s timeout).
 │ STEP 1: PDF → Image → Text (Layer 1, multimodal)                │
 │ - Edge Function picks up job from queue (SKIP LOCKED)           │
 │ - Downloads PDF from Supabase Storage                           │
-│ - pdfjs-dist renders each page to PNG image                     │
-│ - For each page image:                                          │
+│ - (design intent) pdfjs-dist renders each page to PNG image     │
+│ - (design intent) For each page image:                          │
 │   - Call GPT-4o-mini vision API:                                │
 │     "Extract ALL text from this medical document page.          │
 │      Include medications, lab values, diagnoses, dates,         │
@@ -43,21 +43,39 @@ Both run as Supabase Edge Functions (TypeScript, 150s timeout).
 │ - Combine all pages into full document text                     │
 │ - Save extracted_text to documents table                        │
 │ - Cost: ~$0.001 per page image = ~$0.005 per 5-page PDF         │
+│                                                                 │
+│ **Implementation note (settled):** Layer 1 runs in the Python   │
+│ Graphiti wrapper (PyMuPDF/fitz renders pages→PNG, OpenRouter    │
+│ free vision model extracts text via POST /extract-pdf). The     │
+│ Edge Function downloads the PDF, base64-encodes it, POSTs to    │
+│ /extract-pdf, then continues with /extract-entities and         │
+│ /add-facts. Models are OpenRouter FREE (default                │
+│ nvidia/nemotron-nano-12b-v2-vl:free via LAYER_1_VISION_MODEL),  │
+│ NOT GPT-4o-mini.                                                │
 └──────────────────────────────┬──────────────────────────────────┘
                                ↓
 ┌─────────────────────────────────────────────────────────────────┐
 │ STEP 2: Medical Entity Extraction (Layer 2)                     │
-│ - Send extracted text to AWS Comprehend Medical                 │
+│ - (design intent) Send extracted text to AWS Comprehend Medical │
 │   - API: comprehendmedical.detect_entities_v2()                 │
 │   - Extracts: medications, conditions, labs, dosages            │
 │   - Returns RxNorm, ICD-10, SNOMED codes                        │
 │ - Cost: $0.01 per 100 chars (within free tier for MVT)          │
 │ - Save extracted_entities (JSON) to documents table             │
+│                                                                 │
+│ **Implementation note (settled):** AWS Comprehend Medical was   │
+│ replaced by OpenRouter free-model entity extraction in the      │
+│ Python wrapper (POST /extract-entities, e.g.                     │
+│ deepseek/deepseek-chat-v3-0324:free). No AWS Comprehend.        │
 └──────────────────────────────┬──────────────────────────────────┘
                                ↓
 ┌─────────────────────────────────────────────────────────────────┐
 │ STEP 3: Extract Document Metadata                               │
-│ - Use Claude Haiku to extract from the text:                    │
+│ - (design intent) Use Claude Haiku to extract from the text:    │
+│   **Implementation note (settled):** uses an OpenRouter free     │
+│   model instead of Claude Haiku (no hardcoded proprietary       │
+│   model).                                                       │
+│ - Use an OpenRouter free model to extract from the text:        │
 │   - document_date (when was this document created?)             │
 │   - document_type (lab_result? visit_note? prescription?)       │
 │   - provider_name (who wrote it?)                               │
@@ -94,7 +112,7 @@ Both run as Supabase Edge Functions (TypeScript, 150s timeout).
 
 ### Error handling for Pipeline 1:
 - If Step 1 (vision) fails → retry once, then mark document as 'failed' with error
-- If Step 2 (Comprehend Medical) fails → continue with LLM-based extraction as fallback
+- If Step 2 (entity extraction) fails → continue with LLM-based extraction as fallback
 - If Step 4 (Graphiti) fails → retry with exponential backoff (3 attempts), then queue for later
 - Each step is idempotent — if the Edge Function times out and retries, it can resume from the last completed step (check documents.status before each step)
 
@@ -328,9 +346,9 @@ ACE inhibitors should be used with caution in CKD stage 3+. Close monitoring of 
 
 | Step | API | Cost |
 |---|---|---|
-| Layer 1 (vision, per PDF) | GPT-4o-mini vision | ~$0.005 per PDF |
-| Layer 2 (Comprehend Medical, per PDF) | AWS Comprehend Medical | ~$0.01 per PDF |
-| Layer 3 (reasoning) | Claude Haiku | ~$0.005 |
+| Layer 1 (vision, per PDF) | OpenRouter free vision model (nvidia/nemotron-nano-12b-v2-vl:free) | ~$0 (free) |
+| Layer 2 (entity extraction, per PDF) | OpenRouter free model (deepseek/deepseek-chat-v3-0324:free) | ~$0 (free) |
+| Layer 3 (reasoning) | OpenRouter free model | ~$0 (free) |
 | Layer 5 (drug DBs) | RxNorm + DDInter | $0 (free) |
 | Layer 4 (PaperTrail) | Claude Haiku (3 calls) | ~$0.03 |
 | **Total per document processed** | | ~$0.015 |
@@ -362,8 +380,8 @@ src/supabase/functions/
 └── _shared/
     ├── graphiti.ts       # HTTP client for Python Graphiti wrapper
     ├── comprehend.ts     # AWS Comprehend Medical client
-    ├── vision.ts         # GPT-4o-mini vision client
-    ├── claude.ts         # Claude Haiku client
+├── vision.ts         # (legacy) PDF→image client; Layer 1 now in Python wrapper
+├── claude.ts         # (legacy) replaced by OpenRouter free models
     ├── papertrail.ts     # PaperTrail verification logic
     ├── drug-db.ts        # RxNorm + DDInter clients
     └── queue.ts          # Postgres SKIP LOCKED queue helpers

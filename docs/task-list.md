@@ -77,7 +77,7 @@
 
 ### Task 4: PDF to Text Extraction (Layer 1)
 
-**Read before starting:** pdfjs-dist API docs, OpenAI GPT-4o-mini vision API docs, Supabase Edge Functions docs.
+**Read before starting:** PyMuPDF (fitz) docs, OpenRouter API docs (free vision models), Supabase Edge Functions docs. Models are configurable via environment variables (e.g. `LAYER_1_VISION_MODEL`) and are NOT hardcoded to GPT-4o-mini — all LLM calls go through OpenRouter free models.
 
 **Do:**
 - Create a Supabase Edge Function named `process-document`
@@ -103,6 +103,8 @@ Preserve the structure. Output as structured text.
 - Combine all page texts into one full document text
 - Save the extracted text to the documents table (extracted_text column)
 - Update the document status to 'extracted'
+
+**Implementation note (settled architecture):** Layer 1 is implemented in the **Python FastAPI wrapper** (`python/graphiti-wrapper/`), NOT in the Deno Edge Function. The bullets above describe the original design intent (PDF → image → vision model). What was actually built: the Python wrapper uses **PyMuPDF (fitz)** to render each PDF page to a PNG image, then sends each page image to an **OpenRouter free vision model** (default `nvidia/nemotron-nano-12b-v2-vl:free`, configurable via `LAYER_1_VISION_MODEL`) to extract text, exposed at `POST /extract-pdf`. The Supabase Edge Function `process-document` is now a thin dispatcher: it downloads the PDF from Storage, base64-encodes it, POSTs to the wrapper's `/extract-pdf` endpoint, then continues with entity extraction (`/extract-entities`) and graph build (`/add-facts`). Models are OpenRouter free models — never GPT-4o-mini.
 
 **Verify before committing:**
 - Upload a Synthea-generated PDF

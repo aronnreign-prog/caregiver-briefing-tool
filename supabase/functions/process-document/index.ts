@@ -1,7 +1,4 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
-import * as pdfjsLib from "npm:pdfjs-dist@3.11.174";
-
-(pdfjsLib as any).GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
 
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -11,6 +8,7 @@ function jsonResponse(body: unknown, status = 200) {
 }
 
 Deno.serve(async (req: Request) => {
+ try {
   const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
   const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
   if (!SUPABASE_URL) throw new Error("SUPABASE_URL is required");
@@ -23,7 +21,7 @@ Deno.serve(async (req: Request) => {
   const maybeJson = req.method === "POST" ? await req.json().catch(() => null) : null;
   const workerName = maybeJson?.worker_name ?? "edge-worker-1";
 
-  const { data: jobs, error: claimError } = await supabaseClient.rpc("claim_next_job", {
+  const { data: claimed, error: claimError } = await supabaseClient.rpc("claim_next_job", {
     worker_name: workerName,
   });
 
@@ -32,11 +30,11 @@ Deno.serve(async (req: Request) => {
     return jsonResponse({ error: claimError.message }, 500);
   }
 
-  if (!jobs || jobs.length === 0) {
+  if (!claimed) {
     return jsonResponse({ message: "No queued jobs" }, 200);
   }
 
-  const job = jobs[0];
+  const job = claimed;
   let documentId: string | number | null = null;
 
   try {
@@ -72,45 +70,37 @@ Deno.serve(async (req: Request) => {
     const arrayBuffer = await fileData.arrayBuffer();
     const uint8 = new Uint8Array(arrayBuffer);
 
-    const pdf = await (pdfjsLib as any).getDocument(uint8).promise;
-    console.log(`PDF loaded. Pages: ${pdf.numPages}`);
+    const GRAPHITI_WRAPPER_URL = Deno.env.get("GRAPHITI_WRAPPER_URL") || "http://host.docker.internal:8000";
 
-    let fullRawText = "";
-    for (let i = 1; i <= pdf.numPages; i++) {
-      const page = await pdf.getPage(i);
-      const textContent = await page.getTextContent();
-      const pageText = textContent.items.map((item: any) => item.str).join(" ");
-      fullRawText += `\n--- Page ${i} ---\n${pageText}`;
+    let binary = "";
+    const chunkSize = 0x8000;
+    for (let i = 0; i < uint8.length; i += chunkSize) {
+      binary += String.fromCharCode.apply(null, Array.from(uint8.subarray(i, i + chunkSize)));
     }
+    const pdfBase64 = btoa(binary);
+
+    const extractResp = await fetch(`${GRAPHITI_WRAPPER_URL}/extract-pdf`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pdf_base64: pdfBase64 }),
+    });
+    if (!extractResp.ok) {
+      const errBody = await extractResp.text().catch(() => "");
+      throw new Error(`PDF extraction wrapper error: ${extractResp.status} ${extractResp.statusText} ${errBody}`);
+    }
+    const extractResult = await extractResp.json();
+    const fullRawText = extractResult.extracted_text || "";
 
     const OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY");
     if (!OPENROUTER_API_KEY) throw new Error("OPENROUTER_API_KEY is required");
 
-    const MODEL = Deno.env.get("LAYER_1_VISION_MODEL") || "nvidia/nemotron-nano-12b-v2-vl:free";
+    const MODEL = Deno.env.get("METADATA_MODEL") || "meta-llama/llama-3.1-8b-instruct:free";
 
-    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${OPENROUTER_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: MODEL,
-        messages: [
-          {
-            role: "system",
-            content: `You are a medical document analyzer. Extract ALL text from this medical document.\nInclude:\n- All medications (name, dose, frequency, prescriber)\n- All lab values (test name, value, unit, reference range, date)\n- All diagnoses/conditions\n- All allergies\n- Provider names and specialties\n- Dates (of service, of lab draw, of prescription)\n- Patient demographics\nPreserve the structure. Output as structured text.`,
-          },
-          { role: "user", content: fullRawText },
-        ],
-      }),
-    });
-
-    if (!response.ok) throw new Error(`OpenRouter API error: ${response.statusText}`);
-
-    const data = await response.json();
-    const extractedText = data?.choices?.[0]?.message?.content;
-    if (!extractedText) throw new Error("OpenRouter response missing extracted text");
+    // Layer 1 already produced the structured extracted text via the vision
+    // model in the Python wrapper. Use it directly instead of a redundant
+    // second OpenRouter call (keeps us well under the 150s Edge timeout).
+    const extractedText = fullRawText;
+    if (!extractedText) throw new Error("PDF extraction returned no text");
 
     const metaResponse = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
@@ -149,8 +139,6 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    const GRAPHITI_WRAPPER_URL = Deno.env.get("GRAPHITI_WRAPPER_URL") || "http://host.docker.internal:8000";
-
     const entityResponse = await fetch(`${GRAPHITI_WRAPPER_URL}/extract-entities`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -158,7 +146,14 @@ Deno.serve(async (req: Request) => {
     });
 
     let extractedEntities: any = { medications: [], lab_values: [] };
-    if (entityResponse.ok) extractedEntities = await entityResponse.json();
+    if (entityResponse.ok) {
+      extractedEntities = await entityResponse.json();
+    } else {
+      // [Fix] No silent failures — log the error clearly (non-fatal: pipeline continues with empty entities)
+      const errText = await entityResponse.text();
+      console.warn(`[WARN] /extract-entities failed (${entityResponse.status}): ${errText}. Continuing with empty entities.`);
+    }
+
 
     await supabaseClient.from("documents").update({
       extracted_text: extractedText,
@@ -214,5 +209,11 @@ Deno.serve(async (req: Request) => {
     }
 
     return jsonResponse({ error: error?.message || String(error) }, 500);
+  }
+  } catch (fatal: any) {
+    return jsonResponse(
+      { fatal_error: fatal?.message || String(fatal), stack: String(fatal?.stack || "") },
+      500,
+    );
   }
 });

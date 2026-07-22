@@ -13,6 +13,7 @@ Endpoints:
 """
 
 import os
+import base64
 import logging
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -24,11 +25,12 @@ from pydantic import BaseModel
 from graphiti_core import Graphiti
 from graphiti_core.nodes import EpisodeType
 from graphiti_core.llm_client import OpenAIClient, LLMConfig
-from graphiti_core.embedder import OpenAIEmbedder, OpenAIEmbedderConfig
+from graphiti_core.embedder.gemini import GeminiEmbedder, GeminiEmbedderConfig
 from graphiti_core.cross_encoder.openai_reranker_client import OpenAIRerankerClient
 from graphiti_core.driver.falkordb_driver import FalkorDriver
 
 from extractor import extract_entities
+from pdf_extract import extract_pdf_text
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -41,7 +43,7 @@ class AddFactsRequest(BaseModel):
     patient_id: str
     episode_text: str              # Full extracted text from the PDF (Layer 1 output)
     source_doc_id: str             # UUID of the document row in Postgres
-    source_doc_date: str           # ISO date: when the document was created (valid_from)
+    source_doc_date: str | None = None  # ISO date: when the document was created (valid_from)
     entities: list[dict] = []      # Pre-extracted medical entities (Layer 2 output)
     reference_time: str            # ISO datetime: when we are ingesting this fact
 
@@ -56,6 +58,11 @@ class ExtractEntitiesRequest(BaseModel):
     text: str                      # Text to extract entities from
 
 
+class ExtractPdfRequest(BaseModel):
+    pdf_base64: str                # Base64-encoded PDF bytes (Layer 1 input)
+    model: str | None = None       # Optional override of LAYER_1_VISION_MODEL
+
+
 # ---------------------------------------------------------------------------
 # Graphiti initialisation
 # ---------------------------------------------------------------------------
@@ -65,7 +72,14 @@ class ExtractEntitiesRequest(BaseModel):
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 OPENROUTER_BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
 ENTITY_EXTRACT_MODEL = os.getenv("ENTITY_EXTRACT_MODEL", "qwen/qwen-2-vl-7b-instruct:free")
-EMBED_MODEL = os.getenv("EMBED_MODEL", "text-embedding-3-small")  # via OpenRouter or OpenAI
+
+# Embeddings: OpenRouter serves NO embedding models, so Graphiti's embedder uses
+# Google Gemini (free tier) instead. Keep chat/LLM on OpenRouter.
+# EMBED_DIM is env-driven: 768 for local (light on RAM); set to the model default
+# (3072 for gemini-embedding-001) when hosting separately.
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+EMBED_MODEL = os.getenv("EMBED_MODEL", "gemini-embedding-001")
+EMBED_DIM = int(os.getenv("EMBED_DIM", "768"))
 
 FALKORDB_HOST = os.getenv("FALKORDB_HOST", "localhost")
 FALKORDB_PORT = int(os.getenv("FALKORDB_PORT", "6379"))
@@ -85,18 +99,21 @@ async def lifespan(app: FastAPI):
         )
     )
 
-    embedder = OpenAIEmbedder(
-        config=OpenAIEmbedderConfig(
-            api_key=OPENROUTER_API_KEY,
+    embedder = GeminiEmbedder(
+        config=GeminiEmbedderConfig(
+            api_key=GEMINI_API_KEY,
             embedding_model=EMBED_MODEL,
-            base_url=OPENROUTER_BASE_URL,
+            embedding_dim=EMBED_DIM,
         )
     )
 
+    # Reranker: Graphiti falls back to a default OpenAIRerankerClient (which needs
+    # an OPENAI_API_KEY) if cross_encoder is None, so we must pass a real one.
+    # Point it at OpenRouter (used only during search(), not add-facts).
     cross_encoder = OpenAIRerankerClient(
         config=LLMConfig(
             api_key=OPENROUTER_API_KEY,
-            model=os.getenv("RERANK_MODEL", "deepseek/deepseek-chat-v3-0324:free"),
+            model=os.getenv("RERANK_MODEL", "deepseek/deepseek-chat-v3-0324"),
             base_url=OPENROUTER_BASE_URL,
         )
     )
@@ -173,12 +190,12 @@ async def add_facts(req: AddFactsRequest):
     episode_body = (
         f"PATIENT_ID: {req.patient_id}\n"
         f"DOCUMENT_ID: {req.source_doc_id}\n"
-        f"DOCUMENT_DATE: {req.source_doc_date}\n\n"
+        f"DOCUMENT_DATE: {req.source_doc_date or 'unknown'}\n\n"
         f"DOCUMENT TEXT:\n{req.episode_text}"
         f"{entity_context}"
     )
 
-    episode = await graphiti.add_episode(
+    result = await graphiti.add_episode(
         name=f"doc_{req.source_doc_id}",
         episode_body=episode_body,
         source=EpisodeType.text,
@@ -186,11 +203,16 @@ async def add_facts(req: AddFactsRequest):
         source_description=(
             f"Medical document {req.source_doc_id} "
             f"for patient {req.patient_id}, "
-            f"dated {req.source_doc_date}"
+            f"dated {req.source_doc_date or 'unknown'}"
         ),
     )
 
-    return {"status": "ok", "episode_uuid": str(episode.uuid)}
+    return {
+        "status": "ok",
+        "episode_uuid": str(result.episode.uuid),
+        "nodes_extracted": len(result.nodes),
+        "edges_extracted": len(result.edges),
+    }
 
 
 @app.get("/patient-state/{patient_id}")
@@ -309,3 +331,18 @@ async def api_extract_entities(req: ExtractEntitiesRequest):
     except Exception as e:
         logger.error(f"Error in extract-entities: {e}")
         raise HTTPException(status_code=500, detail="Internal Server Error during extraction")
+
+
+@app.post("/extract-pdf")
+async def api_extract_pdf(req: ExtractPdfRequest):
+    """
+    Layer 1: Convert a PDF (base64) to per-page PNGs and extract text via a
+    vision model. Returns concatenated structured text for downstream layers.
+    """
+    try:
+        pdf_bytes = base64.b64decode(req.pdf_base64)
+        result = await extract_pdf_text(pdf_bytes, model_override=req.model)
+        return result
+    except Exception as e:
+        logger.error(f"Error in extract-pdf: {e}")
+        raise HTTPException(status_code=500, detail="Internal Server Error during PDF extraction")

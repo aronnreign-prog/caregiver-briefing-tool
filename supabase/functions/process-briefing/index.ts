@@ -2,10 +2,13 @@ import { serve } from "https://deno.land/std@0.192.0/http/server.ts"
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
 serve(async (req: Request) => {
-  const supabaseClient = createClient(
-    Deno.env.get('SUPABASE_URL') ?? '',
-    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
-  )
+  // [Fix] Validate required env vars immediately — fail fast with clear error
+  const SUPABASE_URL = Deno.env.get('SUPABASE_URL')
+  const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
+  if (!SUPABASE_URL) return new Response(JSON.stringify({ error: 'SUPABASE_URL env var is missing' }), { status: 500 })
+  if (!SUPABASE_SERVICE_ROLE_KEY) return new Response(JSON.stringify({ error: 'SUPABASE_SERVICE_ROLE_KEY env var is missing' }), { status: 500 })
+
+  const supabaseClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 
   // 1. Claim a job using our custom SKIP LOCKED function
   const { data: jobs, error: claimError } = await supabaseClient.rpc('claim_next_job', {
@@ -143,7 +146,9 @@ serve(async (req: Request) => {
 
     console.log('Calling LLM Reasoning engine (Task 9)...')
     const OPENROUTER_API_KEY = Deno.env.get('OPENROUTER_API_KEY')
-    // Fix: Pull the LLM model from the environment instead of hardcoding
+    // [Fix] Validate OPENROUTER_API_KEY before any LLM call — fail fast with clear error
+    if (!OPENROUTER_API_KEY) throw new Error('OPENROUTER_API_KEY env var is missing. Set it in Supabase Secrets or supabase/functions/.env.local')
+    // Pull the LLM model from the environment instead of hardcoding
     const LLM_MODEL = Deno.env.get('LLM_MODEL') || 'anthropic/claude-3-haiku'
 
     const systemPrompt = `You are generating a medical briefing for a caregiver to bring to a doctor.
@@ -440,5 +445,13 @@ Rules:
     }).eq('id', briefingId)
 
     return new Response(JSON.stringify({ error: error.message }), { status: 500 })
+  }
+}, {
+  // [Fix M8] Outer fatal error handler: catches module-load or top-level errors
+  // and returns them in the response body instead of a generic Deno 500.
+  onError(error: unknown) {
+    const msg = error instanceof Error ? error.message : String(error)
+    console.error('[FATAL] Unhandled module-level error:', msg)
+    return new Response(JSON.stringify({ error: `Fatal: ${msg}` }), { status: 500 })
   }
 })

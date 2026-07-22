@@ -23,6 +23,8 @@
 # misc
 .DS_Store
 *.pem
+*.key
+*.cert
 
 # debug
 npm-debug.log*
@@ -30,8 +32,15 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files (can opt-in for committing if needed)
-.env*
+# env files — NEVER commit these (contain real API keys, service role keys)
+.env
+.env.local
+.env.development
+.env.production
+.env.staging
+.env*.local
+supabase/functions/.env.local
+supabase/functions/.env
 
 # vercel
 .vercel
@@ -40,4 +49,33 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
+# supabase local state
 supabase/.temp/
+supabase/.branches/
+.supabase/
+
+# python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+.venv/
+venv/
+env/
+
+# synthea / test medical PDFs — synthetic but realistic patient data
+# must not be in a public repo
+synthea-test-data/
+pipeline_pdfs/
+*.pdf
+
+# docker build artifacts
+.dockerignore
+
+# log files (may contain URLs, tokens, stack traces)
+*.log
+tunnel_output.log
+
+# OS
+Thumbs.db

@@ -1,10 +1,207 @@
 import os
 import json
 import logging
+import asyncio
 import httpx
 
 logger = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
+# Layer 2 Entity Extraction — Architecture Decision (from research session):
+#
+#   MEDICATIONS  → Med7 ML model (en_core_med7_lg)
+#                  Rule-based NER is not enough for messy drug names/dosages.
+#                  Med7 is a lightweight (~500MB) clinical NER model trained on
+#                  MIMIC-III. Runs locally, zero API calls, zero rate limits.
+#                  Labels: DRUG, DOSAGE, FREQUENCY, ROUTE, FORM, STRENGTH, DURATION
+#
+#   LAB VALUES   → spaCy Matcher rules (deterministic, faster than ML).
+#                  Lab values always follow the same pattern:
+#                  <test_name> <numeric_value> <unit>
+#                  e.g. "Glucose 100 mg/dL", "GFR: 58 mL/min/1.73m2"
+#                  Rules beat ML here because the pattern is highly structured.
+#
+#   RXNORM CODES → NIH RxNav API (free government database, deterministic)
+#   ICD-10 CODES → NIH ClinicalTables API (free, deterministic)
+#
+#   LLM FALLBACK → OpenRouter only used if Med7 is unavailable (e.g., model
+#                  not yet downloaded). Never relied on as primary extractor.
+# ---------------------------------------------------------------------------
+
+# ── Med7 (lazy-loaded so app starts fast even if model isn't ready yet) ──────
+_med7 = None
+
+def _get_med7():
+    global _med7
+    if _med7 is None:
+        try:
+            import spacy
+            _med7 = spacy.load("en_core_med7_lg")
+            logger.info("Med7 (en_core_med7_lg) loaded successfully.")
+        except OSError:
+            logger.warning(
+                "Med7 model not found. Run: "
+                "pip install https://huggingface.co/kormilitzin/en_core_med7_lg/resolve/main/en_core_med7_lg-any-py3-none-any.whl"
+            )
+            _med7 = False
+        except Exception as e:
+            logger.warning(f"Med7 load error: {e}")
+            _med7 = False
+    return _med7 if _med7 is not False else None
+
+
+# ── spaCy Matcher for lab values (deterministic rules) ───────────────────────
+_lab_matcher = None
+
+# Comprehensive list of common lab test names used in clinical documents
+LAB_TEST_NAMES = [
+    # Kidney
+    "gfr", "egfr", "creatinine", "bun", "urea nitrogen",
+    # Blood sugar
+    "glucose", "hba1c", "hemoglobin a1c", "a1c", "fasting glucose",
+    # Lipids
+    "ldl", "hdl", "cholesterol", "triglycerides", "triglyceride",
+    # Blood count
+    "hemoglobin", "hematocrit", "wbc", "rbc", "platelets", "platelet count",
+    "neutrophils", "lymphocytes", "monocytes", "eosinophils", "basophils",
+    # Liver
+    "alt", "ast", "alkaline phosphatase", "bilirubin", "albumin",
+    # Thyroid
+    "tsh", "t3", "t4", "free t4",
+    # Electrolytes
+    "sodium", "potassium", "chloride", "bicarbonate", "calcium", "magnesium", "phosphorus",
+    # Cardiac
+    "troponin", "bnp", "pro-bnp", "ck-mb", "creatine kinase",
+    # Coagulation
+    "inr", "pt", "ptt", "aptt",
+    # Vitamins / Other
+    "vitamin d", "b12", "folate", "ferritin", "iron", "uric acid",
+    # Urine
+    "urine protein", "urine creatinine", "microalbumin",
+    # Blood pressure (often documented with labs)
+    "blood pressure", "systolic", "diastolic",
+    # Weight / BMI
+    "bmi", "weight",
+]
+
+# Common measurement units
+LAB_UNITS = [
+    "mg/dl", "mg/l", "mmol/l", "g/dl", "g/l", "ng/ml", "pg/ml", "iu/l",
+    "u/l", "meq/l", "mmhg", "mm hg", "ml/min", "ml/min/1.73m2",
+    "%", "units", "cells/ul", "k/ul", "x10^3/ul", "x10^9/l",
+    "umol/l", "nmol/l", "pmol/l", "miu/ml", "ng/dl",
+]
+
+
+def _get_lab_matcher():
+    """Build a spaCy Matcher that finds: <lab_name> [optional colon] <number> [optional unit>."""
+    global _lab_matcher
+    if _lab_matcher is None:
+        try:
+            import spacy
+            from spacy.matcher import Matcher
+
+            # Use a blank English model just for tokenization + matching
+            nlp = spacy.blank("en")
+            matcher = Matcher(nlp.vocab)
+
+            # Pattern: lab_name (1–4 tokens) + optional colon + number + optional unit
+            # We register one pattern per lab test name phrase
+            for test in LAB_TEST_NAMES:
+                tokens = test.split()
+                # Build token pattern list: each word as LOWER match
+                name_pattern = [{"LOWER": t} for t in tokens]
+                # Then: optional colon, then a number, then optional unit
+                full_pattern = (
+                    name_pattern
+                    + [{"TEXT": ":", "OP": "?"}]
+                    + [{"LIKE_NUM": True}]
+                    + [{"LOWER": {"IN": LAB_UNITS}, "OP": "?"}]
+                )
+                rule_id = f"LAB_{test.upper().replace(' ', '_')}"
+                matcher.add(rule_id, [full_pattern])
+
+            _lab_matcher = (nlp, matcher)
+            logger.info(f"Lab value Matcher built with {len(LAB_TEST_NAMES)} test patterns.")
+        except Exception as e:
+            logger.warning(f"Could not build lab Matcher: {e}")
+            _lab_matcher = False
+    return _lab_matcher if _lab_matcher is not False else None
+
+
+def _extract_labs_with_matcher(text: str) -> list[dict]:
+    """Deterministically extract lab values using spaCy Matcher rules."""
+    result = _get_lab_matcher()
+    if result is None:
+        return []
+    nlp, matcher = result
+    doc = nlp(text[:200_000])
+    matches = matcher(doc)
+    labs = []
+    seen = set()
+    for match_id, start, end in matches:
+        span = doc[start:end]
+        tokens = [t for t in span]
+        # Find the numeric token
+        num_tok = next((t for t in tokens if t.like_num), None)
+        if num_tok is None:
+            continue
+        # Test name is everything before the number (strip colon)
+        name_tokens = [t for t in tokens[:tokens.index(num_tok)] if t.text != ":"]
+        test_name = " ".join(t.text for t in name_tokens).strip().lower()
+        value = num_tok.text
+        # Unit is the token right after the number, if it's in our units list
+        num_idx = tokens.index(num_tok)
+        unit = ""
+        if num_idx + 1 < len(tokens) and tokens[num_idx + 1].lower_ in LAB_UNITS:
+            unit = tokens[num_idx + 1].text
+        key = (test_name, value)
+        if key not in seen:
+            seen.add(key)
+            labs.append({"test": test_name, "value": value, "unit": unit, "source": "matcher"})
+    logger.info(f"spaCy Matcher found {len(labs)} lab values.")
+    return labs
+
+
+def _extract_meds_with_med7(text: str) -> list[dict]:
+    """Extract medications using Med7 NER model (local ML, no API)."""
+    nlp = _get_med7()
+    if nlp is None:
+        return []
+    doc = nlp(text[:100_000])
+    meds = []
+    seen_drugs = set()
+    current_drug = {}
+    for ent in doc.ents:
+        if ent.label_ == "DRUG":
+            if current_drug and "name" in current_drug:
+                name_lower = current_drug["name"].lower()
+                if name_lower not in seen_drugs:
+                    seen_drugs.add(name_lower)
+                    meds.append({**current_drug, "source": "med7"})
+            current_drug = {"name": ent.text.strip()}
+        elif ent.label_ == "DOSAGE":
+            current_drug["dosage"] = ent.text.strip()
+        elif ent.label_ == "FREQUENCY":
+            current_drug["frequency"] = ent.text.strip()
+        elif ent.label_ == "ROUTE":
+            current_drug["route"] = ent.text.strip()
+        elif ent.label_ == "FORM":
+            current_drug["form"] = ent.text.strip()
+        elif ent.label_ == "STRENGTH":
+            current_drug["strength"] = ent.text.strip()
+        elif ent.label_ == "DURATION":
+            current_drug["duration"] = ent.text.strip()
+    # Flush last drug
+    if current_drug and "name" in current_drug:
+        name_lower = current_drug["name"].lower()
+        if name_lower not in seen_drugs:
+            meds.append({**current_drug, "source": "med7"})
+    logger.info(f"Med7 found {len(meds)} medications.")
+    return meds
+
+
+# ── OpenRouter LLM (fallback only) ───────────────────────────────────────────
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 OPENROUTER_BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
 EXTRACT_MODEL = os.getenv("ENTITY_EXTRACT_MODEL", "deepseek/deepseek-chat-v3-0324:free")
@@ -24,6 +221,40 @@ HEADERS = {
 }
 
 
+async def _llm_extract_fallback(text: str) -> tuple[list[dict], list[dict]]:
+    """LLM fallback — only called when Med7 is unavailable."""
+    if not OPENROUTER_API_KEY:
+        logger.warning("OPENROUTER_API_KEY not set — no LLM fallback available.")
+        return [], []
+    payload = {
+        "model": EXTRACT_MODEL,
+        "messages": [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": text[:8000]},  # keep tokens reasonable
+        ],
+        "response_format": {"type": "json_object"},
+        "temperature": 0.0,
+    }
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                f"{OPENROUTER_BASE_URL}/chat/completions",
+                headers=HEADERS,
+                json=payload,
+                timeout=30.0,
+            )
+            resp.raise_for_status()
+            parsed = json.loads(resp.json()["choices"][0]["message"]["content"])
+            meds = parsed.get("medications", [])
+            labs = parsed.get("lab_values", [])
+            logger.info(f"LLM fallback found {len(meds)} meds, {len(labs)} labs.")
+            return meds, labs
+    except Exception as e:
+        logger.warning(f"LLM fallback extraction failed: {e}")
+        return [], []
+
+
+# ── NIH API enrichment (deterministic code lookup) ───────────────────────────
 async def fetch_rxnorm_code(drug_name: str) -> str | None:
     """Fetch RxNorm CUI for a given drug name using NIH RxNav API."""
     try:
@@ -32,8 +263,7 @@ async def fetch_rxnorm_code(drug_name: str) -> str | None:
             resp = await client.get(url, timeout=5.0)
             if resp.status_code == 200:
                 data = resp.json()
-                approx_group = data.get("approximateGroup", {})
-                candidates = approx_group.get("candidate", [])
+                candidates = data.get("approximateGroup", {}).get("candidate", [])
                 if candidates:
                     return candidates[0].get("rxcui")
     except Exception as e:
@@ -50,59 +280,50 @@ async def fetch_icd10_code(condition_name: str) -> str | None:
             if resp.status_code == 200:
                 data = resp.json()
                 if len(data) >= 4 and data[3]:
-                    # data[3] is an array of [code, name]
                     return data[3][0][0]
     except Exception as e:
         logger.warning(f"Failed to fetch ICD-10 for {condition_name}: {e}")
     return None
 
 
+# ── Main entry point ──────────────────────────────────────────────────────────
 async def extract_entities(text: str) -> dict:
     """
-    Extract medications and lab values from text using an OpenRouter LLM.
-    Returns {"medications": [...], "lab_values": [...]}.
+    Layer 2: Medical Entity Extraction.
+
+    Strategy (as decided in architecture session):
+      1. Med7 ML model → medications (local, zero API, handles messy drug text)
+      2. spaCy Matcher rules → lab values (deterministic, rules beat ML for structured data)
+      3. LLM fallback → only if Med7 is unavailable (not downloaded yet)
+      4. NIH RxNav API → enrich medications with RxNorm codes (deterministic)
+
+    Returns: {"medications": [...], "lab_values": [...]}
     """
-    if not OPENROUTER_API_KEY:
-        logger.error("OPENROUTER_API_KEY not set. Cannot extract entities via LLM.")
-        return {"medications": [], "lab_values": []}
+    # --- Step 1: Deterministic lab value extraction (spaCy Matcher) ---
+    labs = _extract_labs_with_matcher(text)
 
-    payload = {
-        "model": EXTRACT_MODEL,
-        "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": text},
-        ],
-        "response_format": {"type": "json_object"},
-        "temperature": 0.0,
-    }
+    # --- Step 2: Medication extraction (Med7 ML model) ---
+    meds = _extract_meds_with_med7(text)
 
-    try:
-        async with httpx.AsyncClient() as client:
-            resp = await client.post(
-                f"{OPENROUTER_BASE_URL}/chat/completions",
-                headers=HEADERS,
-                json=payload,
-                timeout=30.0,
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            content = data["choices"][0]["message"]["content"]
-            parsed = json.loads(content)
+    # --- Step 3: LLM fallback only if Med7 unavailable ---
+    if not meds and _get_med7() is None:
+        logger.info("Med7 unavailable — using LLM fallback for medication extraction.")
+        llm_meds, llm_labs = await _llm_extract_fallback(text)
+        # Merge LLM labs with Matcher labs (deduplicate by test name)
+        seen_tests = {l["test"].lower() for l in labs}
+        for l in llm_labs:
+            if l.get("test", "").lower() not in seen_tests:
+                labs.append(l)
+        meds = llm_meds
 
-        medications = parsed.get("medications", [])
-        lab_values = parsed.get("lab_values", [])
+    # --- Step 4: Enrich medications with RxNorm codes (NIH API, deterministic) ---
+    rxnorm_tasks = [
+        fetch_rxnorm_code(m["name"])
+        for m in meds if "name" in m and "rxcui" not in m
+    ]
+    rxcuis = await asyncio.gather(*rxnorm_tasks, return_exceptions=True)
+    for med, rxcui in zip(meds, rxcuis):
+        if isinstance(rxcui, str):
+            med["rxcui"] = rxcui
 
-        # Enrich medications with RxNorm codes (best-effort, non-blocking).
-        for med in medications:
-            if "name" in med and "rxcui" not in med:
-                rxcui = await fetch_rxnorm_code(med["name"])
-                if rxcui:
-                    med["rxcui"] = rxcui
-
-        return {
-            "medications": medications,
-            "lab_values": lab_values,
-        }
-    except Exception as e:
-        logger.error(f"OpenRouter entity extraction failed: {e}")
-        return {"medications": [], "lab_values": []}
+    return {"medications": meds, "lab_values": labs}
