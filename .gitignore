@@ -79,3 +79,6 @@ tunnel_output.log
 
 # OS
 Thumbs.db
+
+.vercel
+.env*
