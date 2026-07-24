@@ -1,7 +1,8 @@
 import { createClient } from '@/lib/supabase/server'
-import { notFound, redirect } from 'next/navigation'
+import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
+import { getPatientSafely } from '@/lib/data/patient'
 import PatientDetailClient from './PatientDetailClient'
 
 export default async function PatientPage({ params }: { params: { id: string } }) {
@@ -11,19 +12,15 @@ export default async function PatientPage({ params }: { params: { id: string } }
     redirect('/login')
   }
 
-  // Await the params object before accessing properties (Next.js 15 requirement, though works in 14 too)
   const patientId = params.id
 
-  // Fetch the patient (RLS ensures caregiver can only see their own patients)
-  const { data: patient, error: patientError } = await supabase
-    .from('patients')
-    .select('*')
-    .eq('id', patientId)
-    .single()
+  const result = await getPatientSafely(patientId)
 
-  if (patientError || !patient) {
-    notFound()
+  if (!result.success) {
+    throw new Error(result.errorMessage || 'Failed to load patient')
   }
+
+  const patient = result.data
 
   // Fetch initial documents for this patient
   const { data: documents } = await supabase

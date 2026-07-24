@@ -1,0 +1,41 @@
+import { createClient } from '@/lib/supabase/server'
+
+export interface PatientResult {
+  success: boolean
+  data: any
+  errorMessage: string | null
+}
+
+export async function getPatientSafely(patientId: string): Promise<PatientResult> {
+  try {
+    const supabase = await createClient()
+
+    const { data, error } = await supabase
+      .from('patients')
+      .select('*')
+      .eq('id', patientId)
+      .single()
+
+    if (error) {
+      console.error('🚨 [DB ERROR - Patient Fetch]:', error)
+      return {
+        success: false,
+        data: null,
+        errorMessage: error.message || 'Failed to fetch patient from database',
+      }
+    }
+
+    return {
+      success: true,
+      data,
+      errorMessage: null,
+    }
+  } catch (err) {
+    console.error('🚨 [DB ERROR - Patient Fetch]:', err)
+    return {
+      success: false,
+      data: null,
+      errorMessage: err instanceof Error ? err.message : 'Unknown error loading patient',
+    }
+  }
+}
