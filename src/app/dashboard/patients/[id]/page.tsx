@@ -5,14 +5,15 @@ import { Button } from '@/components/ui/button'
 import { getPatientSafely } from '@/lib/data/patient'
 import PatientDetailClient from './PatientDetailClient'
 
-export default async function PatientPage({ params }: { params: { id: string } }) {
+export default async function PatientPage({ params }: { params: Promise<{ id: string }> }) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) {
     redirect('/login')
   }
 
-  const patientId = params.id
+  const { id } = await params
+  const patientId = id
 
   const result = await getPatientSafely(patientId)
 

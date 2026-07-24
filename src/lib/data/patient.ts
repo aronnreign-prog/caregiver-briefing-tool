@@ -7,6 +7,15 @@ export interface PatientResult {
 }
 
 export async function getPatientSafely(patientId: string): Promise<PatientResult> {
+  if (!patientId || patientId === 'undefined' || patientId.trim() === '') {
+    console.error('🚨 [DATA ACCESS GUARD]: Invalid or missing identifier provided:', patientId)
+    return {
+      success: false,
+      data: null,
+      errorMessage: 'Invalid request parameters.',
+    }
+  }
+
   try {
     const supabase = await createClient()
 
