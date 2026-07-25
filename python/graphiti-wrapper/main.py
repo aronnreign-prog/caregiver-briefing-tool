@@ -71,7 +71,7 @@ class ExtractPdfRequest(BaseModel):
 # Graphiti uses an LLM for entity extraction and an embedder for semantic search.
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 OPENROUTER_BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
-ENTITY_EXTRACT_MODEL = os.getenv("ENTITY_EXTRACT_MODEL", "qwen/qwen-2-vl-7b-instruct:free")
+ENTITY_EXTRACT_MODEL = os.getenv("OPENROUTER_MODEL", "google/gemini-2.0-flash-lite-001:free")
 
 # Embeddings: OpenRouter serves NO embedding models, so Graphiti's embedder uses
 # Google Gemini (free tier) instead. Keep chat/LLM on OpenRouter.
