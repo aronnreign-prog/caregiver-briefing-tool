@@ -69,9 +69,16 @@ class ExtractPdfRequest(BaseModel):
 
 # OpenRouter is compatible with the OpenAI SDK — we just point base_url at it.
 # Graphiti uses an LLM for entity extraction and an embedder for semantic search.
+from model_resolver import (
+    get_model_fallback_chain,
+    get_rerank_model_chain,
+    resolve_model,
+)
+
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 OPENROUTER_BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
-ENTITY_EXTRACT_MODEL = os.getenv("OPENROUTER_MODEL", "google/gemini-2.0-flash-lite-001:free")
+ENTITY_EXTRACT_MODEL = resolve_model(get_model_fallback_chain())
+RERANK_MODEL = resolve_model(get_rerank_model_chain())
 
 # Embeddings: OpenRouter serves NO embedding models, so Graphiti's embedder uses
 # Google Gemini (free tier) instead. Keep chat/LLM on OpenRouter.
@@ -114,7 +121,7 @@ async def lifespan(app: FastAPI):
     cross_encoder = OpenAIRerankerClient(
         config=LLMConfig(
             api_key=OPENROUTER_API_KEY,
-            model=os.getenv("RERANK_MODEL", "deepseek/deepseek-chat-v3-0324"),
+            model=RERANK_MODEL,
             base_url=OPENROUTER_BASE_URL,
         )
     )
@@ -159,7 +166,11 @@ def _parse_iso(s: str) -> datetime:
 
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    return {
+        "status": "ok",
+        "llm_model": ENTITY_EXTRACT_MODEL or "unconfigured",
+        "rerank_model": RERANK_MODEL or "unconfigured",
+    }
 
 
 @app.post("/add-facts")

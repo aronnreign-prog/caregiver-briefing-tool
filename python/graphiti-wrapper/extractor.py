@@ -202,9 +202,11 @@ async def _extract_meds_with_med7_api(text: str) -> list[dict]:
 
 
 # ── OpenRouter LLM (fallback only) ───────────────────────────────────────────
+from model_resolver import get_extractor_model_chain, resolve_model
+
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 OPENROUTER_BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
-EXTRACT_MODEL = os.getenv("ENTITY_EXTRACT_MODEL", "deepseek/deepseek-chat-v3-0324:free")
+EXTRACT_MODEL_CHAIN = get_extractor_model_chain()
 
 SYSTEM_PROMPT = """You are a clinical entity extraction engine. From the given medical text, extract:
 1. medications — each with a "name" (the drug name) and optional "dosage", "frequency", "route", "form", "strength", "duration".
@@ -222,36 +224,40 @@ HEADERS = {
 
 
 async def _llm_extract_fallback(text: str) -> tuple[list[dict], list[dict]]:
-    """LLM fallback — only called when Med7 is unavailable."""
     if not OPENROUTER_API_KEY:
         logger.warning("OPENROUTER_API_KEY not set — no LLM fallback available.")
         return [], []
-    payload = {
-        "model": EXTRACT_MODEL,
-        "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": text[:8000]},  # keep tokens reasonable
-        ],
-        "response_format": {"type": "json_object"},
-        "temperature": 0.0,
-    }
-    try:
-        async with httpx.AsyncClient() as client:
-            resp = await client.post(
-                f"{OPENROUTER_BASE_URL}/chat/completions",
-                headers=HEADERS,
-                json=payload,
-                timeout=30.0,
-            )
-            resp.raise_for_status()
-            parsed = json.loads(resp.json()["choices"][0]["message"]["content"])
-            meds = parsed.get("medications", [])
-            labs = parsed.get("lab_values", [])
-            logger.info(f"LLM fallback found {len(meds)} meds, {len(labs)} labs.")
-            return meds, labs
-    except Exception as e:
-        logger.warning(f"LLM fallback extraction failed: {e}")
-        return [], []
+
+    for model_name in EXTRACT_MODEL_CHAIN:
+        payload = {
+            "model": model_name,
+            "messages": [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": text[:8000]},
+            ],
+            "response_format": {"type": "json_object"},
+            "temperature": 0.0,
+        }
+        try:
+            async with httpx.AsyncClient() as client:
+                resp = await client.post(
+                    f"{OPENROUTER_BASE_URL}/chat/completions",
+                    headers=HEADERS,
+                    json=payload,
+                    timeout=30.0,
+                )
+                resp.raise_for_status()
+                parsed = json.loads(resp.json()["choices"][0]["message"]["content"])
+                meds = parsed.get("medications", [])
+                labs = parsed.get("lab_values", [])
+                logger.info(f"LLM fallback ({model_name}) found {len(meds)} meds, {len(labs)} labs.")
+                return meds, labs
+        except Exception as e:
+            logger.warning(f"Model {model_name} failed ({e}). Trying next fallback...")
+            continue
+
+    logger.warning("All LLM fallback models failed.")
+    return [], []
 
 
 # ── NIH API enrichment (deterministic code lookup) ───────────────────────────
