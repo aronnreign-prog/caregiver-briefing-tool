@@ -100,7 +100,7 @@ serve(async (req: Request) => {
     
     for (const med of Array.from(activeMeds)) {
       try {
-        const url = \`https://rxnav.nlm.nih.gov/REST/approximateTerm.json?term=\${encodeURIComponent(med)}&maxEntries=1\`
+        const url = `https://rxnav.nlm.nih.gov/REST/approximateTerm.json?term=${encodeURIComponent(med)}&maxEntries=1`
         const res = await fetch(url)
         if (res.ok) {
           const data = await res.json()
@@ -112,14 +112,14 @@ serve(async (req: Request) => {
           }
         }
       } catch (e) {
-        console.warn(\`Failed to fetch RxCUI for \${med}: \`, e)
+        console.warn(`Failed to fetch RxCUI for ${med}: `, e)
       }
     }
 
     // 3. Check for Drug-Drug Interactions via NIH RxNav Interaction API
     if (rxcuis.length > 1) {
       try {
-        const ddiUrl = \`https://rxnav.nlm.nih.gov/REST/interaction/list.json?rxcuis=\${rxcuis.join('+')}\`
+        const ddiUrl = `https://rxnav.nlm.nih.gov/REST/interaction/list.json?rxcuis=${rxcuis.join('+')}`
         const ddiRes = await fetch(ddiUrl)
         if (ddiRes.ok) {
           const ddiData = await ddiRes.json()
@@ -132,7 +132,7 @@ serve(async (req: Request) => {
                     medications: [rxcuiToName[interaction.interactionConcept[0].minConceptItem.rxcui] || "Unknown", 
                                   rxcuiToName[interaction.interactionConcept[1].minConceptItem.rxcui] || "Unknown"],
                     severity: interaction.severity,
-                    citation: \`NIH RxNav Interaction API: \${interaction.description}\`
+                    citation: `NIH RxNav Interaction API: ${interaction.description}`
                   })
                 }
               }
