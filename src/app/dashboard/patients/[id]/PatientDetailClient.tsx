@@ -94,10 +94,15 @@ export default function PatientDetailClient({
 
     const { data: { user } } = await supabase.auth.getUser()
     const { data: caregiver } = await supabase.from('caregivers').select('id').eq('auth_user_id', user?.id).single()
+    if (!caregiver?.id) {
+      alert('Caregiver profile not found')
+      setUploading(false)
+      return
+    }
 
     const { data: docData, error: dbError } = await supabase.from('documents').insert({
       patient_id: patient.id,
-      caregiver_id: caregiver?.id,
+      caregiver_id: caregiver.id,
       filename: file.name,
       storage_path: fileName,
       file_size: file.size,
@@ -105,15 +110,22 @@ export default function PatientDetailClient({
       status: 'uploaded'
     }).select().single()
 
-    if (dbError) {
-      alert('Failed to save document metadata: ' + dbError.message)
+    if (dbError || !docData?.id) {
+      alert('Failed to save document metadata: ' + (dbError?.message || 'No document ID returned'))
+      setUploading(false)
+      return
+    }
+
+    const documentId = docData.id
+    if (!documentId || documentId === 'undefined' || typeof documentId !== 'string') {
+      alert('Invalid document ID generated')
       setUploading(false)
       return
     }
 
     await supabase.from('jobs').insert({
       job_type: 'process_document',
-      payload: { document_id: docData.id, caregiver_id: caregiver?.id },
+      payload: { document_id: documentId, caregiver_id: caregiver.id },
       status: 'queued'
     })
 
@@ -125,24 +137,36 @@ export default function PatientDetailClient({
     setGenerating(true)
     const { data: { user } } = await supabase.auth.getUser()
     const { data: caregiver } = await supabase.from('caregivers').select('id').eq('auth_user_id', user?.id).single()
+    if (!caregiver?.id) {
+      alert('Caregiver profile not found')
+      setGenerating(false)
+      return
+    }
 
     const { data: briefingData, error: briefingError } = await supabase.from('briefings').insert({
       patient_id: patient.id,
-      caregiver_id: caregiver?.id,
+      caregiver_id: caregiver.id,
       audience: audience,
       status: 'queued',
       source_doc_ids: documents.map(d => d.id)
     }).select().single()
 
-    if (briefingError) {
-      alert('Failed to start briefing: ' + briefingError.message)
+    if (briefingError || !briefingData?.id) {
+      alert('Failed to start briefing: ' + (briefingError?.message || 'No briefing ID returned'))
+      setGenerating(false)
+      return
+    }
+
+    const briefingId = briefingData.id
+    if (!briefingId || briefingId === 'undefined' || typeof briefingId !== 'string') {
+      alert('Invalid briefing ID generated')
       setGenerating(false)
       return
     }
 
     await supabase.from('jobs').insert({
       job_type: 'generate_briefing',
-      payload: { briefing_id: briefingData.id, caregiver_id: caregiver?.id },
+      payload: { briefing_id: briefingId, caregiver_id: caregiver.id },
       status: 'queued'
     })
 

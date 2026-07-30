@@ -154,9 +154,9 @@ Adding LLM-as-judge is redundant with PaperTrail, weak for omissions/reasoning (
 | Component | Hosting | Cost |
 |---|---|---|
 | Frontend (Next.js) | Cloudflare Pages or Vercel free | $0 |
-| API/compute (pipeline) | AWS t4g.small (2GB ARM, free until Dec 2026) OR Supabase Edge Functions | $0 |
+| API/compute (pipeline) | Supabase Edge Functions (150s timeout) + Render (Python Graphiti wrapper) | $0 |
 | Operational database | Supabase Postgres free tier (500MB, 50K MAU) | $0 |
-| Graph database (the moat) | FalkorDB on Upstash Redis free tier (256MB, 10K commands/day) OR self-hosted on the VPS | $0 |
+| Graph database (the moat) | FalkorDB remote instance (Upstash/managed) | $0 |
 | File storage (PDFs) | Supabase Storage (1GB free) | $0 |
 | Auth | Supabase Auth (50K MAU free) | $0 |
 | Queue | Postgres SKIP LOCKED (no separate service) | $0 |

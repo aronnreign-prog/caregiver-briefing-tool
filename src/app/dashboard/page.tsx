@@ -24,11 +24,15 @@ export default async function DashboardPage() {
     .eq('auth_user_id', user.id)
     .single()
 
+  if (!caregiver?.id) {
+    throw new Error('Caregiver profile not found')
+  }
+
   // Fetch patients
   const { data: patients } = await supabase
     .from('patients')
     .select('*')
-    .eq('caregiver_id', caregiver?.id)
+    .eq('caregiver_id', caregiver.id)
     .order('created_at', { ascending: false })
 
   return (

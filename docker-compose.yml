@@ -28,11 +28,14 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - FALKORDB_HOST=falkordb
-      - FALKORDB_PORT=6379
+      - FALKORDB_HOST=${FALKORDB_HOST:-falkordb}
+      - FALKORDB_PORT=${FALKORDB_PORT:-6379}
+      - FALKORDB_PASSWORD=${FALKORDB_PASSWORD:-}
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
       - OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
+      - METADATA_MODEL=deepseek/deepseek-v4-flash
       - ENTITY_EXTRACT_MODEL=deepseek/deepseek-chat-v3-0324
+      - LLM_MODEL=deepseek/deepseek-chat-v3.1
       - GEMINI_API_KEY=${GEMINI_API_KEY}
       - EMBED_MODEL=gemini-embedding-001
       - EMBED_DIM=768

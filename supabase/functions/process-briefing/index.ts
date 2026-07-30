@@ -11,8 +11,9 @@ serve(async (req: Request) => {
   const supabaseClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 
   // 1. Claim a job using our custom SKIP LOCKED function
-  const { data: jobs, error: claimError } = await supabaseClient.rpc('claim_next_job', {
-    worker_name: 'briefing-worker-1'
+  const { data: job, error: claimError } = await supabaseClient.rpc('claim_next_job', {
+    worker_name: 'briefing-worker-1',
+    job_type_filter: 'generate_briefing',
   })
 
   if (claimError) {
@@ -20,18 +21,25 @@ serve(async (req: Request) => {
     return new Response(JSON.stringify({ error: claimError.message }), { status: 500 })
   }
 
-  if (!jobs || jobs.length === 0) {
+  if (!job) {
     return new Response(JSON.stringify({ message: 'No queued jobs' }), { status: 200 })
   }
 
-  const job = jobs[0]
   if (job.job_type !== 'generate_briefing') {
-    // If it's a different job type, mark as failed (this worker only processes briefings)
-    await supabaseClient.from('jobs').update({ status: 'failed', error_message: 'Worker does not support this job type' }).eq('id', job.id)
-    return new Response(JSON.stringify({ message: 'Skipped unsupported job' }), { status: 200 })
+    await supabaseClient.from('jobs').update({ status: 'queued', started_at: null, worker_id: null, attempts: job.attempts + 1 }).eq('id', job.id)
+    return new Response(JSON.stringify({ message: 'Re-queued unsupported job' }), { status: 200 })
   }
 
-  const briefingId = job.payload.briefing_id
+  const briefingId = job.payload?.briefing_id
+  if (
+    !briefingId ||
+    briefingId === 'undefined' ||
+    briefingId === 'null' ||
+    typeof briefingId !== 'string' ||
+    briefingId.trim() === ''
+  ) {
+    throw new Error("Job payload missing or invalid briefing_id")
+  }
 
   try {
     console.log(`Processing briefing: ${briefingId}`)
@@ -148,13 +156,8 @@ serve(async (req: Request) => {
     const OPENROUTER_API_KEY = Deno.env.get('OPENROUTER_API_KEY')
     // [Fix] Validate OPENROUTER_API_KEY before any LLM call — fail fast with clear error
     if (!OPENROUTER_API_KEY) throw new Error('OPENROUTER_API_KEY env var is missing. Set it in Supabase Secrets or supabase/functions/.env.local')
-    // Pull the LLM model from the environment, with a fallback chain
-    const LLM_MODEL_CHAIN = [
-      Deno.env.get('LLM_MODEL'),
-      'openrouter/free',
-      'anthropic/claude-3-haiku',
-      'mistralai/mistral-7b-instruct:free',
-    ].filter((m): m is string => !!m)
+    // Pull the LLM model from the environment instead of hardcoding
+    const LLM_MODEL = Deno.env.get('LLM_MODEL') || 'anthropic/claude-3-haiku'
 
     const systemPrompt = `You are generating a medical briefing for a caregiver to bring to a doctor.
 
@@ -191,35 +194,27 @@ Rules:
 
     const userPrompt = `Please generate the briefing now as JSON.`
 
-    let llmResponse: Response | null = null;
+    const llmResponse = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${OPENROUTER_API_KEY}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        model: LLM_MODEL,
+        response_format: { type: "json_object" },
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt }
+        ]
+      })
+    })
 
-    for (const modelName of LLM_MODEL_CHAIN) {
-      llmResponse = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${OPENROUTER_API_KEY}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          model: modelName,
-          response_format: { type: "json_object" },
-          messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: userPrompt }
-          ]
-        })
-      });
-
-      if (llmResponse.ok) break;
-      console.warn(`LLM model ${modelName} failed (${llmResponse.status}). Trying next fallback...`);
-      llmResponse = null;
+    if (!llmResponse.ok) {
+      throw new Error(`LLM API error: ${llmResponse.statusText}`)
     }
 
-    if (!llmResponse) {
-      throw new Error('All LLM models failed');
-    }
-
-    const llmData = await llmResponse.json();
+    const llmData = await llmResponse.json()
     const content = llmData.choices[0].message.content
     
     let parsedContent;
@@ -245,12 +240,11 @@ Rules:
 
     let atomicClaims: any[] = []
     try {
-      const decomposeModel = LLM_MODEL_CHAIN[0] || 'anthropic/claude-3-haiku';
       const decompRes = await fetch("https://openrouter.ai/api/v1/chat/completions", {
         method: "POST",
         headers: { "Authorization": `Bearer ${OPENROUTER_API_KEY}`, "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: decomposeModel,
+          model: LLM_MODEL,
           response_format: { type: "json_object" },
           messages: [{ role: "user", content: decomposeClaimsPrompt }]
         })
@@ -282,12 +276,11 @@ Rules:
         Output as JSON array of {evidence_id, evidence_text, source_quote, source_doc_id: "${doc.id}"}.`
         
         try {
-          const evModel = LLM_MODEL_CHAIN[0] || 'anthropic/claude-3-haiku';
           const evRes = await fetch("https://openrouter.ai/api/v1/chat/completions", {
             method: "POST",
             headers: { "Authorization": `Bearer ${OPENROUTER_API_KEY}`, "Content-Type": "application/json" },
             body: JSON.stringify({
-              model: evModel,
+              model: LLM_MODEL,
               response_format: { type: "json_object" },
               messages: [{ role: "user", content: extractEvidencePrompt }]
             })
@@ -350,16 +343,15 @@ Rules:
           Respond ONLY with JSON: {"is_supported": true/false, "confidence": 0.0 to 1.0, "matching_fact": "the matching fact text"}`
           
           try {
-const semanticModel = LLM_MODEL_CHAIN[0] || 'anthropic/claude-3-haiku';
-             const semanticResponse = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-               method: "POST",
-               headers: { "Authorization": `Bearer ${OPENROUTER_API_KEY}`, "Content-Type": "application/json" },
-               body: JSON.stringify({
-                 model: semanticModel,
-                 response_format: { type: "json_object" },
-                 messages: [{ role: "user", content: semanticPrompt }]
-               })
-             })
+            const semanticResponse = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+              method: "POST",
+              headers: { "Authorization": `Bearer ${OPENROUTER_API_KEY}`, "Content-Type": "application/json" },
+              body: JSON.stringify({
+                model: LLM_MODEL,
+                response_format: { type: "json_object" },
+                messages: [{ role: "user", content: semanticPrompt }]
+              })
+            })
             
             if (semanticResponse.ok) {
               const semanticData = await semanticResponse.json()
