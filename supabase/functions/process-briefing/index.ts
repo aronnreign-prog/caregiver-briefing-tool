@@ -61,7 +61,9 @@ serve(async (req: Request) => {
     const GRAPHITI_WRAPPER_URL = Deno.env.get("GRAPHITI_WRAPPER_URL") || "http://host.docker.internal:8000"
     
     // Get current facts
-    const stateResponse = await fetch(`${GRAPHITI_WRAPPER_URL}/patient-state/${briefing.patient_id}`)
+    const stateResponse = await fetch(`${GRAPHITI_WRAPPER_URL}/patient-state/${briefing.patient_id}`, {
+      signal: AbortSignal.timeout(30000),
+    })
     if (!stateResponse.ok) throw new Error(`Graphiti wrapper error: ${stateResponse.statusText}`)
     const patientState = await stateResponse.json()
     const currentFacts = patientState.current_facts || []
@@ -71,7 +73,9 @@ serve(async (req: Request) => {
     const trends: Record<string, any> = {}
     
     for (const lab of labsToTrack) {
-      const trendResponse = await fetch(`${GRAPHITI_WRAPPER_URL}/trend/${briefing.patient_id}/${lab}`)
+      const trendResponse = await fetch(`${GRAPHITI_WRAPPER_URL}/trend/${briefing.patient_id}/${lab}`, {
+        signal: AbortSignal.timeout(30000),
+      })
       if (trendResponse.ok) {
         const trendData = await trendResponse.json()
         if (trendData.trend && trendData.trend.length > 0) {
@@ -109,7 +113,7 @@ serve(async (req: Request) => {
     for (const med of Array.from(activeMeds)) {
       try {
         const url = `https://rxnav.nlm.nih.gov/REST/approximateTerm.json?term=${encodeURIComponent(med)}&maxEntries=1`
-        const res = await fetch(url)
+        const res = await fetch(url, { signal: AbortSignal.timeout(30000) })
         if (res.ok) {
           const data = await res.json()
           const candidates = data.approximateGroup?.candidate
@@ -128,7 +132,7 @@ serve(async (req: Request) => {
     if (rxcuis.length > 1) {
       try {
         const ddiUrl = `https://rxnav.nlm.nih.gov/REST/interaction/list.json?rxcuis=${rxcuis.join('+')}`
-        const ddiRes = await fetch(ddiUrl)
+        const ddiRes = await fetch(ddiUrl, { signal: AbortSignal.timeout(30000) })
         if (ddiRes.ok) {
           const ddiData = await ddiRes.json()
           if (ddiData.fullInteractionTypeGroup) {
@@ -207,7 +211,8 @@ Rules:
           { role: "system", content: systemPrompt },
           { role: "user", content: userPrompt }
         ]
-      })
+      }),
+      signal: AbortSignal.timeout(60000),
     })
 
     if (!llmResponse.ok) {
@@ -247,7 +252,8 @@ Rules:
           model: LLM_MODEL,
           response_format: { type: "json_object" },
           messages: [{ role: "user", content: decomposeClaimsPrompt }]
-        })
+        }),
+        signal: AbortSignal.timeout(60000),
       })
       if (decompRes.ok) {
         const decompData = await decompRes.json()
@@ -283,7 +289,8 @@ Rules:
               model: LLM_MODEL,
               response_format: { type: "json_object" },
               messages: [{ role: "user", content: extractEvidencePrompt }]
-            })
+            }),
+            signal: AbortSignal.timeout(60000),
           })
           if (evRes.ok) {
             const evData = await evRes.json()
@@ -350,7 +357,8 @@ Rules:
                 model: LLM_MODEL,
                 response_format: { type: "json_object" },
                 messages: [{ role: "user", content: semanticPrompt }]
-              })
+              }),
+              signal: AbortSignal.timeout(60000),
             })
             
             if (semanticResponse.ok) {
@@ -420,6 +428,7 @@ Rules:
                 'Authorization': `Bearer ${RESEND_API_KEY}`,
                 'Content-Type': 'application/json'
               },
+              signal: AbortSignal.timeout(30000),
               body: JSON.stringify({
                 from: 'Acme Care <onboarding@resend.dev>',
                 to: [email],

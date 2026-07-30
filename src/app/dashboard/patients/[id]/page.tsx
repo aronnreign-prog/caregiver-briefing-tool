@@ -3,7 +3,9 @@ import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { getPatientSafely } from '@/lib/data/patient'
+import { isValidUUID } from '@/lib/validators'
 import PatientDetailClient from './PatientDetailClient'
+import type { Patient, Document, Briefing } from '@/types/database'
 
 export default async function PatientPage({ params }: { params: Promise<{ id: string }> }) {
   const supabase = await createClient()
@@ -15,13 +17,18 @@ export default async function PatientPage({ params }: { params: Promise<{ id: st
   const { id } = await params
   const patientId = id
 
+  // Validate UUID before any DB query
+  if (!isValidUUID(patientId)) {
+    redirect('/dashboard')
+  }
+
   const result = await getPatientSafely(patientId)
 
   if (!result.success) {
     throw new Error(result.errorMessage || 'Failed to load patient')
   }
 
-  const patient = result.data
+  const patient = result.data as Patient
 
   // Fetch initial documents for this patient
   const { data: documents } = await supabase
@@ -57,8 +64,8 @@ export default async function PatientPage({ params }: { params: Promise<{ id: st
 
         <PatientDetailClient 
           patient={patient} 
-          initialDocuments={documents || []} 
-          initialBriefings={briefings || []}
+          initialDocuments={(documents || []) as Document[]} 
+          initialBriefings={(briefings || []) as Briefing[]}
         />
       </div>
     </div>

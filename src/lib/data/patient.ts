@@ -1,8 +1,9 @@
 import { createClient } from '@/lib/supabase/server'
+import type { Patient } from '@/types/database'
 
 export interface PatientResult {
   success: boolean
-  data: any
+  data: Patient | null
   errorMessage: string | null
 }
 

@@ -89,6 +89,7 @@ Deno.serve(async (req: Request) => {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ pdf_base64: pdfBase64 }),
+      signal: AbortSignal.timeout(30000),
     });
     if (!extractResp.ok) {
       const errBody = await extractResp.text().catch(() => "");
@@ -125,6 +126,7 @@ Deno.serve(async (req: Request) => {
           { role: "user", content: extractedText },
         ],
       }),
+      signal: AbortSignal.timeout(30000),
     });
 
     // NOTE (Rule M2): never fall back to now() for document_date. If the
@@ -149,6 +151,7 @@ Deno.serve(async (req: Request) => {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text: extractedText }),
+      signal: AbortSignal.timeout(30000),
     });
 
     let extractedEntities: any = { medications: [], lab_values: [] };
@@ -185,6 +188,7 @@ Deno.serve(async (req: Request) => {
         ],
         reference_time: new Date().toISOString(),
       }),
+      signal: AbortSignal.timeout(30000),
     });
 
     if (!graphitiResponse.ok) {
