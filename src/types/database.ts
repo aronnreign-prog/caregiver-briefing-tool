@@ -93,6 +93,7 @@ export interface Claim {
 
 export interface ClaimEvidence {
   source_doc_id?: string
+  source_page?: number
   source_quote?: string
   source?: string
   entry_text?: string

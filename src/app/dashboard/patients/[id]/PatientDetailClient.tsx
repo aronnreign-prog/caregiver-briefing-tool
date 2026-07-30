@@ -231,12 +231,18 @@ export default function PatientDetailClient({
       )
     }
 
+    if (!claim.evidence || !claim.evidence.source_doc_id) return null
+
+    const evidence = claim.evidence
+    const docId: string = evidence.source_doc_id!
+    const page = evidence.source_page ?? undefined
+
     return (
       <a
         href="#"
-        onClick={(e) => handleDocClick(e, claim.evidence.source_doc_id, claim.evidence.source_page)}
+        onClick={(e) => handleDocClick(e, docId, page)}
         className="inline-flex items-center ml-2 px-2 py-0.5 rounded text-[10px] font-bold bg-blue-100 text-blue-800 hover:bg-blue-200"
-        title={claim.evidence.source_quote}
+        title={evidence.source_quote || ''}
       >
         📄 Doc
       </a>
