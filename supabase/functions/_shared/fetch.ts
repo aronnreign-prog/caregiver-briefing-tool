@@ -45,10 +45,12 @@ export async function fetchWithRetry(
   let lastError: Error | null = null;
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const controller = new AbortController();
+    const signal = controller.signal;
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
     try {
-      const controller = new AbortController();
-      const signal = controller.signal;
-      const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+      timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
       const response = await fetch(url, {
         ...fetchOptions,
@@ -70,7 +72,9 @@ export async function fetchWithRetry(
 
       return { response, attempts: attempt + 1 };
     } catch (error) {
-      clearTimeout(0);
+      if (timeoutId !== undefined) {
+        clearTimeout(timeoutId);
+      }
 
       if (isTimeout(error)) {
         lastError = new Error(`Request timed out after ${timeoutMs}ms`);

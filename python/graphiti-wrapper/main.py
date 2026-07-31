@@ -13,39 +13,125 @@ Endpoints:
 """
 
 import os
+import json
+import re
 import base64
 import logging
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Optional, Any
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
 from graphiti_core import Graphiti
 from graphiti_core.nodes import EpisodeType
-from graphiti_core.llm_client import OpenAIClient, LLMConfig
+from graphiti_core.llm_client.openai_generic_client import OpenAIGenericClient
+from graphiti_core.llm_client.config import LLMConfig
+from graphiti_core.prompts.models import Message
 
-# Monkey-patch OpenAIClient to strip code fences from OpenRouter responses
-import json as _json
-_openai_create_structured = OpenAIClient._create_structured_completion
-async def _patched_create_structured(*args, **kwargs):
+
+def extract_json_from_response(content: str) -> dict[str, Any]:
+    """
+    Extract and parse the first valid JSON object from response content.
+    Handles: pure JSON, code fences, leading/trailing text, multiple objects.
+    """
+    content = re.sub(r'^```(?:json)?\s*', '', content, flags=re.MULTILINE)
+    content = re.sub(r'\s*```$', '', content, flags=re.MULTILINE)
+
     try:
-        return await _openai_create_structured(*args, **kwargs)
-    except _json.JSONDecodeError:
-        import re
-        self = args[0] if args else None
-        if self is None:
+        return json.loads(content)
+    except json.JSONDecodeError:
+        pass
+
+    brace_count = 0
+    start_idx = None
+    for i, char in enumerate(content):
+        if char == '{':
+            if start_idx is None:
+                start_idx = i
+            brace_count += 1
+        elif char == '}':
+            brace_count -= 1
+            if brace_count == 0 and start_idx is not None:
+                json_str = content[start_idx:i+1]
+                try:
+                    return json.loads(json_str)
+                except json.JSONDecodeError:
+                    start_idx = None
+
+    json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', content, re.DOTALL)
+    if json_match:
+        try:
+            return json.loads(json_match.group())
+        except json.JSONDecodeError:
+            pass
+
+    raise json.JSONDecodeError(
+        f"Could not extract valid JSON from response. Preview: {content[:200]}",
+        content, 0,
+    )
+
+
+# Patch OpenAIGenericClient._generate_response to handle OpenRouter failure modes
+_original_generic_generate = OpenAIGenericClient._generate_response
+
+async def _patched_generic_generate(self, messages, response_model=None, max_tokens=16384, model_size=None):
+    openai_messages = []
+    for m in messages:
+        m.content = self._clean_input(m.content)
+        if m.role == 'user':
+            openai_messages.append({'role': 'user', 'content': m.content})
+        elif m.role == 'system':
+            openai_messages.append({'role': 'system', 'content': m.content})
+
+    import openai as _openai
+
+    for attempt in range(3):
+        try:
+            response = await self.client.chat.completions.create(
+                model=self.model or 'gpt-4.1-mini',
+                messages=openai_messages,
+                temperature=self.temperature,
+                max_tokens=max_tokens,
+                response_format=self._build_response_format(response_model),
+            )
+            result = response.choices[0].message.content or ''
+            if not result:
+                raise Exception('LLM returned an empty response')
+
+            parsed = extract_json_from_response(result)
+
+            if response_model and any(k in parsed for k in ('$defs', '$def', '$schema')):
+                raise ValueError('LLM returned schema definition instead of data')
+
+            if isinstance(parsed, list):
+                raise ValueError('LLM returned list instead of object')
+
+            return parsed
+
+        except _openai.RateLimitError:
             raise
-        request_kwargs = kwargs if kwargs else (args[1] if len(args) > 1 else {})
-        resp = await self.client.responses.parse(**request_kwargs)
-        text = resp.output_text.strip()
-        text = re.sub(r'^```(?:json)?\s*', '', text)
-        text = re.sub(r'\s*```$', '', text)
-        return _json.loads(text)
-OpenAIClient._create_structured_completion = _patched_create_structured
+        except (json.JSONDecodeError, ValueError, KeyError) as e:
+            logger.warning(
+                f'[OpenRouter] parse error on attempt {attempt+1}/3: {e}'
+            )
+            if attempt >= 2:
+                raise
+            error_msg = Message(
+                role='user',
+                content=(
+                    f'Your previous response was invalid ({e}). '
+                    f'Return a valid JSON object with the correct structure. '
+                    f'Do NOT return a schema definition or a list.'
+                ),
+            )
+            openai_messages.append({'role': 'user', 'content': error_msg.content})
+        except Exception:
+            raise
+
+OpenAIGenericClient._generate_response = _patched_generic_generate
 from graphiti_core.embedder.gemini import GeminiEmbedder, GeminiEmbedderConfig
-from graphiti_core.cross_encoder.openai_reranker_client import OpenAIRerankerClient
 from graphiti_core.driver.falkordb_driver import FalkorDriver
 
 from extractor import extract_entities
@@ -118,12 +204,14 @@ graphiti: Graphiti | None = None
 async def lifespan(app: FastAPI):
     global graphiti
 
-    llm_client = OpenAIClient(
+    llm_client = OpenAIGenericClient(
         config=LLMConfig(
             api_key=OPENROUTER_API_KEY,
             model=ENTITY_EXTRACT_MODEL,
             base_url=OPENROUTER_BASE_URL,
         ),
+        max_tokens=16384,
+        structured_output_mode="json_object",
     )
 
     embedder = GeminiEmbedder(
@@ -134,16 +222,8 @@ async def lifespan(app: FastAPI):
         )
     )
 
-    # Reranker: Graphiti falls back to a default OpenAIRerankerClient (which needs
-    # an OPENAI_API_KEY) if cross_encoder is None, so we must pass a real one.
-    # Point it at OpenRouter (used only during search(), not add-facts).
-    cross_encoder = OpenAIRerankerClient(
-        config=LLMConfig(
-            api_key=OPENROUTER_API_KEY,
-            model=RERANK_MODEL,
-            base_url=OPENROUTER_BASE_URL,
-        )
-    )
+    # Reranker disabled — OpenRouter's /chat/completions for reranking models
+    # returns unreliable JSON; Graphiti will skip reranking in search results.
 
     falkor_driver = FalkorDriver(host=FALKORDB_HOST, port=FALKORDB_PORT, password=FALKORDB_PASSWORD, username="falkordb")
 
@@ -151,7 +231,7 @@ async def lifespan(app: FastAPI):
         graph_driver=falkor_driver,
         llm_client=llm_client,
         embedder=embedder,
-        cross_encoder=cross_encoder,
+        cross_encoder=None,
     )
 
     logger.info("Building Graphiti indices and constraints…")
