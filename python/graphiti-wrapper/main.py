@@ -24,7 +24,8 @@ from pydantic import BaseModel
 
 from graphiti_core import Graphiti
 from graphiti_core.nodes import EpisodeType
-from graphiti_core.llm_client import OpenAIClient, LLMConfig
+from graphiti_core.llm_client.openai_generic_client import OpenAIGenericClient
+from graphiti_core.llm_client.config import LLMConfig
 from graphiti_core.embedder.gemini import GeminiEmbedder, GeminiEmbedderConfig
 from graphiti_core.cross_encoder.openai_reranker_client import OpenAIRerankerClient
 from graphiti_core.driver.falkordb_driver import FalkorDriver
@@ -99,7 +100,7 @@ graphiti: Graphiti | None = None
 async def lifespan(app: FastAPI):
     global graphiti
 
-    llm_client = OpenAIClient(
+    llm_client = OpenAIGenericClient(
         config=LLMConfig(
             api_key=OPENROUTER_API_KEY,
             model=ENTITY_EXTRACT_MODEL,
