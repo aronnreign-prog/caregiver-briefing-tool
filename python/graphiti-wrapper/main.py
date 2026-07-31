@@ -24,8 +24,24 @@ from pydantic import BaseModel
 
 from graphiti_core import Graphiti
 from graphiti_core.nodes import EpisodeType
-from graphiti_core.llm_client.openai_generic_client import OpenAIGenericClient
-from graphiti_core.llm_client.config import LLMConfig
+from graphiti_core.llm_client import OpenAIClient, LLMConfig
+
+# Monkey-patch OpenAIClient to strip code fences from OpenRouter responses
+import json as _json
+_openai_create_structured = OpenAIClient._create_structured_completion
+async def _patched_create_structured(self, request_kwargs):
+    try:
+        return await _openai_create_structured(self, request_kwargs)
+    except _json.JSONDecodeError:
+        import re
+        resp = await self.client.responses.parse(**request_kwargs)
+        text = resp.output_text.strip()
+        text = re.sub(r'^```(?:json)?\s*', '', text)
+        text = re.sub(r'\s*```$', '', text)
+        if isinstance(resp, list):
+            resp = resp[0] if resp else resp
+        return _json.loads(text)
+OpenAIClient._create_structured_completion = _patched_create_structured
 from graphiti_core.embedder.gemini import GeminiEmbedder, GeminiEmbedderConfig
 from graphiti_core.cross_encoder.openai_reranker_client import OpenAIRerankerClient
 from graphiti_core.driver.falkordb_driver import FalkorDriver
@@ -100,13 +116,12 @@ graphiti: Graphiti | None = None
 async def lifespan(app: FastAPI):
     global graphiti
 
-    llm_client = OpenAIGenericClient(
+    llm_client = OpenAIClient(
         config=LLMConfig(
             api_key=OPENROUTER_API_KEY,
             model=ENTITY_EXTRACT_MODEL,
             base_url=OPENROUTER_BASE_URL,
         ),
-        structured_output_mode="json_object",
     )
 
     embedder = GeminiEmbedder(
