@@ -16,10 +16,10 @@ FALLBACK_CHAIN = [
 
 EXTRACTOR_FALLBACK_CHAIN = [
     os.getenv("ENTITY_EXTRACT_MODEL", ""),
-    "openrouter/free",
+    "deepseek/deepseek-chat-v3-0324:free",
     "meta-llama/llama-3.3-70b-instruct:free",
     "mistralai/mistral-small-3.1-24b-instruct-2503:free",
-    "deepseek/deepseek-chat-v3-0324:free",
+    "openrouter/free",
 ]
 
 VISION_FALLBACK_CHAIN = [
