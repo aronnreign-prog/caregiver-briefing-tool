@@ -104,7 +104,8 @@ async def lifespan(app: FastAPI):
             api_key=OPENROUTER_API_KEY,
             model=ENTITY_EXTRACT_MODEL,
             base_url=OPENROUTER_BASE_URL,
-        )
+        ),
+        structured_output_mode="json_object",
     )
 
     embedder = GeminiEmbedder(
