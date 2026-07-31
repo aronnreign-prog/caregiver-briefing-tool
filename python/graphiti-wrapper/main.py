@@ -165,11 +165,21 @@ def _parse_iso(s: str) -> datetime:
 # ---------------------------------------------------------------------------
 
 @app.get("/health")
-def health():
+async def health():
+    db_status = "disconnected"
+    try:
+        if graphiti is not None and graphiti.driver is not None:
+            await graphiti.driver.health_check()
+            db_status = "connected"
+    except Exception as e:
+        logger.warning(f"FalkorDB health check failed: {e}")
+        db_status = f"error: {e}"
+
     return {
         "status": "ok",
-        "llm_model": ENTITY_EXTRACT_MODEL or "unconfigured",
-        "rerank_model": RERANK_MODEL or "unconfigured",
+        "llm_model": get_model_fallback_chain()[0] if get_model_fallback_chain() else "openrouter/free",
+        "rerank_model": get_rerank_model_chain()[0] if get_rerank_model_chain() else "openrouter/free",
+        "falkordb": db_status,
     }
 
 

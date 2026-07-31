@@ -10,7 +10,7 @@ FALLBACK_CHAIN = [
     PRIMARY_MODEL if PRIMARY_MODEL and PRIMARY_MODEL not in DEPRECATED_MODELS else "",
     "openrouter/free",
     "meta-llama/llama-3.3-70b-instruct:free",
-    "mistralai/mistral-7b-instruct:free",
+    "mistralai/mistral-small-3.1-24b-instruct-2503:free",
     "google/gemini-2.0-flash-exp:free",
 ]
 
@@ -18,7 +18,7 @@ EXTRACTOR_FALLBACK_CHAIN = [
     os.getenv("ENTITY_EXTRACT_MODEL", ""),
     "openrouter/free",
     "meta-llama/llama-3.3-70b-instruct:free",
-    "mistralai/mistral-7b-instruct:free",
+    "mistralai/mistral-small-3.1-24b-instruct-2503:free",
     "deepseek/deepseek-chat-v3-0324:free",
 ]
 
@@ -26,14 +26,14 @@ VISION_FALLBACK_CHAIN = [
     os.getenv("LAYER_1_VISION_MODEL", ""),
     "openrouter/free",
     "nvidia/nemotron-nano-12b-v2-vl:free",
-    "google/gemini-2.0-flash-lite-001:free",
+    "google/gemma-4-26b-a4b-it:free",
 ]
 
 METADATA_FALLBACK_CHAIN = [
     os.getenv("METADATA_MODEL", ""),
     "openrouter/free",
     "meta-llama/llama-3.1-8b-instruct:free",
-    "mistralai/mistral-7b-instruct:free",
+    "mistralai/mistral-small-3.1-24b-instruct-2503:free",
 ]
 
 RERANK_FALLBACK_CHAIN = [
