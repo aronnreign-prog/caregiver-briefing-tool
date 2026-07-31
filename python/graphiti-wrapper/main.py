@@ -29,17 +29,19 @@ from graphiti_core.llm_client import OpenAIClient, LLMConfig
 # Monkey-patch OpenAIClient to strip code fences from OpenRouter responses
 import json as _json
 _openai_create_structured = OpenAIClient._create_structured_completion
-async def _patched_create_structured(self, request_kwargs):
+async def _patched_create_structured(*args, **kwargs):
     try:
-        return await _openai_create_structured(self, request_kwargs)
+        return await _openai_create_structured(*args, **kwargs)
     except _json.JSONDecodeError:
         import re
+        self = args[0] if args else None
+        if self is None:
+            raise
+        request_kwargs = kwargs if kwargs else (args[1] if len(args) > 1 else {})
         resp = await self.client.responses.parse(**request_kwargs)
         text = resp.output_text.strip()
         text = re.sub(r'^```(?:json)?\s*', '', text)
         text = re.sub(r'\s*```$', '', text)
-        if isinstance(resp, list):
-            resp = resp[0] if resp else resp
         return _json.loads(text)
 OpenAIClient._create_structured_completion = _patched_create_structured
 from graphiti_core.embedder.gemini import GeminiEmbedder, GeminiEmbedderConfig
