@@ -132,6 +132,7 @@ async def _patched_generic_generate(self, messages, response_model=None, max_tok
 
 OpenAIGenericClient._generate_response = _patched_generic_generate
 from graphiti_core.embedder.gemini import GeminiEmbedder, GeminiEmbedderConfig
+from graphiti_core.cross_encoder.openai_reranker_client import OpenAIRerankerClient
 from graphiti_core.driver.falkordb_driver import FalkorDriver
 
 from extractor import extract_entities
@@ -222,8 +223,16 @@ async def lifespan(app: FastAPI):
         )
     )
 
-    # Reranker disabled — OpenRouter's /chat/completions for reranking models
-    # returns unreliable JSON; Graphiti will skip reranking in search results.
+    # Reranker: Graphiti falls back to a default OpenAIRerankerClient (which needs
+    # an OPENAI_API_KEY) if cross_encoder is None, so we must pass a real one.
+    # Point it at OpenRouter (used only during search(), not add-facts).
+    cross_encoder = OpenAIRerankerClient(
+        config=LLMConfig(
+            api_key=OPENROUTER_API_KEY,
+            model=RERANK_MODEL,
+            base_url=OPENROUTER_BASE_URL,
+        )
+    )
 
     falkor_driver = FalkorDriver(host=FALKORDB_HOST, port=FALKORDB_PORT, password=FALKORDB_PASSWORD, username="falkordb")
 
@@ -231,7 +240,7 @@ async def lifespan(app: FastAPI):
         graph_driver=falkor_driver,
         llm_client=llm_client,
         embedder=embedder,
-        cross_encoder=None,
+        cross_encoder=cross_encoder,
     )
 
     logger.info("Building Graphiti indices and constraints…")
