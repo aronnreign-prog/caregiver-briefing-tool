@@ -251,7 +251,7 @@ async def get_patient_state(patient_id: str):
         num_results=200,
     )
 
-    current_facts = [r for r in results if r.valid_to is None]
+    current_facts = [r for r in results if r.valid_at is None]
 
     return {
         "patient_id": patient_id,
