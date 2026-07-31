@@ -2,16 +2,33 @@
 
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { isValidUUID, buildJobPayload } from '@/lib/validators'
-import type { Patient, Document, Briefing, Claim } from '@/types/database'
 import ReactMarkdown from 'react-markdown'
+
+type Document = {
+  id: string
+  filename: string
+  status: string
+  uploaded_at: string
+  storage_path?: string
+}
+
+type Briefing = {
+  id: string
+  audience: string
+  status: string
+  created_at: string
+  completed_at: string | null
+  briefing_text: string | null
+  claims: any[] | null
+  flagged_concerns: any[] | null
+}
 
 export default function PatientDetailClient({
   patient,
   initialDocuments,
   initialBriefings,
 }: {
-  patient: Patient
+  patient: any
   initialDocuments: Document[]
   initialBriefings: Briefing[]
 }) {
@@ -63,12 +80,6 @@ export default function PatientDetailClient({
       return
     }
 
-    // Validate patient.id before any DB operations
-    if (!isValidUUID(patient.id)) {
-      alert('Invalid patient ID. Cannot upload document.')
-      return
-    }
-
     setUploading(true)
     const fileExt = file.name.split('.').pop()
     const fileName = `${patient.id}/${Date.now()}.${fileExt}`
@@ -83,8 +94,8 @@ export default function PatientDetailClient({
 
     const { data: { user } } = await supabase.auth.getUser()
     const { data: caregiver } = await supabase.from('caregivers').select('id').eq('auth_user_id', user?.id).single()
-    if (!caregiver?.id || !isValidUUID(caregiver.id)) {
-      alert('Caregiver profile not found or invalid caregiver ID')
+    if (!caregiver?.id) {
+      alert('Caregiver profile not found')
       setUploading(false)
       return
     }
@@ -106,21 +117,15 @@ export default function PatientDetailClient({
     }
 
     const documentId = docData.id
-    if (!isValidUUID(documentId)) {
+    if (!documentId || documentId === 'undefined' || documentId === 'null' || typeof documentId !== 'string') {
       alert('Invalid document ID generated')
       setUploading(false)
       return
     }
 
-    // Build payload with strict UUID validation — prevents 'undefined' strings
-    const jobPayload = buildJobPayload({
-      document_id: documentId,
-      caregiver_id: caregiver.id,
-    })
-
     await supabase.from('jobs').insert({
       job_type: 'process_document',
-      payload: jobPayload,
+      payload: { document_id: documentId, caregiver_id: caregiver.id },
       status: 'queued'
     })
 
@@ -129,32 +134,21 @@ export default function PatientDetailClient({
   }
 
   const generateBriefing = async () => {
-    // Validate patient.id before any DB operations
-    if (!isValidUUID(patient.id)) {
-      alert('Invalid patient ID. Cannot generate briefing.')
-      return
-    }
-
     setGenerating(true)
     const { data: { user } } = await supabase.auth.getUser()
     const { data: caregiver } = await supabase.from('caregivers').select('id').eq('auth_user_id', user?.id).single()
-    if (!caregiver?.id || !isValidUUID(caregiver.id)) {
-      alert('Caregiver profile not found or invalid caregiver ID')
+    if (!caregiver?.id) {
+      alert('Caregiver profile not found')
       setGenerating(false)
       return
     }
-
-    // Validate all document IDs before including in source_doc_ids
-    const validDocIds = documents
-      .map(d => d.id)
-      .filter((id): id is string => isValidUUID(id))
 
     const { data: briefingData, error: briefingError } = await supabase.from('briefings').insert({
       patient_id: patient.id,
       caregiver_id: caregiver.id,
       audience: audience,
       status: 'queued',
-      source_doc_ids: validDocIds
+      source_doc_ids: documents.map(d => d.id)
     }).select().single()
 
     if (briefingError || !briefingData?.id) {
@@ -164,21 +158,15 @@ export default function PatientDetailClient({
     }
 
     const briefingId = briefingData.id
-    if (!isValidUUID(briefingId)) {
+    if (!briefingId || briefingId === 'undefined' || briefingId === 'null' || typeof briefingId !== 'string') {
       alert('Invalid briefing ID generated')
       setGenerating(false)
       return
     }
 
-    // Build payload with strict UUID validation — prevents 'undefined' strings
-    const jobPayload = buildJobPayload({
-      briefing_id: briefingId,
-      caregiver_id: caregiver.id,
-    })
-
     await supabase.from('jobs').insert({
       job_type: 'generate_briefing',
-      payload: jobPayload,
+      payload: { briefing_id: briefingId, caregiver_id: caregiver.id },
       status: 'queued'
     })
 
@@ -213,7 +201,7 @@ export default function PatientDetailClient({
     window.open(url, '_blank')
   }
 
-  const renderCitationChip = (claim: Claim) => {
+  const renderCitationChip = (claim: any) => {
     if (!claim.evidence) return null
 
     if (claim.flag === 'MEDICAL_KNOWLEDGE') {
@@ -231,18 +219,12 @@ export default function PatientDetailClient({
       )
     }
 
-    if (!claim.evidence || !claim.evidence.source_doc_id) return null
-
-    const evidence = claim.evidence
-    const docId: string = evidence.source_doc_id!
-    const page = evidence.source_page ?? undefined
-
     return (
       <a
         href="#"
-        onClick={(e) => handleDocClick(e, docId, page)}
+        onClick={(e) => handleDocClick(e, claim.evidence.source_doc_id, claim.evidence.source_page)}
         className="inline-flex items-center ml-2 px-2 py-0.5 rounded text-[10px] font-bold bg-blue-100 text-blue-800 hover:bg-blue-200"
-        title={evidence.source_quote || ''}
+        title={claim.evidence.source_quote}
       >
         📄 Doc
       </a>
