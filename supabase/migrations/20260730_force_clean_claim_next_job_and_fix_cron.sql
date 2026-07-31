@@ -3,7 +3,7 @@
 
 -- =============================================================================
 -- 1. Drop ALL overloads of claim_next_job, then recreate the canonical version
---    with the job_type_filter capability.
+--    with the job_type_filter capability and safe_cast_uuid.
 -- =============================================================================
 
 drop function if exists public.claim_next_job(text);
@@ -17,6 +17,7 @@ set search_path = public
 as $$
 declare
   claimed_job jsonb;
+  target_id uuid;
 begin
   select jsonb_build_object(
     'id', j.id,
@@ -37,22 +38,35 @@ begin
     return null;
   end if;
 
+  target_id := public.safe_cast_uuid(claimed_job->>'id');
+  if target_id is null then
+    return null;
+  end if;
+
   update public.jobs
   set status = 'processing',
       started_at = now(),
       worker_id = worker_name
-  where id = claimed_job->>'id';
+  where id = target_id;
 
   return claimed_job;
 end;
 $$;
 
-grant execute on function public.claim_next_job(text, text) to service_role;
+grant execute on function public.claim_next_job(text, text) to authenticated, service_role, anon;
+grant execute on function public.claim_next_job(text) to authenticated, service_role, anon;
 
 -- =============================================================================
 -- 2. Schedule reset_stale_jobs every 5 minutes to recover jobs stuck in
 --    'processing' because of Edge Function crashes or pg_cron timeouts.
 -- =============================================================================
+
+do $$
+begin
+  if exists (select 1 from cron.job where jobname = 'reset-stale-jobs') then
+    perform cron.unschedule('reset-stale-jobs');
+  end if;
+end $$;
 
 select cron.schedule(
   'reset-stale-jobs',
@@ -61,19 +75,16 @@ select cron.schedule(
 );
 
 -- =============================================================================
--- 3. (Optional but recommended) remove the old single-param pg_cron wakes with
---    10s timeout and reschedule with a longer timeout so the Edge Function has
---    enough time to fully process.  If you prefer to keep the short timeout,
---    the reset-stale-jobs job above will still reclaim stuck jobs.
+-- 3. Remove old single-param pg_cron wakes and reschedule with safe timeouts
 -- =============================================================================
 
 do $$
 begin
   if exists (select 1 from cron.job where jobname = 'wake-process-document') then
-    perform cron.unschedule((select job_id from cron.job where jobname = 'wake-process-document'));
+    perform cron.unschedule('wake-process-document');
   end if;
   if exists (select 1 from cron.job where jobname = 'wake-process-briefing') then
-    perform cron.unschedule((select job_id from cron.job where jobname = 'wake-process-briefing'));
+    perform cron.unschedule('wake-process-briefing');
   end if;
 end $$;
 
