@@ -27,7 +27,7 @@ from pydantic import BaseModel
 from graphiti_core import Graphiti
 from graphiti_core.nodes import EpisodeType
 from graphiti_core.llm_client.openai_generic_client import OpenAIGenericClient
-from graphiti_core.llm_client.config import LLMConfig
+from graphiti_core.llm_client.config import LLMConfig, ModelSize
 from graphiti_core.prompts.models import Message
 
 
@@ -118,6 +118,13 @@ async def _patched_generic_generate(self, messages, response_model=None, max_tok
             return parsed
 
         except _openai.RateLimitError:
+            raise
+        except _openai.BadRequestError:
+            # json_schema format not supported by this model — fall back to json_object
+            if self.structured_output_mode == 'json_schema' and attempt == 0:
+                logger.warning('json_schema not supported by model, falling back to json_object')
+                self.structured_output_mode = 'json_object'
+                continue
             raise
         except (json.JSONDecodeError, ValueError, KeyError) as e:
             logger.warning(
@@ -220,8 +227,41 @@ async def lifespan(app: FastAPI):
             base_url=OPENROUTER_BASE_URL,
         ),
         max_tokens=16384,
-        structured_output_mode="json_schema",
+        structured_output_mode="json_object",
     )
+
+    # Monkey-patch generate_response to strip schema injection from prompt.
+    # graphiti-core injects the full JSON Schema into the prompt in json_object mode
+    # (see generate_response lines 194-200 in openai_generic_client.py), which causes
+    # DeepSeek/OpenRouter free models to regurgitate the schema definition instead of
+    # filling it with data. We replace it with a minimal "output JSON" instruction.
+    _original_gen_resp = OpenAIGenericClient.generate_response
+
+    async def _patched_gen_resp(self, messages, response_model=None, max_tokens=None, model_size=None, group_id=None, prompt_name=None, *, attribute_extraction=False):
+        self._apply_attribute_extraction_preamble(messages, attribute_extraction)
+        if max_tokens is None:
+            max_tokens = self.max_tokens or 16384
+        if model_size is None:
+            model_size = ModelSize.medium
+
+        if response_model is not None:
+            messages[-1].content += '\n\nOutput ONLY the requested data as a JSON object. Do NOT output a JSON Schema definition, $defs, or type descriptors. Fill in actual values.'
+
+        from graphiti_core.llm_client.client import get_extraction_language_instruction
+        messages[0].content += get_extraction_language_instruction(group_id)
+
+        with self.tracer.start_span('llm.generate') as span:
+            span.add_attributes({'llm.provider': 'openai', 'model.size': model_size.value, 'max_tokens': max_tokens})
+            if prompt_name:
+                span.add_attributes({'prompt.name': prompt_name})
+            try:
+                return await self._generate_response_with_retry(messages, response_model, max_tokens=max_tokens, model_size=model_size)
+            except Exception as e:
+                span.set_status('error', str(e))
+                span.record_exception(e)
+                raise
+
+    OpenAIGenericClient.generate_response = _patched_gen_resp
 
     embedder = GeminiEmbedder(
         config=GeminiEmbedderConfig(
