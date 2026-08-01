@@ -410,6 +410,32 @@ def _parse_iso(s: str) -> datetime:
     return dt
 
 
+def _get_valid_from(r: Any) -> Optional[datetime]:
+    """Safely get start-time from any graphiti search result or edge object.
+
+    graphiti-core 0.29.x uses valid_at/created_at on EntityEdge,
+    not valid_from. This helper tries all known attribute names in order.
+    """
+    for attr in ("valid_from", "valid_at", "created_at", "reference_time"):
+        val = getattr(r, attr, None)
+        if val is not None and isinstance(val, datetime):
+            return val
+    return None
+
+
+def _get_valid_to(r: Any) -> Optional[datetime]:
+    """Safely get end-time from any graphiti search result or edge object.
+
+    graphiti-core 0.29.x uses invalid_at/expired_at on EntityEdge,
+    not valid_to. This helper tries all known attribute names in order.
+    """
+    for attr in ("valid_to", "invalid_at", "expired_at"):
+        val = getattr(r, attr, None)
+        if val is not None and isinstance(val, datetime):
+            return val
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
@@ -501,7 +527,9 @@ async def get_patient_state(patient_id: str):
         num_results=200,
     )
 
-    current_facts = [r for r in results if r.valid_at is None]
+    # Keep only facts with no expiry — use _get_valid_to which handles
+    # both valid_to (search results) and invalid_at / expired_at (EntityEdge).
+    current_facts = [r for r in results if _get_valid_to(r) is None]
 
     return {
         "patient_id": patient_id,
@@ -509,7 +537,7 @@ async def get_patient_state(patient_id: str):
             {
                 "fact": r.fact,
                 "entity_name": getattr(r, "name", None),
-                "valid_from": r.valid_from.isoformat() if r.valid_from else None,
+                "valid_from": _get_valid_from(r).isoformat() if _get_valid_from(r) else None,
                 "source_node_uuid": str(r.uuid),
             }
             for r in current_facts
@@ -531,10 +559,10 @@ async def get_trend(patient_id: str, entity_name: str):
         num_results=100,
     )
 
-    # Sort by valid_from ascending
+    # Sort by valid_from ascending — use safe helper for both attribute variants
     sorted_results = sorted(
         results,
-        key=lambda r: r.valid_from if r.valid_from else datetime.min.replace(tzinfo=timezone.utc),
+        key=lambda r: _get_valid_from(r) or datetime.min.replace(tzinfo=timezone.utc),
     )
 
     return {
@@ -543,9 +571,9 @@ async def get_trend(patient_id: str, entity_name: str):
         "trend": [
             {
                 "fact": r.fact,
-                "valid_from": r.valid_from.isoformat() if r.valid_from else None,
-                "valid_to": r.valid_to.isoformat() if r.valid_to else None,
-                "is_current": r.valid_to is None,
+                "valid_from": _get_valid_from(r).isoformat() if _get_valid_from(r) else None,
+                "valid_to": _get_valid_to(r).isoformat() if _get_valid_to(r) else None,
+                "is_current": _get_valid_to(r) is None,
                 "source_node_uuid": str(r.uuid),
             }
             for r in sorted_results
@@ -569,12 +597,13 @@ async def temporal_query(req: TemporalQueryRequest):
 
     if req.valid_at:
         valid_date = _parse_iso(req.valid_at)
-        results = [
-            r for r in results
-            if r.valid_from is not None
-            and r.valid_from <= valid_date
-            and (r.valid_to is None or r.valid_to > valid_date)
-        ]
+        filtered = []
+        for r in results:
+            vf = _get_valid_from(r)
+            vt = _get_valid_to(r)
+            if vf is not None and vf <= valid_date and (vt is None or vt > valid_date):
+                filtered.append(r)
+        results = filtered
 
     return {
         "patient_id": req.patient_id,
@@ -583,8 +612,8 @@ async def temporal_query(req: TemporalQueryRequest):
         "facts": [
             {
                 "fact": r.fact,
-                "valid_from": r.valid_from.isoformat() if r.valid_from else None,
-                "valid_to": r.valid_to.isoformat() if r.valid_to else None,
+                "valid_from": _get_valid_from(r).isoformat() if _get_valid_from(r) else None,
+                "valid_to": _get_valid_to(r).isoformat() if _get_valid_to(r) else None,
                 "source_node_uuid": str(r.uuid),
             }
             for r in results
