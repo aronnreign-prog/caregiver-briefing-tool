@@ -1,14 +1,53 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 
+function isValidHttpUrl(value: string | undefined): value is string {
+  if (!value) return false
+  try {
+    const url = new URL(value)
+    return url.protocol === 'http:' || url.protocol === 'https:'
+  } catch {
+    return false
+  }
+}
+
 export async function proxy(request: NextRequest) {
   let supabaseResponse = NextResponse.next({
     request,
   })
 
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+  const supabaseAnonKey =
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
+
+  const publicPaths = ['/login', '/signup']
+  const isPublicPath = publicPaths.some((path) =>
+    request.nextUrl.pathname.startsWith(path)
+  )
+  const isStaticAsset =
+    request.nextUrl.pathname.startsWith('/_next') ||
+    request.nextUrl.pathname.startsWith('/favicon') ||
+    request.nextUrl.pathname.startsWith('/images')
+
+  // If Supabase isn't configured (e.g. env vars are unavailable in this
+  // environment), don't throw and crash every route with a 500. Instead treat
+  // the visitor as logged-out: allow public/auth pages to render and send
+  // everything else to /login rather than to pages that would then crash.
+  if (!isValidHttpUrl(supabaseUrl) || !supabaseAnonKey) {
+    console.error(
+      '[v0] Supabase env vars are missing or invalid (NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_ANON_KEY). Auth is disabled in this environment.'
+    )
+    if (!isPublicPath && !isStaticAsset) {
+      const url = request.nextUrl.clone()
+      url.pathname = '/login'
+      return NextResponse.redirect(url)
+    }
+    return supabaseResponse
+  }
+
   const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!,
+    supabaseUrl,
+    supabaseAnonKey,
     {
       cookies: {
         getAll() {
@@ -36,15 +75,6 @@ export async function proxy(request: NextRequest) {
   } = await supabase.auth.getUser()
 
   // If no user and not on a public page, redirect to login
-  const publicPaths = ['/login', '/signup']
-  const isPublicPath = publicPaths.some((path) =>
-    request.nextUrl.pathname.startsWith(path)
-  )
-  const isStaticAsset =
-    request.nextUrl.pathname.startsWith('/_next') ||
-    request.nextUrl.pathname.startsWith('/favicon') ||
-    request.nextUrl.pathname.startsWith('/images')
-
   if (!user && !isPublicPath && !isStaticAsset) {
     const url = request.nextUrl.clone()
     url.pathname = '/login'
