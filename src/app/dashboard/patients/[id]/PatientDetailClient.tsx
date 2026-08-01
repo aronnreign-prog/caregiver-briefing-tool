@@ -38,8 +38,11 @@ export default function PatientDetailClient({
   const [generating, setGenerating] = useState(false)
   const [audience, setAudience] = useState('general')
   const supabase = createClient()
+  const isGuest = !supabase
 
   useEffect(() => {
+    if (!supabase) return
+
     const channel = supabase
       .channel('schema-db-changes')
       .on(
@@ -68,6 +71,7 @@ export default function PatientDetailClient({
   }, [patient.id, supabase])
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!supabase) { alert('Sign in to upload documents.'); return }
     const file = e.target.files?.[0]
     if (!file) return
 
@@ -134,6 +138,7 @@ export default function PatientDetailClient({
   }
 
   const retryBriefing = async (briefingId: string) => {
+    if (!supabase) { alert('Sign in to use this feature.'); return }
     setGenerating(true)
     const { data: { user } } = await supabase.auth.getUser()
     const { data: caregiver } = await supabase.from('caregivers').select('id').eq('auth_user_id', user?.id).single()
@@ -155,6 +160,7 @@ export default function PatientDetailClient({
   }
 
   const generateBriefing = async () => {
+    if (!supabase) { alert('Sign in to generate briefings.'); return }
     setGenerating(true)
     const { data: { user } } = await supabase.auth.getUser()
     const { data: caregiver } = await supabase.from('caregivers').select('id').eq('auth_user_id', user?.id).single()
@@ -207,6 +213,7 @@ export default function PatientDetailClient({
 
   const handleDocClick = async (e: React.MouseEvent, docId: string, page?: number) => {
     e.preventDefault()
+    if (!supabase) { alert('Sign in to view documents.'); return }
     const doc = documents.find(d => d.id === docId)
     if (!doc || !doc.storage_path) {
       alert('Document not found or storage path missing')
