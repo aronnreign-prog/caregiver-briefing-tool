@@ -168,8 +168,17 @@ async def _patched_generic_generate(self, messages, response_model=None, max_tok
                     }
                     fixed_items = []
                     for item in parsed['extracted_entities']:
+                        if isinstance(item, str):
+                            logger.warning(
+                                f'[OpenRouter] extracted_entities item is bare string, coercing: "{item[:60]}"'
+                            )
+                            fixed_items.append({'name': item, 'entity_type_id': 0, 'episode_indices': [0]})
+                            continue
                         if not isinstance(item, dict):
-                            fixed_items.append(item)
+                            logger.warning(
+                                f'[OpenRouter] extracted_entities item has unexpected type '
+                                f'{type(item).__name__}, skipping'
+                            )
                             continue
                         fixed = dict(item)
                         for alias, canonical in ENTITY_ITEM_REMAPS.items():
@@ -192,6 +201,38 @@ async def _patched_generic_generate(self, messages, response_model=None, max_tok
                         fixed.setdefault('episode_indices', [0])
                         fixed_items.append(fixed)
                     parsed['extracted_entities'] = fixed_items
+
+                # --- ExtractedEdges nested item remapper ---
+                if model_name == 'ExtractedEdges' and isinstance(parsed.get('edges'), list):
+                    EDGE_ITEM_REMAPS = {
+                        'source': 'source_entity_name',
+                        'source_entity': 'source_entity_name',
+                        'target': 'target_entity_name',
+                        'target_entity': 'target_entity_name',
+                        'relation': 'relation_type',
+                        'relationship': 'relation_type',
+                        'type': 'relation_type',
+                    }
+                    fixed_edges = []
+                    for item in parsed['edges']:
+                        if not isinstance(item, dict):
+                            logger.warning(f'[OpenRouter] edges item has unexpected type {type(item).__name__}, skipping')
+                            continue
+                        fixed = dict(item)
+                        for alias, canonical in EDGE_ITEM_REMAPS.items():
+                            if alias in fixed and canonical not in fixed:
+                                logger.info(f'[OpenRouter] nested edge remap: "{alias}" -> "{canonical}"')
+                                fixed[canonical] = fixed.pop(alias)
+                        # Ensure required fields have fallback string if missing
+                        fixed.setdefault('source_entity_name', 'Unknown')
+                        fixed.setdefault('target_entity_name', 'Unknown')
+                        fixed.setdefault('relation_type', 'ASSOCIATED_WITH')
+                        fixed.setdefault('fact', 'Relationship extracted')
+                        if 'episode_indices' in fixed and not isinstance(fixed['episode_indices'], list):
+                            fixed['episode_indices'] = [fixed['episode_indices']]
+                        fixed.setdefault('episode_indices', [0])
+                        fixed_edges.append(fixed)
+                    parsed['edges'] = fixed_edges
 
             return parsed
 
