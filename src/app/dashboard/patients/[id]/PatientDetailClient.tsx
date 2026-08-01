@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import ReactMarkdown from 'react-markdown'
+import Link from 'next/link'
 
 type Document = {
   id: string
@@ -23,6 +24,110 @@ type Briefing = {
   flagged_concerns: any[] | null
 }
 
+const DOC_PIPELINE = ['uploaded', 'processing', 'extracted'] as const
+
+function PipelineSteps({ status }: { status: string }) {
+  const steps = [
+    { key: 'uploaded',   label: 'Uploaded' },
+    { key: 'processing', label: 'Extracting' },
+    { key: 'extracted',  label: 'Ready' },
+  ]
+  const currentIdx = steps.findIndex(s => s.key === status)
+  const isFailed = status === 'failed'
+
+  return (
+    <div className="flex items-center gap-1 mt-1">
+      {steps.map((step, i) => {
+        const done  = !isFailed && i <= currentIdx
+        const active = !isFailed && i === currentIdx
+        return (
+          <div key={step.key} className="flex items-center gap-1">
+            <div className={`w-1.5 h-1.5 rounded-full transition-colors ${
+              isFailed    ? 'bg-alert' :
+              done && active ? 'bg-accent' :
+              done        ? 'bg-success' :
+                            'bg-border'
+            }`} />
+            <span className={`font-mono text-[9px] ${
+              done ? 'text-muted-foreground' : 'text-border'
+            }`}>{step.label}</span>
+            {i < steps.length - 1 && <span className="text-border text-[9px]">/</span>}
+          </div>
+        )
+      })}
+      {isFailed && <span className="font-mono text-[9px] text-alert">FAILED</span>}
+    </div>
+  )
+}
+
+function CitationChip({ claim, onDocClick }: { claim: any; onDocClick: (e: React.MouseEvent, id: string, page?: number) => void }) {
+  if (!claim.evidence) return null
+
+  if (claim.flag === 'MEDICAL_KNOWLEDGE') {
+    const url = `https://mobius.nlm.nih.gov/RxNav/search?searchBy=String&searchTerm=${encodeURIComponent(claim.claim_text)}`
+    return (
+      <a
+        href={url}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="inline-flex items-center gap-1 mx-1 px-1.5 py-0.5 rounded-sm font-mono text-[10px] border border-warning/40 bg-warning-dim text-warning-foreground hover:border-warning/70 transition-colors"
+        title={claim.evidence.entry_text || 'View on NIH RxNav'}
+      >
+        DDInter
+      </a>
+    )
+  }
+
+  const shortName = claim.evidence.source_doc_id
+    ? (claim.evidence.source_doc_name || claim.evidence.source_doc_id).replace(/\.pdf$/i, '').slice(0, 18)
+    : 'src'
+
+  return (
+    <a
+      href="#"
+      onClick={(e) => onDocClick(e, claim.evidence.source_doc_id, claim.evidence.source_page)}
+      className="inline-flex items-center gap-1 mx-1 px-1.5 py-0.5 rounded-sm font-mono text-[10px] border border-accent/30 bg-accent-dim text-accent hover:border-accent/60 transition-colors"
+      title={claim.evidence.source_quote}
+    >
+      {shortName}{claim.evidence.source_page ? ` p.${claim.evidence.source_page}` : ''}
+    </a>
+  )
+}
+
+const DEMO_BRIEFING = {
+  id: 'demo-b1',
+  audience: 'specialist',
+  status: 'complete',
+  created_at: new Date().toISOString(),
+  completed_at: new Date().toISOString(),
+  flagged_concerns: [
+    { severity: 'high', concern: 'ACE inhibitor (Lisinopril) prescribed despite 18-month declining GFR trend — contraindicated in declining kidney function.' },
+  ],
+  claims: [
+    { claim_text: 'GFR declining for 18 months', flag: 'SUPPORTED', evidence: { source_doc_id: 'demo-doc-1', source_doc_name: 'Lab Result Mar 2024', source_page: 2, source_quote: 'GFR 47 mL/min/1.73m²' } },
+    { claim_text: 'ACE inhibitor contraindicated', flag: 'MEDICAL_KNOWLEDGE', evidence: { entry_text: 'Lisinopril — renal dose adjustment required' } },
+  ],
+  briefing_text: `**Patient Summary**
+
+Your mother's GFR has been declining for 18 months across 6 lab draws from 3 different providers (65 → 58 → 51 → 47).
+
+Her new cardiologist prescribed Lisinopril yesterday — an ACE inhibitor that is contraindicated in declining kidney function.
+
+**Current Medications**
+
+- Lisinopril 10 mg daily (NEW — prescribed 2024-03-14)
+- Atorvastatin 40 mg nightly
+- Metoprolol succinate 25 mg daily
+
+**Lab Trends**
+
+GFR: 65 (Jun 2022) → 58 (Dec 2022) → 51 (Jun 2023) → 47 (Dec 2023)
+
+**Recommendation**
+
+Flag the Lisinopril prescription for the cardiologist before the appointment. Request a nephrology consult given the trend.`,
+}
+
 export default function PatientDetailClient({
   patient,
   initialDocuments,
@@ -36,127 +141,57 @@ export default function PatientDetailClient({
   const [briefings, setBriefings] = useState<Briefing[]>(initialBriefings)
   const [uploading, setUploading] = useState(false)
   const [generating, setGenerating] = useState(false)
-  const [audience, setAudience] = useState('general')
+  const [audience, setAudience] = useState('specialist')
+  const [selectedBriefingId, setSelectedBriefingId] = useState<string | null>(null)
+
   const supabase = createClient()
   const isGuest = !supabase
+  const isDemo = patient.id?.startsWith('demo-')
+
+  // Use demo briefing for demo patients
+  const effectiveBriefings: Briefing[] = isDemo ? [DEMO_BRIEFING as Briefing] : briefings
+  const activeBriefing = effectiveBriefings.find(b => b.id === selectedBriefingId) ?? effectiveBriefings[0] ?? null
+  const totalFlagged = effectiveBriefings.reduce((n, b) => n + (b.flagged_concerns?.length ?? 0), 0)
 
   useEffect(() => {
     if (!supabase) return
-
     const channel = supabase
       .channel('schema-db-changes')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'documents', filter: `patient_id=eq.${patient.id}` },
-        (payload) => {
-          if (payload.eventType === 'INSERT') setDocuments((prev) => [payload.new as Document, ...prev])
-          else if (payload.eventType === 'UPDATE') setDocuments((prev) => prev.map((doc) => (doc.id === payload.new.id ? (payload.new as Document) : doc)))
-          else if (payload.eventType === 'DELETE') setDocuments((prev) => prev.filter((doc) => doc.id !== payload.old.id))
-        }
-      )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'briefings', filter: `patient_id=eq.${patient.id}` },
-        (payload) => {
-          if (payload.eventType === 'INSERT') setBriefings((prev) => [payload.new as Briefing, ...prev])
-          else if (payload.eventType === 'UPDATE') setBriefings((prev) => prev.map((b) => (b.id === payload.new.id ? (payload.new as Briefing) : b)))
-          else if (payload.eventType === 'DELETE') setBriefings((prev) => prev.filter((b) => b.id !== payload.old.id))
-        }
-      )
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'documents', filter: `patient_id=eq.${patient.id}` }, (payload) => {
+        if (payload.eventType === 'INSERT') setDocuments(p => [payload.new as Document, ...p])
+        else if (payload.eventType === 'UPDATE') setDocuments(p => p.map(d => d.id === payload.new.id ? payload.new as Document : d))
+        else if (payload.eventType === 'DELETE') setDocuments(p => p.filter(d => d.id !== payload.old.id))
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'briefings', filter: `patient_id=eq.${patient.id}` }, (payload) => {
+        if (payload.eventType === 'INSERT') setBriefings(p => [payload.new as Briefing, ...p])
+        else if (payload.eventType === 'UPDATE') setBriefings(p => p.map(b => b.id === payload.new.id ? payload.new as Briefing : b))
+        else if (payload.eventType === 'DELETE') setBriefings(p => p.filter(b => b.id !== payload.old.id))
+      })
       .subscribe()
-
-    return () => {
-      supabase.removeChannel(channel)
-    }
+    return () => { supabase.removeChannel(channel) }
   }, [patient.id, supabase])
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!supabase) { alert('Sign in to upload documents.'); return }
     const file = e.target.files?.[0]
     if (!file) return
-
-    if (file.type !== 'application/pdf') {
-      alert('Only PDF files are allowed.')
-      return
-    }
-    if (file.size > 10 * 1024 * 1024) {
-      alert('File size must be under 10MB.')
-      return
-    }
-
+    if (file.type !== 'application/pdf') { alert('Only PDF files are allowed.'); return }
+    if (file.size > 10 * 1024 * 1024) { alert('File size must be under 10MB.'); return }
     setUploading(true)
-    const fileExt = file.name.split('.').pop()
-    const fileName = `${patient.id}/${Date.now()}.${fileExt}`
-
+    const fileName = `${patient.id}/${Date.now()}.${file.name.split('.').pop()}`
     const { error: uploadError } = await supabase.storage.from('medical_records').upload(fileName, file)
-
-    if (uploadError) {
-      alert('Failed to upload file: ' + uploadError.message)
-      setUploading(false)
-      return
-    }
-
+    if (uploadError) { alert('Upload failed: ' + uploadError.message); setUploading(false); return }
     const { data: { user } } = await supabase.auth.getUser()
     const { data: caregiver } = await supabase.from('caregivers').select('id').eq('auth_user_id', user?.id).single()
-    if (!caregiver?.id) {
-      alert('Caregiver profile not found')
-      setUploading(false)
-      return
-    }
-
+    if (!caregiver?.id) { alert('Caregiver profile not found'); setUploading(false); return }
     const { data: docData, error: dbError } = await supabase.from('documents').insert({
-      patient_id: patient.id,
-      caregiver_id: caregiver.id,
-      filename: file.name,
-      storage_path: fileName,
-      file_size: file.size,
-      mime_type: file.type,
-      status: 'uploaded'
+      patient_id: patient.id, caregiver_id: caregiver.id, filename: file.name,
+      storage_path: fileName, file_size: file.size, mime_type: file.type, status: 'uploaded'
     }).select().single()
-
-    if (dbError || !docData?.id) {
-      alert('Failed to save document metadata: ' + (dbError?.message || 'No document ID returned'))
-      setUploading(false)
-      return
-    }
-
-    const documentId = docData.id
-    if (!documentId || documentId === 'undefined' || documentId === 'null' || typeof documentId !== 'string') {
-      alert('Invalid document ID generated')
-      setUploading(false)
-      return
-    }
-
-    await supabase.from('jobs').insert({
-      job_type: 'process_document',
-      payload: { document_id: documentId, caregiver_id: caregiver.id },
-      status: 'queued'
-    })
-
+    if (dbError || !docData?.id) { alert('Failed to save document: ' + (dbError?.message || 'Unknown')); setUploading(false); return }
+    await supabase.from('jobs').insert({ job_type: 'process_document', payload: { document_id: docData.id, caregiver_id: caregiver.id }, status: 'queued' })
     setUploading(false)
     e.target.value = ''
-  }
-
-  const retryBriefing = async (briefingId: string) => {
-    if (!supabase) { alert('Sign in to use this feature.'); return }
-    setGenerating(true)
-    const { data: { user } } = await supabase.auth.getUser()
-    const { data: caregiver } = await supabase.from('caregivers').select('id').eq('auth_user_id', user?.id).single()
-    if (!caregiver?.id) {
-      alert('Caregiver profile not found')
-      setGenerating(false)
-      return
-    }
-
-    await supabase.from('briefings').update({ status: 'queued', error_message: null }).eq('id', briefingId)
-
-    await supabase.from('jobs').insert({
-      job_type: 'generate_briefing',
-      payload: { briefing_id: briefingId, caregiver_id: caregiver.id },
-      status: 'queued'
-    })
-
-    setGenerating(false)
   }
 
   const generateBriefing = async () => {
@@ -164,401 +199,366 @@ export default function PatientDetailClient({
     setGenerating(true)
     const { data: { user } } = await supabase.auth.getUser()
     const { data: caregiver } = await supabase.from('caregivers').select('id').eq('auth_user_id', user?.id).single()
-    if (!caregiver?.id) {
-      alert('Caregiver profile not found')
-      setGenerating(false)
-      return
-    }
-
-    const { data: briefingData, error: briefingError } = await supabase.from('briefings').insert({
-      patient_id: patient.id,
-      caregiver_id: caregiver.id,
-      audience: audience,
-      status: 'queued',
-      source_doc_ids: documents.map(d => d.id)
+    if (!caregiver?.id) { alert('Caregiver profile not found'); setGenerating(false); return }
+    const { data: bd, error: be } = await supabase.from('briefings').insert({
+      patient_id: patient.id, caregiver_id: caregiver.id, audience,
+      status: 'queued', source_doc_ids: documents.map(d => d.id)
     }).select().single()
-
-    if (briefingError || !briefingData?.id) {
-      alert('Failed to start briefing: ' + (briefingError?.message || 'No briefing ID returned'))
-      setGenerating(false)
-      return
-    }
-
-    const briefingId = briefingData.id
-    if (!briefingId || briefingId === 'undefined' || briefingId === 'null' || typeof briefingId !== 'string') {
-      alert('Invalid briefing ID generated')
-      setGenerating(false)
-      return
-    }
-
-    await supabase.from('jobs').insert({
-      job_type: 'generate_briefing',
-      payload: { briefing_id: briefingId, caregiver_id: caregiver.id },
-      status: 'queued'
-    })
-
+    if (be || !bd?.id) { alert('Failed to start: ' + (be?.message || 'Unknown')); setGenerating(false); return }
+    await supabase.from('jobs').insert({ job_type: 'generate_briefing', payload: { briefing_id: bd.id, caregiver_id: caregiver.id }, status: 'queued' })
     setGenerating(false)
   }
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'uploaded': return 'bg-blue-100 text-blue-800'
-      case 'processing': return 'bg-yellow-100 text-yellow-800'
-      case 'extracted': return 'bg-green-100 text-green-800'
-      case 'complete': return 'bg-green-100 text-green-800'
-      case 'failed': return 'bg-red-100 text-red-800'
-      default: return 'bg-gray-100 text-gray-800'
-    }
+  const retryBriefing = async (briefingId: string) => {
+    if (!supabase) { alert('Sign in to use this feature.'); return }
+    setGenerating(true)
+    const { data: { user } } = await supabase.auth.getUser()
+    const { data: caregiver } = await supabase.from('caregivers').select('id').eq('auth_user_id', user?.id).single()
+    if (!caregiver?.id) { alert('Caregiver profile not found'); setGenerating(false); return }
+    await supabase.from('briefings').update({ status: 'queued', error_message: null }).eq('id', briefingId)
+    await supabase.from('jobs').insert({ job_type: 'generate_briefing', payload: { briefing_id: briefingId, caregiver_id: caregiver.id }, status: 'queued' })
+    setGenerating(false)
   }
 
   const handleDocClick = async (e: React.MouseEvent, docId: string, page?: number) => {
     e.preventDefault()
     if (!supabase) { alert('Sign in to view documents.'); return }
     const doc = documents.find(d => d.id === docId)
-    if (!doc || !doc.storage_path) {
-      alert('Document not found or storage path missing')
-      return
-    }
+    if (!doc?.storage_path) { alert('Document not found'); return }
     const { data, error } = await supabase.storage.from('medical_records').createSignedUrl(doc.storage_path, 60)
-    if (error || !data) {
-      alert('Failed to open document: ' + (error?.message || 'Unknown error'))
-      return
-    }
-
-    const url = page ? `${data.signedUrl}#page=${page}` : data.signedUrl
-    window.open(url, '_blank')
+    if (error || !data) { alert('Failed to open: ' + (error?.message || 'Unknown')); return }
+    window.open(page ? `${data.signedUrl}#page=${page}` : data.signedUrl, '_blank')
   }
 
-  const renderCitationChip = (claim: any) => {
-    if (!claim.evidence) return null
-
-    if (claim.flag === 'MEDICAL_KNOWLEDGE') {
-      const searchUrl = `https://mobius.nlm.nih.gov/RxNav/search?searchBy=String&searchTerm=${encodeURIComponent(claim.claim_text)}`
-      return (
-        <a
-          href={searchUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-flex items-center ml-2 px-2 py-0.5 rounded text-[10px] font-bold bg-purple-100 text-purple-800 hover:bg-purple-200"
-          title={claim.evidence.entry_text || 'View on NIH RxNav'}
-        >
-          💊 RxNav
-        </a>
-      )
-    }
-
-    return (
-      <a
-        href="#"
-        onClick={(e) => handleDocClick(e, claim.evidence.source_doc_id, claim.evidence.source_page)}
-        className="inline-flex items-center ml-2 px-2 py-0.5 rounded text-[10px] font-bold bg-blue-100 text-blue-800 hover:bg-blue-200"
-        title={claim.evidence.source_quote}
-      >
-        📄 Doc
-      </a>
-    )
+  const statusDot = (status: string) => {
+    if (status === 'extracted' || status === 'complete') return 'bg-success'
+    if (status === 'failed') return 'bg-alert'
+    if (status === 'processing') return 'bg-accent animate-pulse'
+    return 'bg-warning'
   }
-
-  const renderPlaceholderBriefing = () => (
-    <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-      <div className="bg-gradient-to-r from-indigo-50 to-white px-6 py-4 border-b border-gray-200">
-        <h3 className="text-lg font-semibold text-gray-900">Shift Briefing Preview</h3>
-        <p className="text-sm text-gray-500 mt-1">Based on the Signature Value Example</p>
-      </div>
-
-      <div className="p-6 space-y-6">
-        {/* Important Medical Alerts */}
-        <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-          <h4 className="text-red-800 font-bold mb-3 flex items-center text-sm uppercase tracking-wide">
-            <span className="mr-2 text-base">⚠️</span>
-            Important Medical Alerts
-          </h4>
-          <ul className="space-y-2">
-            <li className="flex items-start">
-              <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-red-100 text-red-700 text-xs font-bold mr-3 mt-0.5 flex-shrink-0">
-                <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM10 13a1 1 0 110-2 1 1 0 010 2zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" /></svg>
-              </span>
-              <div>
-                <span className="text-xs font-semibold uppercase tracking-wider text-red-600 bg-red-100 px-2 py-0.5 rounded-full mr-2">High</span>
-                <span className="text-sm text-red-800">ACE inhibitor (Lisinopril) prescribed despite 18-month declining GFR trend — contraindicated in declining kidney function.</span>
-              </div>
-            </li>
-          </ul>
-        </div>
-
-        {/* Briefing Content */}
-        <div className="prose prose-sm max-w-none">
-          <h4 className="text-base font-semibold text-gray-900 mb-3">Patient Summary</h4>
-          <div className="text-sm text-gray-700 leading-relaxed space-y-3">
-            <p>
-              Your mom&apos;s GFR has been declining for 18 months across 6 lab draws from 3 different providers
-              <span className="inline-flex items-center ml-1.5 px-2 py-0.5 rounded text-[10px] font-bold bg-green-100 text-green-800 border border-green-200" title="Verified against Lab Result - Mar 12">
-                ✓ SUPPORTED
-              </span>
-              <span className="inline-flex items-center ml-1 px-2 py-0.5 rounded text-[10px] font-bold bg-blue-100 text-blue-800 cursor-pointer hover:bg-blue-200" title="Source: Lab Result - Mar 12, page 2">
-                [Lab Result - Mar 12]
-              </span>
-              <span className="inline-flex items-center ml-1 px-2 py-0.5 rounded text-[10px] font-bold bg-blue-100 text-blue-800 cursor-pointer hover:bg-blue-200" title="Source: Lab Result - Sep 05, page 1">
-                [Lab Result - Sep 05]
-              </span>
-              {' '}(65 → 58 → 51 → 47)
-              <span className="inline-flex items-center ml-1.5 px-2 py-0.5 rounded text-[10px] font-bold bg-green-100 text-green-800 border border-green-200" title="Verified against Lab Result - Jan 20">
-                ✓ SUPPORTED
-              </span>
-              <span className="inline-flex items-center ml-1 px-2 py-0.5 rounded text-[10px] font-bold bg-blue-100 text-blue-800 cursor-pointer hover:bg-blue-200" title="Source: Lab Result - Jan 20, page 1">
-                [Lab Result - Jan 20]
-              </span>
-              .
-            </p>
-            <p>
-              Her new cardiologist prescribed Lisinopril yesterday — an ACE inhibitor that is contraindicated in declining kidney function
-              <span className="inline-flex items-center ml-1.5 px-2 py-0.5 rounded text-[10px] font-bold bg-purple-100 text-purple-800 border border-purple-200" title="Verified via NIH RxNav Drug Database">
-                💊 RxNav
-              </span>
-              .
-            </p>
-            <p className="text-gray-600 italic">
-              Flag this for the cardiologist before the next appointment.
-            </p>
-          </div>
-        </div>
-
-        {/* PaperTrail Verification Summary */}
-        <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
-          <h5 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">PaperTrail Verification</h5>
-          <div className="flex flex-wrap gap-2">
-            <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-green-50 text-green-700 border border-green-200">
-              <svg className="w-3.5 h-3.5 mr-1.5 text-green-500" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" /></svg>
-              3 Claims SUPPORTED
-            </span>
-            <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-yellow-50 text-yellow-700 border border-yellow-200">
-              <svg className="w-3.5 h-3.5 mr-1.5 text-yellow-500" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM10 13a1 1 0 110-2 1 1 0 010 2zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" /></svg>
-              1 Claim Partially Supported
-            </span>
-            <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-red-50 text-red-700 border border-red-200">
-              <svg className="w-3.5 h-3.5 mr-1.5 text-red-500" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" /></svg>
-              0 Claims Unsupported
-            </span>
-          </div>
-          <p className="text-xs text-gray-500 mt-3">
-            All claims verified against source documents via atomic evidence matching.
-          </p>
-        </div>
-      </div>
-    </div>
-  )
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-          
-          {/* Left Column: Medical Records & History */}
-          <div className="space-y-6">
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-              <div className="px-6 py-5 border-b border-gray-200 bg-gray-50/50">
-                <h2 className="text-xl font-semibold text-gray-900">Medical Records & History</h2>
-                <p className="text-sm text-gray-500 mt-1">Upload PDFs to feed the AI Knowledge Graph</p>
-              </div>
-              <div className="p-6 space-y-6">
-                {/* Upload Drop Zone */}
-                <div className="relative">
-                  <input
-                    type="file"
-                    accept="application/pdf"
-                    onChange={handleFileUpload}
-                    disabled={uploading}
-                    className="hidden"
-                    id="pdf-upload"
-                  />
-                  <label
-                    htmlFor="pdf-upload"
-                    className="flex flex-col items-center justify-center w-full h-40 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:border-gray-400 hover:bg-gray-50 transition-colors"
-                  >
-                    <svg className="w-10 h-10 text-gray-400 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-                    </svg>
-                    <span className="text-sm font-medium text-gray-700">
-                      {uploading ? 'Uploading...' : 'Upload PDFs (Lab Results, Visit Notes, etc.)'}
-                    </span>
-                    <span className="text-xs text-gray-500 mt-1">Click or drag files here</span>
-                  </label>
-                </div>
+    <div className="min-h-screen bg-background flex flex-col">
 
-                {/* Recent Documents */}
-                <div>
-                  <h3 className="text-sm font-semibold text-gray-900 uppercase tracking-wider mb-3">Recent Documents</h3>
-                  <div className="space-y-2">
-                    {documents.length === 0 ? (
-                      <p className="text-sm text-gray-500 text-center py-6">No documents uploaded yet.</p>
-                    ) : (
-                      documents.map((doc) => (
-                        <div
-                          key={doc.id}
-                          className="flex items-center justify-between p-3 border border-gray-200 rounded-lg bg-gray-50/50 hover:bg-gray-50 transition-colors"
-                        >
-                          <div className="flex items-center space-x-3">
-                            <span className="text-xl">📄</span>
-                            <div className="flex flex-col">
-                              <span className="text-sm font-medium text-gray-900">{doc.filename}</span>
-                              <span className="text-xs text-gray-500">
-                                {new Date(doc.uploaded_at).toLocaleDateString()}
-                              </span>
-                            </div>
-                          </div>
-                          <span className={`px-2.5 py-1 rounded text-[10px] uppercase font-bold tracking-wider ${getStatusColor(doc.status)}`}>
-                            {doc.status}
-                          </span>
-                        </div>
-                      ))
-                    )}
-                  </div>
-                </div>
+      {/* Nav */}
+      <header className="border-b border-border bg-surface flex items-center justify-between px-6 py-3 shrink-0">
+        <div className="flex items-center gap-3">
+          <Link href="/dashboard" className="font-mono text-[10px] text-muted-foreground hover:text-foreground transition-colors tracking-widest uppercase">
+            &larr; CareNote
+          </Link>
+          <span className="text-border">/</span>
+          <span className="font-mono text-[10px] text-foreground">{patient.name}</span>
+          {totalFlagged > 0 && (
+            <span className="flex items-center gap-1 font-mono text-[10px] border border-alert/40 bg-alert-dim text-alert-foreground px-2 py-0.5 rounded-sm">
+              <span className="w-1.5 h-1.5 rounded-full bg-alert inline-block" />
+              {totalFlagged} FLAG{totalFlagged > 1 ? 'S' : ''}
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-3">
+          {(isGuest || isDemo) && (
+            <Link href="/signup" className="font-mono text-[10px] bg-accent text-background px-3 py-1.5 rounded hover:opacity-90 transition-opacity">
+              Create account to save
+            </Link>
+          )}
+        </div>
+      </header>
+
+      {/* Flagged concerns band — only show when there are flags */}
+      {activeBriefing?.flagged_concerns && activeBriefing.flagged_concerns.length > 0 && (
+        <div className="border-b border-alert/30 bg-alert-dim px-6 py-3">
+          <div className="flex items-start gap-3">
+            <div className="shrink-0 mt-0.5">
+              <div className="w-2 h-2 rounded-full bg-alert" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="font-mono text-[10px] text-alert tracking-widest uppercase mb-1.5">Flagged concerns — raise with doctor</p>
+              <div className="flex flex-col gap-1">
+                {activeBriefing.flagged_concerns.map((c, i) => (
+                  <p key={i} className="text-xs text-alert-foreground leading-relaxed">
+                    <span className="font-mono text-[9px] border border-alert/40 text-alert px-1 py-0.5 rounded-sm mr-2 uppercase">{c.severity}</span>
+                    {c.concern}
+                  </p>
+                ))}
               </div>
             </div>
           </div>
+        </div>
+      )}
 
-          {/* Right Column: AI Caregiver Briefing */}
-          <div className="space-y-6">
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-              <div className="px-6 py-5 border-b border-gray-200 bg-gray-50/50">
-                <h2 className="text-xl font-semibold text-gray-900">AI Caregiver Briefing</h2>
-                <p className="text-sm text-gray-500 mt-1">Generate a medical briefing for the next doctor visit</p>
+      {/* Main two-pane layout */}
+      <div className="flex flex-1 overflow-hidden">
+
+        {/* Left — Documents */}
+        <aside className="w-72 shrink-0 border-r border-border bg-surface flex flex-col overflow-y-auto">
+          <div className="px-4 pt-5 pb-3 border-b border-border">
+            <p className="font-mono text-[10px] text-muted-foreground tracking-widest uppercase mb-1">Patient</p>
+            <p className="text-sm font-medium text-foreground">{patient.name}</p>
+            <p className="font-mono text-[10px] text-muted-foreground mt-0.5">
+              {patient.relationship} &middot; DOB {patient.date_of_birth}
+            </p>
+          </div>
+
+          {/* Upload zone */}
+          <div className="px-4 py-4 border-b border-border">
+            <p className="font-mono text-[10px] text-muted-foreground tracking-widest uppercase mb-3">Documents</p>
+            {isGuest || isDemo ? (
+              <div className="border border-dashed border-border rounded px-3 py-4 text-center">
+                <p className="text-xs text-muted-foreground">
+                  <Link href="/signup" className="text-accent hover:underline">Sign in</Link> to upload records
+                </p>
               </div>
-              <div className="p-6 space-y-6">
-                {/* Generate Button */}
-                <div className="flex items-center space-x-3">
-                  <select
-                    className="text-sm border-gray-300 rounded-md shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
-                    value={audience}
-                    onChange={(e) => setAudience(e.target.value)}
-                    disabled={generating}
-                  >
-                    <option value="general">General Overview</option>
-                    <option value="er_visit">ER Visit</option>
-                    <option value="specialist">Specialist Appointment</option>
-                    <option value="second_opinion">Second Opinion</option>
-                  </select>
-                  <button
-                    onClick={generateBriefing}
-                    disabled={generating || documents.length === 0}
-                    className="flex-1 bg-indigo-600 text-white text-sm font-semibold py-2.5 px-4 rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                  >
-                    {generating ? 'Starting...' : 'Generate Shift Briefing'}
-                  </button>
+            ) : (
+              <>
+                <input type="file" accept="application/pdf" onChange={handleFileUpload} disabled={uploading} className="hidden" id="pdf-upload" />
+                <label
+                  htmlFor="pdf-upload"
+                  className="flex items-center justify-center gap-2 w-full border border-dashed border-border rounded px-3 py-3 cursor-pointer hover:border-accent/50 hover:bg-surface-raised transition-colors"
+                >
+                  <svg className="w-4 h-4 text-muted-foreground" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
+                  </svg>
+                  <span className="font-mono text-[10px] text-muted-foreground">
+                    {uploading ? 'Uploading...' : 'Upload PDF'}
+                  </span>
+                </label>
+              </>
+            )}
+          </div>
+
+          {/* Document list */}
+          <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2">
+            {(isDemo ? [] : documents).length === 0 && !isDemo ? (
+              <p className="text-xs text-muted-foreground text-center py-6">No documents yet.</p>
+            ) : isDemo ? (
+              // Demo documents
+              [
+                { id: 'd1', filename: 'Lab Result Mar 2024.pdf', status: 'extracted', uploaded_at: '2024-03-14T00:00:00Z' },
+                { id: 'd2', filename: 'Cardiology Visit Notes.pdf', status: 'extracted', uploaded_at: '2024-03-13T00:00:00Z' },
+                { id: 'd3', filename: 'Lab Result Sep 2023.pdf', status: 'extracted', uploaded_at: '2023-09-05T00:00:00Z' },
+              ].map(doc => (
+                <div key={doc.id} className="border border-border rounded bg-surface-raised px-3 py-2.5">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0 flex-1">
+                      <p className="font-mono text-[11px] text-foreground truncate">{doc.filename}</p>
+                      <p className="font-mono text-[9px] text-muted-foreground mt-0.5">
+                        {new Date(doc.uploaded_at).toLocaleDateString()}
+                      </p>
+                    </div>
+                    <div className={`w-1.5 h-1.5 rounded-full mt-1 shrink-0 ${statusDot(doc.status)}`} />
+                  </div>
+                  <PipelineSteps status={doc.status} />
+                </div>
+              ))
+            ) : (
+              documents.map(doc => (
+                <div key={doc.id} className="border border-border rounded bg-surface-raised px-3 py-2.5">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0 flex-1">
+                      <p className="font-mono text-[11px] text-foreground truncate">{doc.filename}</p>
+                      <p className="font-mono text-[9px] text-muted-foreground mt-0.5">
+                        {new Date(doc.uploaded_at).toLocaleDateString()}
+                      </p>
+                    </div>
+                    <div className={`w-1.5 h-1.5 rounded-full mt-1 shrink-0 ${statusDot(doc.status)}`} />
+                  </div>
+                  <PipelineSteps status={doc.status} />
+                </div>
+              ))
+            )}
+          </div>
+        </aside>
+
+        {/* Right — Briefing */}
+        <main className="flex-1 overflow-y-auto">
+
+          {/* Briefing toolbar */}
+          <div className="border-b border-border bg-surface px-6 py-3 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <p className="font-mono text-[10px] text-muted-foreground tracking-widest uppercase">Briefing</p>
+              {/* Briefing tabs */}
+              {effectiveBriefings.length > 1 && (
+                <div className="flex items-center gap-1">
+                  {effectiveBriefings.map((b, i) => (
+                    <button
+                      key={b.id}
+                      onClick={() => setSelectedBriefingId(b.id)}
+                      className={`font-mono text-[10px] px-2 py-1 rounded-sm border transition-colors ${
+                        (activeBriefing?.id === b.id)
+                          ? 'border-accent/50 bg-accent-dim text-accent'
+                          : 'border-border text-muted-foreground hover:border-border hover:text-foreground'
+                      }`}
+                    >
+                      {b.audience.replace('_', ' ')} &middot; {new Date(b.created_at).toLocaleDateString()}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            {!isGuest && !isDemo && (
+              <div className="flex items-center gap-2">
+                <select
+                  value={audience}
+                  onChange={e => setAudience(e.target.value)}
+                  disabled={generating}
+                  className="font-mono text-[10px] bg-surface-raised border border-border text-foreground rounded px-2 py-1.5 focus:outline-none focus:border-accent"
+                >
+                  <option value="general">General overview</option>
+                  <option value="er_visit">ER visit</option>
+                  <option value="specialist">Specialist appointment</option>
+                  <option value="second_opinion">Second opinion</option>
+                </select>
+                <button
+                  onClick={generateBriefing}
+                  disabled={generating || documents.length === 0}
+                  className="font-mono text-[10px] bg-accent text-background px-4 py-1.5 rounded hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity"
+                >
+                  {generating ? 'Starting...' : 'Generate briefing'}
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Briefing content */}
+          <div className="max-w-3xl mx-auto px-8 py-8">
+            {!activeBriefing ? (
+              <div className="border border-dashed border-border rounded p-12 text-center">
+                <p className="text-sm text-muted-foreground">No briefings yet.</p>
+                {!isGuest && !isDemo && (
+                  <p className="text-xs text-muted-foreground mt-2">Upload documents and click &ldquo;Generate briefing&rdquo; to start.</p>
+                )}
+              </div>
+            ) : (
+              <div>
+                {/* Briefing header */}
+                <div className="flex items-baseline justify-between mb-6">
+                  <div>
+                    <h1 className="text-base font-medium text-foreground capitalize">
+                      {activeBriefing.audience.replace('_', ' ')} briefing
+                    </h1>
+                    <p className="font-mono text-[10px] text-muted-foreground mt-0.5">
+                      Generated {new Date(activeBriefing.created_at).toLocaleString()}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <div className={`w-1.5 h-1.5 rounded-full ${statusDot(activeBriefing.status)}`} />
+                    <span className="font-mono text-[10px] text-muted-foreground uppercase">{activeBriefing.status}</span>
+                  </div>
                 </div>
 
-                {/* Briefing Output */}
-                {briefings.length === 0 ? (
-                  renderPlaceholderBriefing()
-                ) : (
+                {/* Processing state */}
+                {(activeBriefing.status === 'queued' || activeBriefing.status === 'processing') && (
+                  <div className="border border-border rounded px-6 py-12 flex flex-col items-center gap-3">
+                    <div className="flex gap-1.5">
+                      {[0, 1, 2].map(i => (
+                        <div key={i} className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" style={{ animationDelay: `${i * 200}ms` }} />
+                      ))}
+                    </div>
+                    <p className="font-mono text-[11px] text-muted-foreground">
+                      {activeBriefing.status === 'queued' ? 'Queued — waiting for processor...' : 'AI is reading documents and building knowledge graph...'}
+                    </p>
+                  </div>
+                )}
+
+                {/* Failed */}
+                {activeBriefing.status === 'failed' && (
+                  <div className="border border-alert/30 bg-alert-dim rounded px-4 py-4 flex items-center justify-between">
+                    <p className="text-xs text-alert-foreground">Briefing generation failed.</p>
+                    <button
+                      onClick={() => retryBriefing(activeBriefing.id)}
+                      disabled={generating}
+                      className="font-mono text-[10px] border border-alert/40 text-alert px-3 py-1.5 rounded hover:bg-alert/10 disabled:opacity-50 transition-colors"
+                    >
+                      {generating ? 'Retrying...' : 'Retry'}
+                    </button>
+                  </div>
+                )}
+
+                {/* Complete briefing */}
+                {activeBriefing.status === 'complete' && activeBriefing.briefing_text && (
                   <div className="space-y-6">
-                    {briefings.map((briefing) => (
-                      <div key={briefing.id} className="border border-gray-200 rounded-lg bg-white shadow-sm overflow-hidden">
-                        <div className="px-6 py-4 border-b border-gray-200 bg-gray-50/50 flex items-center justify-between">
-                          <div>
-                            <h3 className="font-semibold text-lg capitalize text-gray-900">{briefing.audience.replace('_', ' ')} Briefing</h3>
-                            <p className="text-sm text-gray-500 mt-0.5">{new Date(briefing.created_at).toLocaleString()}</p>
-                          </div>
-                          <span className={`px-3 py-1 rounded-full text-xs font-semibold ${getStatusColor(briefing.status)}`}>
-                            {briefing.status.toUpperCase()}
-                          </span>
+                    {/* PaperTrail verification strip */}
+                    {activeBriefing.claims && activeBriefing.claims.length > 0 && (
+                      <div className="border border-border rounded px-4 py-3 flex items-center gap-4">
+                        <p className="font-mono text-[10px] text-muted-foreground tracking-widest uppercase shrink-0">PaperTrail</p>
+                        <div className="flex items-center gap-3 flex-wrap">
+                          {(() => {
+                            const supported = activeBriefing.claims.filter(c => c.flag === 'SUPPORTED').length
+                            const partial   = activeBriefing.claims.filter(c => c.flag === 'PARTIAL').length
+                            const unsupported = activeBriefing.claims.filter(c => c.flag === 'UNSUPPORTED').length
+                            return (
+                              <>
+                                {supported > 0 && <span className="font-mono text-[10px] text-success">{supported} supported</span>}
+                                {partial   > 0 && <span className="font-mono text-[10px] text-warning">{partial} partial</span>}
+                                {unsupported > 0 && <span className="font-mono text-[10px] text-alert">{unsupported} unsupported</span>}
+                              </>
+                            )
+                          })()}
                         </div>
-
-                        {briefing.status === 'queued' && (
-                          <div className="flex justify-center items-center py-12">
-                            <div className="flex flex-col items-center">
-                              <div className="h-8 w-8 bg-gray-400 rounded-full mb-4 animate-pulse"></div>
-                              <p className="text-sm text-gray-500">Queued for processing...</p>
-                            </div>
-                          </div>
-                        )}
-
-                        {briefing.status === 'complete' && (
-                          <div className="p-6 space-y-6">
-                            {briefing.flagged_concerns && briefing.flagged_concerns.length > 0 && (
-                              <div className="bg-red-50 border border-red-200 rounded-md p-4">
-                                <h4 className="text-red-800 font-bold mb-2 flex items-center text-sm uppercase tracking-wide">
-                                  <span className="mr-2">⚠️</span> Important Medical Alerts
-                                </h4>
-                                <ul className="list-disc pl-5 space-y-1">
-                                  {briefing.flagged_concerns.map((concern, idx) => (
-                                    <li key={idx} className="text-sm text-red-700">
-                                      <span className="font-semibold capitalize">[{concern.severity}]</span> {concern.concern}
-                                    </li>
-                                  ))}
-                                </ul>
-                              </div>
-                            )}
-
-                            <div className="prose prose-sm max-w-none">
-                              <ReactMarkdown
-                                components={{
-                                  p: ({ node, children }) => {
-                                    const textContent = Array.isArray(children) ? children.join('') : String(children)
-                                    const matchedClaims = (briefing.claims || []).filter(c =>
-                                      textContent.includes(c.claim_text) || c.claim_text.includes(textContent)
-                                    )
-                                    return (
-                                      <p className="text-sm text-gray-700 leading-relaxed">
-                                        {children}
-                                        {matchedClaims.map((claim, idx) => (
-                                          <span key={idx}>{renderCitationChip(claim)}</span>
-                                        ))}
-                                      </p>
-                                    )
-                                  },
-                                  li: ({ node, children }) => {
-                                    const textContent = Array.isArray(children) ? children.join('') : String(children)
-                                    const matchedClaims = (briefing.claims || []).filter(c =>
-                                      textContent.includes(c.claim_text) || c.claim_text.includes(textContent)
-                                    )
-                                    return (
-                                      <li className="text-sm text-gray-700">
-                                        {children}
-                                        {matchedClaims.map((claim, idx) => (
-                                          <span key={idx}>{renderCitationChip(claim)}</span>
-                                        ))}
-                                      </li>
-                                    )
-                                  }
-                                }}
-                              >
-                                {briefing.briefing_text || ''}
-                              </ReactMarkdown>
-                            </div>
-                          </div>
-                        )}
-
-                        {briefing.status === 'processing' && (
-                          <div className="flex justify-center items-center py-12">
-                            <div className="animate-pulse flex flex-col items-center">
-                              <div className="h-8 w-8 bg-indigo-400 rounded-full mb-4"></div>
-                              <p className="text-sm text-gray-500">AI is analyzing documents and reasoning...</p>
-                            </div>
-                          </div>
-                        )}
-
-                        {briefing.status === 'failed' && (
-                          <div className="text-red-500 text-sm mt-4 p-4 bg-red-50 rounded">
-                            <p className="mb-3">Failed to generate briefing. Please try again.</p>
-                            <button
-                              onClick={() => retryBriefing(briefing.id)}
-                              disabled={generating}
-                              className="text-sm bg-red-600 text-white px-3 py-1.5 rounded hover:bg-red-700 disabled:opacity-50 transition-colors"
-                            >
-                              {generating ? 'Retrying...' : 'Retry'}
-                            </button>
-                          </div>
-                        )}
+                        <p className="font-mono text-[9px] text-muted-foreground ml-auto">Every claim traced to source</p>
                       </div>
-                    ))}
+                    )}
+
+                    {/* Briefing body */}
+                    <div className="prose prose-sm max-w-none">
+                      <ReactMarkdown
+                        components={{
+                          h1: ({ children }) => <h1 className="text-sm font-semibold text-foreground mt-6 mb-2">{children}</h1>,
+                          h2: ({ children }) => <h2 className="text-xs font-semibold text-foreground uppercase tracking-wider mt-5 mb-2 font-mono">{children}</h2>,
+                          h3: ({ children }) => <h3 className="text-xs font-medium text-muted-foreground-strong mt-4 mb-1">{children}</h3>,
+                          p: ({ children }) => {
+                            const text = Array.isArray(children) ? children.join('') : String(children)
+                            const matched = (activeBriefing.claims || []).filter(c =>
+                              text.includes(c.claim_text) || c.claim_text.includes(text)
+                            )
+                            return (
+                              <p className="text-sm text-foreground leading-relaxed mb-3">
+                                {children}
+                                {matched.map((c, i) => (
+                                  <CitationChip key={i} claim={c} onDocClick={handleDocClick} />
+                                ))}
+                              </p>
+                            )
+                          },
+                          li: ({ children }) => {
+                            const text = Array.isArray(children) ? children.join('') : String(children)
+                            const matched = (activeBriefing.claims || []).filter(c =>
+                              text.includes(c.claim_text) || c.claim_text.includes(text)
+                            )
+                            return (
+                              <li className="text-sm text-foreground mb-1">
+                                {children}
+                                {matched.map((c, i) => (
+                                  <CitationChip key={i} claim={c} onDocClick={handleDocClick} />
+                                ))}
+                              </li>
+                            )
+                          },
+                          strong: ({ children }) => <strong className="font-semibold text-foreground">{children}</strong>,
+                          ul: ({ children }) => <ul className="list-none space-y-1 my-3 pl-0">{children}</ul>,
+                          ol: ({ children }) => <ol className="list-decimal pl-4 space-y-1 my-3 text-sm text-foreground">{children}</ol>,
+                          code: ({ children }) => <code className="font-mono text-[11px] bg-surface-raised border border-border px-1.5 py-0.5 rounded-sm text-accent">{children}</code>,
+                        }}
+                      >
+                        {activeBriefing.briefing_text}
+                      </ReactMarkdown>
+                    </div>
+                  </div>
+                )}
+
+                {isDemo && (
+                  <div className="mt-8 border-t border-border pt-6">
+                    <p className="font-mono text-[10px] text-muted-foreground tracking-widest uppercase mb-2">This is a demo briefing</p>
+                    <p className="text-xs text-muted-foreground leading-relaxed">
+                      Real briefings are generated from your uploaded documents. Every claim above would be linked to an exact source quote.{' '}
+                      <Link href="/signup" className="text-accent hover:underline">Create an account</Link> to get started.
+                    </p>
                   </div>
                 )}
               </div>
-            </div>
+            )}
           </div>
-        </div>
+        </main>
       </div>
     </div>
   )
