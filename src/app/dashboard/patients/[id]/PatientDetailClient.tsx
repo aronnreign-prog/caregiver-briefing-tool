@@ -133,6 +133,27 @@ export default function PatientDetailClient({
     e.target.value = ''
   }
 
+  const retryBriefing = async (briefingId: string) => {
+    setGenerating(true)
+    const { data: { user } } = await supabase.auth.getUser()
+    const { data: caregiver } = await supabase.from('caregivers').select('id').eq('auth_user_id', user?.id).single()
+    if (!caregiver?.id) {
+      alert('Caregiver profile not found')
+      setGenerating(false)
+      return
+    }
+
+    await supabase.from('briefings').update({ status: 'queued', error_message: null }).eq('id', briefingId)
+
+    await supabase.from('jobs').insert({
+      job_type: 'generate_briefing',
+      payload: { briefing_id: briefingId, caregiver_id: caregiver.id },
+      status: 'queued'
+    })
+
+    setGenerating(false)
+  }
+
   const generateBriefing = async () => {
     setGenerating(true)
     const { data: { user } } = await supabase.auth.getUser()
@@ -437,6 +458,15 @@ export default function PatientDetailClient({
                           </span>
                         </div>
 
+                        {briefing.status === 'queued' && (
+                          <div className="flex justify-center items-center py-12">
+                            <div className="flex flex-col items-center">
+                              <div className="h-8 w-8 bg-gray-400 rounded-full mb-4 animate-pulse"></div>
+                              <p className="text-sm text-gray-500">Queued for processing...</p>
+                            </div>
+                          </div>
+                        )}
+
                         {briefing.status === 'complete' && (
                           <div className="p-6 space-y-6">
                             {briefing.flagged_concerns && briefing.flagged_concerns.length > 0 && (
@@ -504,7 +534,14 @@ export default function PatientDetailClient({
 
                         {briefing.status === 'failed' && (
                           <div className="text-red-500 text-sm mt-4 p-4 bg-red-50 rounded">
-                            Failed to generate briefing. Please try again.
+                            <p className="mb-3">Failed to generate briefing. Please try again.</p>
+                            <button
+                              onClick={() => retryBriefing(briefing.id)}
+                              disabled={generating}
+                              className="text-sm bg-red-600 text-white px-3 py-1.5 rounded hover:bg-red-700 disabled:opacity-50 transition-colors"
+                            >
+                              {generating ? 'Retrying...' : 'Retry'}
+                            </button>
                           </div>
                         )}
                       </div>
