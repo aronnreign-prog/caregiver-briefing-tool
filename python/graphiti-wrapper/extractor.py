@@ -147,7 +147,11 @@ def _extract_labs_with_matcher(text: str) -> list[dict]:
 
 
 async def _extract_meds_with_med7_api(text: str) -> list[dict]:
-    """Extract medications using Hugging Face Inference API for Med7."""
+    """Extract medications using Hugging Face Inference API for Med7.
+
+    Uses a short 5s timeout so DNS failures on Render's network fail fast
+    and fall through to the LLM fallback immediately instead of blocking 30s.
+    """
     if not HF_TOKEN:
         logger.warning("HF_TOKEN not set — cannot extract medications via Hugging Face API.")
         return []
@@ -156,7 +160,7 @@ async def _extract_meds_with_med7_api(text: str) -> list[dict]:
     payload = {"inputs": text[:30_000]} # Keep payload size reasonable for API
     try:
         async with httpx.AsyncClient() as client:
-            resp = await client.post(HF_API_URL, headers=headers, json=payload, timeout=30.0)
+            resp = await client.post(HF_API_URL, headers=headers, json=payload, timeout=5.0)
             if resp.status_code != 200:
                 logger.warning(f"HF API returned {resp.status_code}: {resp.text}")
                 return []
@@ -196,6 +200,11 @@ async def _extract_meds_with_med7_api(text: str) -> list[dict]:
                     meds.append({**current_drug, "source": "med7-hf-api"})
             logger.info(f"Med7 HF API found {len(meds)} medications.")
             return meds
+    except (httpx.ConnectError, httpx.TimeoutException) as e:
+        # DNS failure or network timeout — expected on Render when HF is unreachable.
+        # Log at DEBUG to avoid noise; LLM fallback handles medication extraction.
+        logger.debug(f"Med7 HF API unreachable (network/DNS): {e}")
+        return []
     except Exception as e:
         logger.warning(f"Med7 HF API extraction failed: {e}")
         return []
