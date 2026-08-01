@@ -1,52 +1,97 @@
 import { createClient } from '@/lib/supabase/server'
-import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { getPatientSafely } from '@/lib/data/patient'
 import { isValidUUID } from '@/lib/validators'
 import PatientDetailClient from './PatientDetailClient'
+import { redirect } from 'next/navigation'
 import type { Patient, Document, Briefing } from '@/types/database'
 
-export default async function PatientPage({ params }: { params: Promise<{ id: string }> }) {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) {
-    redirect('/login')
-  }
+const DEMO_PATIENTS: Record<string, Patient> = {
+  'demo-1': {
+    id: 'demo-1',
+    caregiver_id: 'demo',
+    name: 'Margaret Thompson',
+    relationship: 'Mother',
+    date_of_birth: '1945-03-12',
+    created_at: new Date().toISOString(),
+  },
+  'demo-2': {
+    id: 'demo-2',
+    caregiver_id: 'demo',
+    name: 'Robert Chen',
+    relationship: 'Father',
+    date_of_birth: '1948-07-24',
+    created_at: new Date().toISOString(),
+  },
+}
 
+export default async function PatientPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
   const patientId = id
 
-  // Validate UUID before any DB query
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  const isGuest = !user
+
+  let patient: Patient
+  let documents: Document[] = []
+  let briefings: Briefing[] = []
+
+  // Handle demo patients for guests (non-UUID ids)
   if (!isValidUUID(patientId)) {
-    redirect('/dashboard')
+    const demoPatient = DEMO_PATIENTS[patientId]
+    if (!demoPatient) {
+      redirect('/dashboard')
+    }
+    patient = demoPatient
+    // Demo patients have no real documents/briefings
+  } else {
+    // Real UUID — but if guest, they shouldn't be able to access real patient records
+    if (isGuest) {
+      redirect('/dashboard')
+    }
+
+    const result = await getPatientSafely(patientId)
+    if (!result.success) {
+      throw new Error(result.errorMessage || 'Failed to load patient')
+    }
+    patient = result.data as Patient
+
+    const { data: docData } = await supabase
+      .from('documents')
+      .select('id, filename, status, uploaded_at, storage_path')
+      .eq('patient_id', patientId)
+      .order('uploaded_at', { ascending: false })
+
+    const { data: briefingData } = await supabase
+      .from('briefings')
+      .select('id, audience, status, created_at, completed_at, briefing_text, claims, flagged_concerns')
+      .eq('patient_id', patientId)
+      .order('created_at', { ascending: false })
+
+    documents = (docData || []) as Document[]
+    briefings = (briefingData || []) as Briefing[]
   }
-
-  const result = await getPatientSafely(patientId)
-
-  if (!result.success) {
-    throw new Error(result.errorMessage || 'Failed to load patient')
-  }
-
-  const patient = result.data as Patient
-
-  // Fetch initial documents for this patient
-  const { data: documents } = await supabase
-    .from('documents')
-    .select('id, filename, status, uploaded_at, storage_path')
-    .eq('patient_id', patientId)
-    .order('uploaded_at', { ascending: false })
-
-  // Fetch initial briefings for this patient
-  const { data: briefings } = await supabase
-    .from('briefings')
-    .select('id, audience, status, created_at, completed_at, briefing_text, claims, flagged_concerns')
-    .eq('patient_id', patientId)
-    .order('created_at', { ascending: false })
 
   return (
-    <div className="min-h-screen bg-gray-50 p-8">
+    <div className="min-h-screen bg-background p-8">
       <div className="max-w-4xl mx-auto space-y-6">
+
+        {isGuest && (
+          <div className="flex items-center justify-between rounded-lg border border-border bg-muted/50 px-4 py-3 text-sm text-muted-foreground">
+            <span>Guest mode — this is a demo patient. Sign in to work with your own records.</span>
+            <div className="flex gap-2 ml-4 shrink-0">
+              <Link href="/login">
+                <Button size="sm" variant="outline">Sign in</Button>
+              </Link>
+              <Link href="/signup">
+                <Button size="sm">Create account</Button>
+              </Link>
+            </div>
+          </div>
+        )}
+
         <div className="flex items-center space-x-4 mb-6">
           <Link href="/dashboard">
             <Button variant="outline" size="sm">← Back to Dashboard</Button>
@@ -54,18 +99,18 @@ export default async function PatientPage({ params }: { params: Promise<{ id: st
         </div>
 
         <header>
-          <h1 className="text-3xl font-bold tracking-tight text-gray-900">
+          <h1 className="text-3xl font-bold tracking-tight text-foreground">
             {patient.name}
           </h1>
-          <p className="text-gray-600 mt-2">
+          <p className="text-muted-foreground mt-2">
             DOB: {new Date(patient.date_of_birth).toLocaleDateString()} • {patient.relationship}
           </p>
         </header>
 
-        <PatientDetailClient 
-          patient={patient} 
-          initialDocuments={(documents || []) as Document[]} 
-          initialBriefings={(briefings || []) as Briefing[]}
+        <PatientDetailClient
+          patient={patient}
+          initialDocuments={documents}
+          initialBriefings={briefings}
         />
       </div>
     </div>

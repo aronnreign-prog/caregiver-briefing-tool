@@ -20,28 +20,13 @@ export async function proxy(request: NextRequest) {
   const supabaseAnonKey =
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
 
-  const publicPaths = ['/login', '/signup']
-  const isPublicPath = publicPaths.some((path) =>
+  const authPaths = ['/login', '/signup']
+  const isAuthPath = authPaths.some((path) =>
     request.nextUrl.pathname.startsWith(path)
   )
-  const isStaticAsset =
-    request.nextUrl.pathname.startsWith('/_next') ||
-    request.nextUrl.pathname.startsWith('/favicon') ||
-    request.nextUrl.pathname.startsWith('/images')
 
-  // If Supabase isn't configured (e.g. env vars are unavailable in this
-  // environment), don't throw and crash every route with a 500. Instead treat
-  // the visitor as logged-out: allow public/auth pages to render and send
-  // everything else to /login rather than to pages that would then crash.
+  // If Supabase isn't configured, just pass through — every route is accessible.
   if (!isValidHttpUrl(supabaseUrl) || !supabaseAnonKey) {
-    console.error(
-      '[v0] Supabase env vars are missing or invalid (NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_ANON_KEY). Auth is disabled in this environment.'
-    )
-    if (!isPublicPath && !isStaticAsset) {
-      const url = request.nextUrl.clone()
-      url.pathname = '/login'
-      return NextResponse.redirect(url)
-    }
     return supabaseResponse
   }
 
@@ -74,15 +59,8 @@ export async function proxy(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser()
 
-  // If no user and not on a public page, redirect to login
-  if (!user && !isPublicPath && !isStaticAsset) {
-    const url = request.nextUrl.clone()
-    url.pathname = '/login'
-    return NextResponse.redirect(url)
-  }
-
   // If user is logged in and tries to access login/signup, redirect to dashboard
-  if (user && isPublicPath) {
+  if (user && isAuthPath) {
     const url = request.nextUrl.clone()
     url.pathname = '/dashboard'
     return NextResponse.redirect(url)
