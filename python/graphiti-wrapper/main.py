@@ -118,23 +118,80 @@ async def _patched_generic_generate(self, messages, response_model=None, max_tok
             # Post-process: remap field names from OpenRouter's common variations
             # to graphiti-core's expected field names. DeepSeek free models often
             # return 'entities' instead of 'extracted_entities', etc.
+            #
+            # NOTE: ExtractedEdges uses "edges" (not "extracted_edges") as its
+            # top-level key in the actual schema — do NOT remap it.
             if response_model and isinstance(parsed, dict):
                 expected_schema = response_model.model_json_schema()
                 expected_props = set(expected_schema.get('properties', {}).keys())
                 actual_keys = set(parsed.keys())
                 if not expected_props <= actual_keys:
-                    # Try fuzzy remapping for common mismatches
+                    # Try fuzzy remapping for common top-level mismatches.
                     remapped = dict(parsed)
-                    known_remaps = {
+                    # Only remap 'entities'->'extracted_entities' and
+                    # 'nodes'->'extracted_nodes'. DO NOT remap 'edges' because
+                    # ExtractedEdges.model_json_schema() has "edges" as the
+                    # correct top-level key (the old 'extracted_edges' entry
+                    # was wrong and would have hidden valid data).
+                    known_top_remaps = {
                         'entities': 'extracted_entities',
-                        'edges': 'extracted_edges',
                         'nodes': 'extracted_nodes',
                     }
-                    for actual_key, remap_key in known_remaps.items():
+                    for actual_key, remap_key in known_top_remaps.items():
                         if actual_key in remapped and remap_key in expected_props and remap_key not in remapped:
-                            logger.info(f'[OpenRouter] remapping field "{actual_key}" -> "{remap_key}"')
+                            logger.info(f'[OpenRouter] top-level remap: "{actual_key}" -> "{remap_key}"')
                             remapped[remap_key] = remapped.pop(actual_key)
                     parsed = remapped
+
+            # Remap nested field names inside array items.
+            # LLMs (especially DeepSeek free via OpenRouter) frequently use
+            # natural-language variants of field names inside nested objects:
+            #   ExtractedEntity: entity_name -> name, entity_type_name -> entity_type_id
+            # These remaps are keyed by response_model class name so they only
+            # fire for the relevant Pydantic model, avoiding false positives.
+            if response_model and isinstance(parsed, dict):
+                model_name = getattr(response_model, '__name__', '')
+
+                # --- ExtractedEntities nested item remapper ---
+                if model_name == 'ExtractedEntities' and isinstance(parsed.get('extracted_entities'), list):
+                    ENTITY_ITEM_REMAPS = {
+                        # LLM alias          -> correct Pydantic field name
+                        'entity_name':        'name',
+                        'entityName':         'name',
+                        'entity_type_name':   'entity_type_id',
+                        'entity_type':        'entity_type_id',
+                        'type':               'entity_type_id',
+                        'typeId':             'entity_type_id',
+                        'type_id':            'entity_type_id',
+                        'indices':            'episode_indices',
+                        'episode_index':      'episode_indices',
+                    }
+                    fixed_items = []
+                    for item in parsed['extracted_entities']:
+                        if not isinstance(item, dict):
+                            fixed_items.append(item)
+                            continue
+                        fixed = dict(item)
+                        for alias, canonical in ENTITY_ITEM_REMAPS.items():
+                            if alias in fixed and canonical not in fixed:
+                                logger.info(f'[OpenRouter] nested entity remap: "{alias}" -> "{canonical}"')
+                                fixed[canonical] = fixed.pop(alias)
+                        # entity_type_id must be an int; if the LLM gave a string
+                        # label (e.g. "Medication"), convert to 0 so Pydantic
+                        # doesn't crash — graphiti will re-classify from context.
+                        if 'entity_type_id' in fixed and not isinstance(fixed['entity_type_id'], int):
+                            logger.warning(
+                                f'[OpenRouter] entity_type_id is non-int '
+                                f'("{fixed["entity_type_id"]}"), defaulting to 0'
+                            )
+                            fixed['entity_type_id'] = 0
+                        # episode_indices must be a list; coerce scalar to list
+                        if 'episode_indices' in fixed and not isinstance(fixed['episode_indices'], list):
+                            fixed['episode_indices'] = [fixed['episode_indices']]
+                        # Ensure required fields have sane defaults if still missing
+                        fixed.setdefault('episode_indices', [0])
+                        fixed_items.append(fixed)
+                    parsed['extracted_entities'] = fixed_items
 
             return parsed
 
