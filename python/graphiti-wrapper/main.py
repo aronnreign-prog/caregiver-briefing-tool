@@ -115,6 +115,27 @@ async def _patched_generic_generate(self, messages, response_model=None, max_tok
             if top_keys <= {'type', 'properties', 'title', 'description', 'required', 'allOf', 'anyOf', 'oneOf', 'enum', 'items', 'additionalProperties', 'definitions'}:
                 raise ValueError('LLM returned schema fragment instead of data')
 
+            # Post-process: remap field names from OpenRouter's common variations
+            # to graphiti-core's expected field names. DeepSeek free models often
+            # return 'entities' instead of 'extracted_entities', etc.
+            if response_model and isinstance(parsed, dict):
+                expected_schema = response_model.model_json_schema()
+                expected_props = set(expected_schema.get('properties', {}).keys())
+                actual_keys = set(parsed.keys())
+                if not expected_props <= actual_keys:
+                    # Try fuzzy remapping for common mismatches
+                    remapped = dict(parsed)
+                    known_remaps = {
+                        'entities': 'extracted_entities',
+                        'edges': 'extracted_edges',
+                        'nodes': 'extracted_nodes',
+                    }
+                    for actual_key, remap_key in known_remaps.items():
+                        if actual_key in remapped and remap_key in expected_props and remap_key not in remapped:
+                            logger.info(f'[OpenRouter] remapping field "{actual_key}" -> "{remap_key}"')
+                            remapped[remap_key] = remapped.pop(actual_key)
+                    parsed = remapped
+
             return parsed
 
         except _openai.RateLimitError:
@@ -245,7 +266,23 @@ async def lifespan(app: FastAPI):
             model_size = ModelSize.medium
 
         if response_model is not None:
-            messages[-1].content += '\n\nOutput ONLY the requested data as a JSON object. Do NOT output a JSON Schema definition, $defs, or type descriptors. Fill in actual values.'
+            schema = response_model.model_json_schema()
+            props = schema.get('properties', {})
+            required = schema.get('required', [])
+            fields_list = []
+            for k, v in props.items():
+                if '$ref' in v:
+                    fields_list.append(f'"{k}" (list of objects)')
+                elif v.get('type') == 'array':
+                    fields_list.append(f'"{k}" (list)')
+                else:
+                    fields_list.append(f'"{k}" ({v.get("type","any")})')
+            field_hint = ', '.join(fields_list)
+            req_hint = f' Required fields: {", ".join(required)}.' if required else ''
+            messages[-1].content += (
+                f'\n\nOutput a JSON object with fields: {field_hint}.{req_hint}'
+                f' Fill in actual values. Do NOT output a JSON Schema definition.'
+            )
 
         from graphiti_core.llm_client.client import get_extraction_language_instruction
         messages[0].content += get_extraction_language_instruction(group_id)
