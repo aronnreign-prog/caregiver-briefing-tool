@@ -107,23 +107,23 @@ const DEMO_BRIEFING = {
     { claim_text: 'GFR declining for 18 months', flag: 'SUPPORTED', evidence: { source_doc_id: 'demo-doc-1', source_doc_name: 'Lab Result Mar 2024', source_page: 2, source_quote: 'GFR 47 mL/min/1.73m²' } },
     { claim_text: 'ACE inhibitor contraindicated', flag: 'MEDICAL_KNOWLEDGE', evidence: { entry_text: 'Lisinopril — renal dose adjustment required' } },
   ],
-  briefing_text: `**Patient Summary**
+  briefing_text: `## Patient Summary
 
 Your mother's GFR has been declining for 18 months across 6 lab draws from 3 different providers (65 → 58 → 51 → 47).
 
 Her new cardiologist prescribed Lisinopril yesterday — an ACE inhibitor that is contraindicated in declining kidney function.
 
-**Current Medications**
+## Current Medications
 
 - Lisinopril 10 mg daily (NEW — prescribed 2024-03-14)
 - Atorvastatin 40 mg nightly
 - Metoprolol succinate 25 mg daily
 
-**Lab Trends**
+## Lab Trends
 
-GFR: 65 (Jun 2022) → 58 (Dec 2022) → 51 (Jun 2023) → 47 (Dec 2023)
+GFR: \`65\` (Jun 2022) → \`58\` (Dec 2022) → \`51\` (Jun 2023) → \`47\` (Dec 2023) — declining trend across 18 months
 
-**Recommendation**
+## Recommendation
 
 Flag the Lisinopril prescription for the cardiologist before the appointment. Request a nephrology consult given the trend.`,
 }
@@ -500,19 +500,25 @@ export default function PatientDetailClient({
                     )}
 
                     {/* Briefing body */}
-                    <div className="prose prose-sm max-w-none">
+                    <div className="space-y-0">
                       <ReactMarkdown
                         components={{
-                          h1: ({ children }) => <h1 className="text-sm font-semibold text-foreground mt-6 mb-2">{children}</h1>,
-                          h2: ({ children }) => <h2 className="text-xs font-semibold text-foreground uppercase tracking-wider mt-5 mb-2 font-mono">{children}</h2>,
-                          h3: ({ children }) => <h3 className="text-xs font-medium text-muted-foreground-strong mt-4 mb-1">{children}</h3>,
+                          h1: ({ children }) => (
+                            <h1 className="text-sm font-semibold text-foreground mt-8 mb-3 pb-2 border-b border-border">{children}</h1>
+                          ),
+                          h2: ({ children }) => (
+                            <h2 className="font-mono text-[10px] text-muted-foreground tracking-widest uppercase mt-8 mb-3 pb-2 border-b border-border-subtle">{children}</h2>
+                          ),
+                          h3: ({ children }) => (
+                            <h3 className="text-xs font-medium text-foreground mt-5 mb-2">{children}</h3>
+                          ),
                           p: ({ children }) => {
-                            const text = Array.isArray(children) ? children.join('') : String(children)
+                            const text = Array.isArray(children) ? children.join('') : String(children ?? '')
                             const matched = (activeBriefing.claims || []).filter(c =>
                               text.includes(c.claim_text) || c.claim_text.includes(text)
                             )
                             return (
-                              <p className="text-sm text-foreground leading-relaxed mb-3">
+                              <p className="text-sm text-foreground leading-relaxed mb-4">
                                 {children}
                                 {matched.map((c, i) => (
                                   <CitationChip key={i} claim={c} onDocClick={handleDocClick} />
@@ -521,23 +527,34 @@ export default function PatientDetailClient({
                             )
                           },
                           li: ({ children }) => {
-                            const text = Array.isArray(children) ? children.join('') : String(children)
+                            const text = Array.isArray(children) ? children.join('') : String(children ?? '')
                             const matched = (activeBriefing.claims || []).filter(c =>
                               text.includes(c.claim_text) || c.claim_text.includes(text)
                             )
                             return (
-                              <li className="text-sm text-foreground mb-1">
-                                {children}
-                                {matched.map((c, i) => (
-                                  <CitationChip key={i} claim={c} onDocClick={handleDocClick} />
-                                ))}
+                              <li className="flex items-baseline gap-2 text-sm text-foreground mb-2">
+                                <span className="w-1 h-1 rounded-full bg-border mt-2 shrink-0" />
+                                <span>
+                                  {children}
+                                  {matched.map((c, i) => (
+                                    <CitationChip key={i} claim={c} onDocClick={handleDocClick} />
+                                  ))}
+                                </span>
                               </li>
                             )
                           },
-                          strong: ({ children }) => <strong className="font-semibold text-foreground">{children}</strong>,
-                          ul: ({ children }) => <ul className="list-none space-y-1 my-3 pl-0">{children}</ul>,
-                          ol: ({ children }) => <ol className="list-decimal pl-4 space-y-1 my-3 text-sm text-foreground">{children}</ol>,
-                          code: ({ children }) => <code className="font-mono text-[11px] bg-surface-raised border border-border px-1.5 py-0.5 rounded-sm text-accent">{children}</code>,
+                          strong: ({ children }) => (
+                            <strong className="font-semibold text-foreground">{children}</strong>
+                          ),
+                          ul: ({ children }) => (
+                            <ul className="list-none space-y-0 my-3 pl-0">{children}</ul>
+                          ),
+                          ol: ({ children }) => (
+                            <ol className="list-decimal pl-5 space-y-1 my-3 text-sm text-foreground">{children}</ol>
+                          ),
+                          code: ({ children }) => (
+                            <code className="font-mono text-[11px] bg-surface-raised border border-border px-1.5 py-0.5 rounded-sm text-accent">{children}</code>
+                          ),
                         }}
                       >
                         {activeBriefing.briefing_text}
