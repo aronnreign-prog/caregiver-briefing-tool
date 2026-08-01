@@ -108,6 +108,13 @@ async def _patched_generic_generate(self, messages, response_model=None, max_tok
             if isinstance(parsed, list):
                 raise ValueError('LLM returned list instead of object')
 
+            if not isinstance(parsed, dict):
+                raise ValueError(f'LLM returned non-dict type: {type(parsed).__name__}')
+
+            top_keys = set(parsed.keys())
+            if top_keys <= {'type', 'properties', 'title', 'description', 'required', 'allOf', 'anyOf', 'oneOf', 'enum', 'items', 'additionalProperties', 'definitions'}:
+                raise ValueError('LLM returned schema fragment instead of data')
+
             return parsed
 
         except _openai.RateLimitError:
@@ -121,9 +128,10 @@ async def _patched_generic_generate(self, messages, response_model=None, max_tok
             error_msg = Message(
                 role='user',
                 content=(
-                    f'Your previous response was invalid ({e}). '
-                    f'Return a valid JSON object with the correct structure. '
-                    f'Do NOT return a schema definition or a list.'
+                    f'Your last response was rejected because: {e}. '
+                    f'OUTPUT ONLY THE REQUESTED DATA as a plain JSON object. '
+                    f'NEVER return a JSON Schema definition, type descriptors, $defs, or property listings. '
+                    f'Fill in the actual values.'
                 ),
             )
             openai_messages.append({'role': 'user', 'content': error_msg.content})
@@ -212,7 +220,7 @@ async def lifespan(app: FastAPI):
             base_url=OPENROUTER_BASE_URL,
         ),
         max_tokens=16384,
-        structured_output_mode="json_object",
+        structured_output_mode="json_schema",
     )
 
     embedder = GeminiEmbedder(
