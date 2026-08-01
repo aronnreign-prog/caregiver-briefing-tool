@@ -31,7 +31,7 @@ export default async function PatientPage({ params }: { params: Promise<{ id: st
   const patientId = id
 
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const user = supabase ? (await supabase.auth.getUser()).data.user : null
   const isGuest = !user
 
   let patient: Patient
@@ -58,13 +58,13 @@ export default async function PatientPage({ params }: { params: Promise<{ id: st
     }
     patient = result.data as Patient
 
-    const { data: docData } = await supabase
+    const { data: docData } = await supabase!
       .from('documents')
       .select('id, filename, status, uploaded_at, storage_path')
       .eq('patient_id', patientId)
       .order('uploaded_at', { ascending: false })
 
-    const { data: briefingData } = await supabase
+    const { data: briefingData } = await supabase!
       .from('briefings')
       .select('id, audience, status, created_at, completed_at, briefing_text, claims, flagged_concerns')
       .eq('patient_id', patientId)

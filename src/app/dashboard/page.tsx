@@ -14,13 +14,13 @@ const DEMO_PATIENTS = [
 
 export default async function DashboardPage() {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const user = supabase ? (await supabase.auth.getUser()).data.user : null
 
   let caregiver: { id: string; name: string } | null = null
   let patients: { id: string; name: string; relationship: string; date_of_birth: string }[] = []
   const isGuest = !user
 
-  if (user) {
+  if (user && supabase) {
     const { data } = await supabase
       .from('caregivers')
       .select('id, name')
