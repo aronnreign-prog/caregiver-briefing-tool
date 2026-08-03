@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import type { Patient, Document, Briefing } from '@/types/database'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import ReactMarkdown from 'react-markdown'
 
 // ─── Demo data ────────────────────────────────────────────────────────────────
@@ -148,6 +149,7 @@ interface Props {
 export default function PatientDetailClient({ patient, initialDocuments, initialBriefings }: Props) {
   const isDemo = patient.id.startsWith('demo-')
   const supabase = createClient()
+  const router = useRouter()
   const isGuest = !supabase || isDemo
 
   const [documents, setDocuments] = useState<Document[]>(isDemo ? DEMO_DOCUMENTS : initialDocuments)
@@ -161,7 +163,7 @@ export default function PatientDetailClient({ patient, initialDocuments, initial
 
   const activeBriefing = briefings.find(b => b.id === activeBriefingId) ?? briefings[0] ?? null
 
-  // Realtime
+  // Realtime listener
   useEffect(() => {
     if (!supabase || isDemo) return
     const channel = supabase.channel('patient-changes')
@@ -178,6 +180,34 @@ export default function PatientDetailClient({ patient, initialDocuments, initial
       .subscribe()
     return () => { supabase.removeChannel(channel) }
   }, [patient.id, supabase, isDemo])
+
+  // Automatic polling fallback while documents or briefings are processing/queued
+  useEffect(() => {
+    if (!supabase || isDemo) return
+    const hasPendingBriefing = briefings.some(b => b.status === 'queued' || b.status === 'processing')
+    const hasPendingDoc = documents.some(d => d.status === 'uploaded')
+
+    if (!hasPendingBriefing && !hasPendingDoc) return
+
+    const interval = setInterval(async () => {
+      const { data: updatedDocs } = await supabase
+        .from('documents')
+        .select('id, filename, status, uploaded_at, storage_path')
+        .eq('patient_id', patient.id)
+        .order('uploaded_at', { ascending: false })
+
+      const { data: updatedBriefings } = await supabase
+        .from('briefings')
+        .select('id, audience, status, created_at, completed_at, briefing_text, claims, flagged_concerns')
+        .eq('patient_id', patient.id)
+        .order('created_at', { ascending: false })
+
+      if (updatedDocs) setDocuments(updatedDocs as Document[])
+      if (updatedBriefings) setBriefings(updatedBriefings as Briefing[])
+    }, 3000)
+
+    return () => clearInterval(interval)
+  }, [patient.id, supabase, isDemo, briefings, documents])
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!supabase || isGuest) { alert('Sign in to upload documents.'); return }
@@ -217,6 +247,11 @@ export default function PatientDetailClient({ patient, initialDocuments, initial
 
       if (dbError || !docData?.id) throw dbError || new Error('No document ID')
 
+      // Immediate state update so button response is instant
+      const newDoc = docData as Document
+      setDocuments(prev => [newDoc, ...prev])
+      router.refresh()
+
       await supabase.from('jobs').insert({
         job_type: 'process_document',
         payload: { document_id: docData.id, caregiver_id: caregiver.id },
@@ -250,6 +285,12 @@ export default function PatientDetailClient({ patient, initialDocuments, initial
 
       if (briefingError || !briefingData?.id) throw briefingError || new Error('No briefing ID')
 
+      // Immediate state update so button response is instant
+      const newBriefing = briefingData as Briefing
+      setBriefings(prev => [newBriefing, ...prev])
+      setActiveBriefingId(newBriefing.id)
+      router.refresh()
+
       await supabase.from('jobs').insert({
         job_type: 'generate_briefing',
         payload: { briefing_id: briefingData.id, caregiver_id: caregiver.id },
@@ -271,6 +312,9 @@ export default function PatientDetailClient({ patient, initialDocuments, initial
       if (!user) return
       const { data: caregiver } = await supabase.from('caregivers').select('id').eq('auth_user_id', user.id).single()
       if (!caregiver?.id) return
+
+      setBriefings(prev => prev.map(b => b.id === briefingId ? { ...b, status: 'queued' } : b))
+      router.refresh()
 
       await supabase.from('briefings').update({ status: 'queued', error_message: null }).eq('id', briefingId)
 

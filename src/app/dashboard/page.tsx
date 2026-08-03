@@ -1,7 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
-import { logout } from '@/app/auth/actions'
-import { addPatient } from '@/app/dashboard/actions'
 import Link from 'next/link'
+import AddPatientForm from './AddPatientForm'
+import SignOutButton from './SignOutButton'
 
 const DEMO_PATIENTS = [
   { id: 'demo-1', name: 'Margaret Thompson', relationship: 'Mother', date_of_birth: '1945-03-12', flagCount: 1, docCount: 3, briefingStatus: 'complete' },
@@ -86,20 +86,7 @@ export default async function DashboardPage() {
               </Link>
             </div>
           ) : (
-            <form action={async (fd: FormData) => { 'use server'; await addPatient(fd) }}>
-              <p className="font-mono text-[9px] tracking-widest text-muted-foreground uppercase mb-3">Add patient</p>
-              <div className="space-y-2">
-                <input name="name" placeholder="Full name" required
-                  className="w-full bg-background border border-border rounded px-3 py-2 text-[12px] text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-accent" />
-                <input name="relationship" placeholder="Relationship" required
-                  className="w-full bg-background border border-border rounded px-3 py-2 text-[12px] text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-accent" />
-                <input name="date_of_birth" type="date" required
-                  className="w-full bg-background border border-border rounded px-3 py-2 text-[12px] text-foreground font-mono focus:outline-none focus:border-accent" />
-                <button type="submit" className="w-full bg-accent text-background font-mono text-[11px] font-semibold py-2 rounded hover:opacity-90 transition-opacity">
-                  Add patient
-                </button>
-              </div>
-            </form>
+            <AddPatientForm />
           )}
         </div>
       </aside>
@@ -117,11 +104,7 @@ export default async function DashboardPage() {
             </p>
           </div>
           {!isGuest ? (
-            <form action={async () => { 'use server'; await logout() }}>
-              <button type="submit" className="font-mono text-[11px] text-muted-foreground border border-border px-3 py-1.5 rounded hover:text-foreground hover:border-foreground/30 transition-colors">
-                Sign out
-              </button>
-            </form>
+            <SignOutButton />
           ) : (
             <div className="flex items-center gap-2">
               <Link href="/login" className="font-mono text-[11px] text-muted-foreground border border-border px-3 py-1.5 rounded hover:text-foreground hover:border-foreground/30 transition-colors">
