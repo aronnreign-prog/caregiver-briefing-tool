@@ -2,11 +2,11 @@
 
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import ReactMarkdown from 'react-markdown'
-import Link from 'next/link'
 import type { Patient, Document, Briefing } from '@/types/database'
+import Link from 'next/link'
+import ReactMarkdown from 'react-markdown'
 
-// ─── Demo data (shown to guests / demo patients only) ─────────────────────────
+// ─── Demo data ────────────────────────────────────────────────────────────────
 
 const DEMO_DOCUMENTS: Document[] = [
   { id: 'd1', patient_id: 'demo-1', caregiver_id: 'demo', filename: 'Lab Result Mar 2024.pdf', status: 'extracted', uploaded_at: '2024-03-14T10:00:00Z' },
@@ -20,9 +20,9 @@ const DEMO_BRIEFING: Briefing = {
   caregiver_id: 'demo',
   audience: 'specialist',
   status: 'complete',
+  source_doc_ids: ['d1', 'd2', 'd3'],
   created_at: new Date().toISOString(),
   completed_at: new Date().toISOString(),
-  source_doc_ids: ['d1', 'd2', 'd3'],
   briefing_text: `## Patient Summary
 
 Margaret Thompson (DOB 1945-03-12) presents with a documented 18-month decline in renal function across 6 lab draws sourced from 3 different providers. GFR has fallen from 65 to 47 over this period.
@@ -57,8 +57,14 @@ Flag the Lisinopril prescription for review before the next appointment. Request
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type Claim = {
+  id?: string
+  briefing_id?: string
   claim_text: string
-  claim_type: string
+  source_type?: string
+  source_id?: string
+  source_excerpt?: string
+  source_page?: number | null
+  verification_status?: 'supported' | 'partial' | 'unsupported'
   flag?: string
   evidence?: {
     source_doc_id?: string
@@ -66,27 +72,21 @@ type Claim = {
     source_quote?: string
     entry_text?: string
   } | null
-  // PaperTrail v2 fields (future compatibility)
-  source_type?: string
-  source_id?: string
-  source_excerpt?: string
-  source_page?: number | null
-  verification_status?: 'supported' | 'partial' | 'unsupported'
 }
 
-type FlaggedConcern = { severity: 'high' | 'medium' | 'low'; concern?: string; description?: string }
+type FlaggedConcern = { severity: 'high' | 'medium' | 'low'; description?: string; concern?: string }
 
 // ─── Citation chip ────────────────────────────────────────────────────────────
 
-function CitationChip({ claim, onDocClick }: {
-  claim: Claim
-  onDocClick: (e: React.MouseEvent, id: string, page?: number) => void
-}) {
-  const isDrug = claim.flag === 'MEDICAL_KNOWLEDGE' || claim.source_type === 'drug_interaction'
-  const docId = claim.evidence?.source_doc_id || claim.source_id
-  const page = claim.evidence?.source_page ?? claim.source_page
-  const label = isDrug ? 'DDInter' : `Doc · p.${page ?? '?'}`
-  const title = claim.evidence?.source_quote || claim.evidence?.entry_text || claim.source_excerpt || ''
+function CitationChip({ claim, onDocClick }: { claim: Claim; onDocClick: (e: React.MouseEvent, id: string, page?: number) => void }) {
+  const isDrug = claim.source_type === 'drug_interaction' || claim.flag === 'MEDICAL_KNOWLEDGE'
+  const docId = claim.source_id || claim.evidence?.source_doc_id
+  const page = claim.source_page ?? claim.evidence?.source_page
+  const label = isDrug
+    ? (claim.source_id || 'DDInter')
+    : `Doc · p.${page ?? '?'}`
+
+  const title = claim.source_excerpt || claim.evidence?.source_quote || claim.evidence?.entry_text || ''
 
   return (
     <button
@@ -103,7 +103,7 @@ function CitationChip({ claim, onDocClick }: {
   )
 }
 
-// ─── Pipeline status bar ──────────────────────────────────────────────────────
+// ─── Pipeline status ──────────────────────────────────────────────────────────
 
 const PIPELINE_STEPS = ['Uploaded', 'Extracting', 'Ready']
 
@@ -127,7 +127,9 @@ function PipelineBar({ status }: { status: string }) {
             i === step ? 'bg-accent' :
             'bg-border'
           }`} />
-          <span className={`font-mono text-[9px] ${i === step ? 'text-foreground' : 'text-muted-foreground'}`}>{label}</span>
+          <span className={`font-mono text-[9px] ${
+            i === step ? 'text-foreground' : 'text-muted-foreground'
+          }`}>{label}</span>
           {i < PIPELINE_STEPS.length - 1 && <span className="text-border text-[9px]">·</span>}
         </div>
       ))}
@@ -154,15 +156,15 @@ export default function PatientDetailClient({ patient, initialDocuments, initial
     isDemo ? DEMO_BRIEFING.id : (initialBriefings[0]?.id ?? null)
   )
   const [generating, setGenerating] = useState(false)
-  const [uploading, setUploading] = useState(false)
+  const [uploadingFile, setUploadingFile] = useState(false)
   const [audience, setAudience] = useState<'specialist' | 'gp' | 'family' | 'general' | 'er_visit' | 'second_opinion'>('specialist')
 
   const activeBriefing = briefings.find(b => b.id === activeBriefingId) ?? briefings[0] ?? null
 
-  // ─── Realtime subscriptions (real patients only) ───────────────────────────
+  // Realtime
   useEffect(() => {
-    if (isDemo) return
-    const channel = supabase!.channel('patient-changes')
+    if (!supabase || isDemo) return
+    const channel = supabase.channel('patient-changes')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'documents', filter: `patient_id=eq.${patient.id}` }, (payload) => {
         if (payload.eventType === 'INSERT') setDocuments(prev => [payload.new as Document, ...prev])
         else if (payload.eventType === 'UPDATE') setDocuments(prev => prev.map(d => d.id === payload.new.id ? payload.new as Document : d))
@@ -174,13 +176,11 @@ export default function PatientDetailClient({ patient, initialDocuments, initial
         else if (payload.eventType === 'DELETE') setBriefings(prev => prev.filter(b => b.id !== payload.old.id))
       })
       .subscribe()
-    return () => { supabase!.removeChannel(channel) }
+    return () => { supabase.removeChannel(channel) }
   }, [patient.id, supabase, isDemo])
 
-  // ─── Upload handler (real patients only — our full functional pipeline) ────
-
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (isGuest) { alert('Sign in to upload documents.'); return }
+    if (!supabase || isGuest) { alert('Sign in to upload documents.'); return }
     const file = e.target.files?.[0]
     if (!file) return
 
@@ -193,127 +193,102 @@ export default function PatientDetailClient({ patient, initialDocuments, initial
       return
     }
 
-    setUploading(true)
-    const fileExt = file.name.split('.').pop()
-    const fileName = `${patient.id}/${Date.now()}.${fileExt}`
+    setUploadingFile(true)
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) { alert('Please sign in to upload.'); return }
 
-    const { error: uploadError } = await supabase!.storage.from('medical_records').upload(fileName, file)
-    if (uploadError) {
-      alert('Failed to upload file: ' + uploadError.message)
-      setUploading(false)
-      return
+      const { data: caregiver } = await supabase.from('caregivers').select('id').eq('auth_user_id', user.id).single()
+      if (!caregiver?.id) { alert('Caregiver profile not found.'); return }
+
+      const path = `${patient.id}/${Date.now()}.${file.name.split('.').pop()}`
+      const { error: uploadError } = await supabase.storage.from('medical_records').upload(path, file)
+      if (uploadError) throw uploadError
+
+      const { data: docData, error: dbError } = await supabase.from('documents').insert({
+        patient_id: patient.id,
+        caregiver_id: caregiver.id,
+        filename: file.name,
+        storage_path: path,
+        file_size: file.size,
+        mime_type: file.type,
+        status: 'uploaded',
+      }).select().single()
+
+      if (dbError || !docData?.id) throw dbError || new Error('No document ID')
+
+      await supabase.from('jobs').insert({
+        job_type: 'process_document',
+        payload: { document_id: docData.id, caregiver_id: caregiver.id },
+        status: 'queued'
+      })
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Unknown error'
+      alert('Upload failed: ' + msg)
+    } finally {
+      setUploadingFile(false)
+      e.target.value = ''
     }
-
-    const { data: { user } } = await supabase!.auth.getUser()
-    const { data: caregiver } = await supabase!.from('caregivers').select('id').eq('auth_user_id', user?.id).single()
-    if (!caregiver?.id) {
-      alert('Caregiver profile not found')
-      setUploading(false)
-      return
-    }
-
-    const { data: docData, error: dbError } = await supabase!.from('documents').insert({
-      patient_id: patient.id,
-      caregiver_id: caregiver.id,
-      filename: file.name,
-      storage_path: fileName,
-      file_size: file.size,
-      mime_type: file.type,
-      status: 'uploaded'
-    }).select().single()
-
-    if (dbError || !docData?.id) {
-      alert('Failed to save document metadata: ' + (dbError?.message || 'No document ID returned'))
-      setUploading(false)
-      return
-    }
-
-    const documentId = docData.id
-    if (!documentId || typeof documentId !== 'string') {
-      alert('Invalid document ID generated')
-      setUploading(false)
-      return
-    }
-
-    await supabase!.from('jobs').insert({
-      job_type: 'process_document',
-      payload: { document_id: documentId, caregiver_id: caregiver.id },
-      status: 'queued'
-    })
-
-    setUploading(false)
-    e.target.value = ''
   }
 
-  // ─── Briefing generation (real patients only — our full functional pipeline)
-
   const generateBriefing = async () => {
-    if (isGuest) { alert('Sign in to generate briefings.'); return }
+    if (!supabase || isGuest) { alert('Sign in to generate briefings.'); return }
     setGenerating(true)
-    const { data: { user } } = await supabase!.auth.getUser()
-    const { data: caregiver } = await supabase!.from('caregivers').select('id').eq('auth_user_id', user?.id).single()
-    if (!caregiver?.id) {
-      alert('Caregiver profile not found')
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) return
+      const { data: caregiver } = await supabase.from('caregivers').select('id').eq('auth_user_id', user.id).single()
+      if (!caregiver?.id) { alert('Caregiver profile not found.'); return }
+
+      const { data: briefingData, error: briefingError } = await supabase.from('briefings').insert({
+        patient_id: patient.id,
+        caregiver_id: caregiver.id,
+        audience: audience,
+        status: 'queued',
+        source_doc_ids: documents.map(d => d.id)
+      }).select().single()
+
+      if (briefingError || !briefingData?.id) throw briefingError || new Error('No briefing ID')
+
+      await supabase.from('jobs').insert({
+        job_type: 'generate_briefing',
+        payload: { briefing_id: briefingData.id, caregiver_id: caregiver.id },
+        status: 'queued'
+      })
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Unknown error'
+      alert('Failed to generate briefing: ' + msg)
+    } finally {
       setGenerating(false)
-      return
     }
-
-    const { data: briefingData, error: briefingError } = await supabase!.from('briefings').insert({
-      patient_id: patient.id,
-      caregiver_id: caregiver.id,
-      audience: audience,
-      status: 'queued',
-      source_doc_ids: documents.map(d => d.id)
-    }).select().single()
-
-    if (briefingError || !briefingData?.id) {
-      alert('Failed to start briefing: ' + (briefingError?.message || 'No briefing ID returned'))
-      setGenerating(false)
-      return
-    }
-
-    const briefingId = briefingData.id
-    if (!briefingId || typeof briefingId !== 'string') {
-      alert('Invalid briefing ID generated')
-      setGenerating(false)
-      return
-    }
-
-    await supabase!.from('jobs').insert({
-      job_type: 'generate_briefing',
-      payload: { briefing_id: briefingId, caregiver_id: caregiver.id },
-      status: 'queued'
-    })
-
-    setGenerating(false)
   }
 
   const retryBriefing = async (briefingId: string) => {
-    if (isGuest) return
+    if (!supabase || isGuest) return
     setGenerating(true)
-    const { data: { user } } = await supabase!.auth.getUser()
-    const { data: caregiver } = await supabase!.from('caregivers').select('id').eq('auth_user_id', user?.id).single()
-    if (!caregiver?.id) {
-      alert('Caregiver profile not found')
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) return
+      const { data: caregiver } = await supabase.from('caregivers').select('id').eq('auth_user_id', user.id).single()
+      if (!caregiver?.id) return
+
+      await supabase.from('briefings').update({ status: 'queued', error_message: null }).eq('id', briefingId)
+
+      await supabase.from('jobs').insert({
+        job_type: 'generate_briefing',
+        payload: { briefing_id: briefingId, caregiver_id: caregiver.id },
+        status: 'queued'
+      })
+    } catch (err) {
+      console.error('Retry failed:', err)
+    } finally {
       setGenerating(false)
-      return
     }
-
-    await supabase!.from('briefings').update({ status: 'queued', error_message: null }).eq('id', briefingId)
-
-    await supabase!.from('jobs').insert({
-      job_type: 'generate_briefing',
-      payload: { briefing_id: briefingId, caregiver_id: caregiver.id },
-      status: 'queued'
-    })
-
-    setGenerating(false)
   }
 
   const handleDocClick = async (e: React.MouseEvent, docId: string, page?: number) => {
     e.preventDefault()
-    if (isDemo) return
-    if (!supabase) { alert('Sign in to view documents.'); return }
+    if (isDemo || !supabase) return
     const doc = documents.find(d => d.id === docId)
     if (!doc?.storage_path) { alert('Document path not available.'); return }
     const { data, error } = await supabase.storage.from('medical_records').createSignedUrl(doc.storage_path, 60)
@@ -322,68 +297,70 @@ export default function PatientDetailClient({ patient, initialDocuments, initial
     window.open(url, '_blank')
   }
 
-  // ─── Derived data ─────────────────────────────────────────────────────────
-
   const concerns: FlaggedConcern[] = (activeBriefing?.flagged_concerns as FlaggedConcern[] | null) ?? []
   const claimsArray: Claim[] = (activeBriefing?.claims as Claim[] | null) ?? []
 
-  const supportedCount = claimsArray.filter(c => c.flag === 'SUPPORTED' || c.verification_status === 'supported').length
-  const partialCount = claimsArray.filter(c => c.flag === 'PARTIALLY SUPPORTED' || c.verification_status === 'partial').length
-  const unsupportedCount = claimsArray.filter(c => c.flag === 'UNSUPPORTED' || c.verification_status === 'unsupported').length
+  const supported = claimsArray.filter(c => c.verification_status === 'supported' || c.flag === 'SUPPORTED').length
+  const partial = claimsArray.filter(c => c.verification_status === 'partial' || c.flag === 'PARTIALLY SUPPORTED').length
+  const unsupported = claimsArray.filter(c => c.verification_status === 'unsupported' || c.flag === 'UNSUPPORTED').length
 
   const age = Math.floor((Date.now() - new Date(patient.date_of_birth).getTime()) / (1000 * 60 * 60 * 24 * 365.25))
 
   return (
-    <div className="px-8 pb-8 flex-1 flex flex-col overflow-hidden">
-      <div className="border border-border rounded-lg bg-surface flex flex-col flex-1 overflow-hidden">
+    <div className="min-h-screen bg-background flex flex-col">
 
-        {/* ── Inner Header ── */}
-        <header className="shrink-0 border-b border-border bg-surface flex items-center px-5 py-3 gap-4">
-          <span className="font-mono text-[10px] text-muted-foreground uppercase tracking-widest">CareNote</span>
-          <span className="text-border">/</span>
-          <span className="font-mono text-[10px] text-foreground font-semibold">{patient.name}</span>
-          {concerns.length > 0 && (
-            <div className="flex items-center gap-1.5 bg-alert-dim border border-alert/30 rounded px-2 py-0.5">
-              <div className="w-1.5 h-1.5 rounded-full bg-alert" />
-              <span className="font-mono text-[10px] text-alert">{concerns.length} FLAG</span>
-            </div>
-          )}
-          <div className="ml-auto flex items-center gap-2">
-            {isDemo && (
-              <span className="font-mono text-[9px] border border-border text-muted-foreground px-2 py-1 rounded">DEMO RECORD</span>
-            )}
-            {isGuest && (
-              <Link href="/signup" className="font-mono text-[10px] bg-accent text-background px-3 py-1.5 rounded hover:opacity-90 transition-opacity font-semibold">
-                Create account to save
-              </Link>
-            )}
-          </div>
-        </header>
-
-        {/* ── Flagged concerns band ── */}
+      {/* ── Top nav ── */}
+      <header className="shrink-0 border-b border-border bg-surface flex items-center px-5 py-3 gap-4">
+        <Link href="/dashboard" className="flex items-center gap-1.5 text-muted-foreground hover:text-foreground transition-colors">
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+            <path d="M9.5 6H2.5M5 3L2 6l3 3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
+          <span className="font-mono text-[10px]">Dashboard</span>
+        </Link>
+        <span className="text-border">/</span>
+        <span className="font-mono text-[10px] text-foreground font-semibold">{patient.name}</span>
         {concerns.length > 0 && (
-          <div className="shrink-0 border-b border-alert/30 bg-alert-dim px-5 py-3">
-            <div className="flex items-start gap-3">
-              <div className="shrink-0 mt-0.5">
-                <span className="font-mono text-[9px] text-alert border border-alert/40 px-1.5 py-0.5 rounded tracking-widest">FLAGGED CONCERNS — RAISE WITH DOCTOR</span>
-              </div>
-              <div className="flex-1 space-y-1">
-                {concerns.map((c, i) => (
-                  <div key={i} className="flex items-start gap-2">
-                    <span className={`font-mono text-[9px] px-1.5 py-0.5 rounded border shrink-0 ${
-                      c.severity === 'high' ? 'text-alert border-alert/40 bg-background/20' :
-                      c.severity === 'medium' ? 'text-warning border-warning/40' : 'text-muted-foreground border-border'
-                    }`}>{c.severity.toUpperCase()}</span>
-                    <p className="text-[12px] text-foreground leading-relaxed">{c.concern || c.description}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
+          <div className="flex items-center gap-1.5 bg-alert-dim border border-alert/30 rounded px-2 py-0.5">
+            <div className="w-1.5 h-1.5 rounded-full bg-alert" />
+            <span className="font-mono text-[10px] text-alert">{concerns.length} flag{concerns.length !== 1 ? 's' : ''}</span>
           </div>
         )}
+        <div className="ml-auto flex items-center gap-2">
+          {isDemo && (
+            <span className="font-mono text-[9px] border border-border text-muted-foreground px-2 py-1 rounded">DEMO RECORD</span>
+          )}
+          {(isGuest || isDemo) && (
+            <Link href="/signup" className="font-mono text-[10px] bg-accent text-background px-3 py-1.5 rounded hover:opacity-90 transition-opacity font-semibold">
+              Create account to save
+            </Link>
+          )}
+        </div>
+      </header>
 
-        {/* ── Body ── */}
-        <div className="flex flex-1 overflow-hidden">
+      {/* ── Flagged concerns band ── */}
+      {concerns.length > 0 && (
+        <div className="shrink-0 border-b border-alert/30 bg-alert-dim px-5 py-3">
+          <div className="flex items-start gap-3">
+            <div className="shrink-0 mt-0.5">
+              <span className="font-mono text-[9px] text-alert border border-alert/40 px-1.5 py-0.5 rounded tracking-widest">FLAGGED — RAISE WITH DOCTOR</span>
+            </div>
+            <div className="flex-1 space-y-1">
+              {concerns.map((c, i) => (
+                <div key={i} className="flex items-start gap-2">
+                  <span className={`font-mono text-[9px] px-1.5 py-0.5 rounded border shrink-0 ${
+                    c.severity === 'high' ? 'text-alert border-alert/40 bg-background/20' :
+                    c.severity === 'medium' ? 'text-warning border-warning/40' : 'text-muted-foreground border-border'
+                  }`}>{c.severity.toUpperCase()}</span>
+                  <p className="text-[12px] text-foreground leading-relaxed">{c.description || c.concern}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Body ── */}
+      <div className="flex flex-1 overflow-hidden">
 
         {/* Left pane — patient info + documents */}
         <aside className="w-72 shrink-0 border-r border-border bg-surface flex flex-col overflow-hidden">
@@ -405,11 +382,11 @@ export default function PatientDetailClient({ patient, initialDocuments, initial
           <div className="flex-1 overflow-y-auto px-4 py-4">
             <div className="flex items-center justify-between mb-3">
               <p className="font-mono text-[9px] tracking-widest text-muted-foreground uppercase">Documents</p>
-              {!isGuest && (
+              {!isDemo && !isGuest && (
                 <label className="cursor-pointer">
-                  <input type="file" accept=".pdf,application/pdf" className="hidden" onChange={handleFileUpload} disabled={uploading} />
+                  <input type="file" accept=".pdf" className="hidden" onChange={handleFileUpload} disabled={uploadingFile} />
                   <span className="font-mono text-[10px] text-accent hover:text-foreground transition-colors">
-                    {uploading ? 'Uploading…' : '+ Upload'}
+                    {uploadingFile ? 'Uploading…' : '+ Upload'}
                   </span>
                 </label>
               )}
@@ -418,9 +395,9 @@ export default function PatientDetailClient({ patient, initialDocuments, initial
             {documents.length === 0 ? (
               <div className="border border-dashed border-border rounded-md p-5 text-center">
                 <p className="text-[11px] text-muted-foreground">No documents yet.</p>
-                {!isGuest && (
+                {!isGuest && !isDemo && (
                   <label className="cursor-pointer mt-2 block">
-                    <input type="file" accept=".pdf,application/pdf" className="hidden" onChange={handleFileUpload} />
+                    <input type="file" accept=".pdf" className="hidden" onChange={handleFileUpload} />
                     <span className="font-mono text-[10px] text-accent hover:underline">Upload first document</span>
                   </label>
                 )}
@@ -430,7 +407,7 @@ export default function PatientDetailClient({ patient, initialDocuments, initial
                 {documents.map((doc) => (
                   <div key={doc.id}
                     className={`border border-border rounded-md px-3 py-2.5 bg-surface-raised ${doc.storage_path && !isDemo ? 'hover:border-accent/40 cursor-pointer transition-colors' : ''}`}
-                    onClick={(e) => doc.storage_path && !isDemo ? handleDocClick(e as unknown as React.MouseEvent, doc.id) : undefined}
+                    onClick={(e) => doc.storage_path && !isDemo ? handleDocClick(e, doc.id) : undefined}
                   >
                     <div className="flex items-start gap-2">
                       <svg width="12" height="14" viewBox="0 0 12 14" fill="none" className="text-muted-foreground shrink-0 mt-0.5">
@@ -451,10 +428,10 @@ export default function PatientDetailClient({ patient, initialDocuments, initial
             )}
           </div>
 
-          {/* Generate briefing — only for authenticated real patients */}
-          {!isGuest ? (
+          {/* Generate briefing */}
+          {!isDemo && !isGuest && (
             <div className="border-t border-border p-4 shrink-0">
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 mb-2">
                 <select
                   value={audience}
                   onChange={(e) => setAudience(e.target.value as typeof audience)}
@@ -475,16 +452,6 @@ export default function PatientDetailClient({ patient, initialDocuments, initial
                   {generating ? 'Generating…' : 'Generate briefing'}
                 </button>
               </div>
-            </div>
-          ) : (
-            <div className="border-t border-border p-4 shrink-0">
-              <p className="text-[11px] text-muted-foreground mb-3 leading-relaxed">Sign in to upload documents and generate briefings.</p>
-              <Link href="/signup" className="flex items-center justify-center w-full bg-accent text-background font-mono text-[11px] font-semibold py-2 rounded hover:opacity-90 transition-opacity">
-                Create free account
-              </Link>
-              <Link href="/login" className="flex items-center justify-center w-full border border-border text-muted-foreground font-mono text-[11px] py-2 rounded hover:border-accent hover:text-foreground transition-colors mt-2">
-                Sign in
-              </Link>
             </div>
           )}
         </aside>
@@ -520,14 +487,14 @@ export default function PatientDetailClient({ patient, initialDocuments, initial
                   <h2 className="text-[16px] font-semibold text-foreground">
                     {activeBriefing.audience
                       ? activeBriefing.audience.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase())
-                      : 'Briefing'}
+                      : 'Briefing'} Briefing
                   </h2>
                   <p className="font-mono text-[10px] text-muted-foreground mt-1">
                     Generated {new Date(activeBriefing.created_at).toLocaleString()}
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
-                  {activeBriefing.status === 'failed' && !isGuest && (
+                  {activeBriefing.status === 'failed' && (
                     <button
                       onClick={() => retryBriefing(activeBriefing.id)}
                       disabled={generating}
@@ -558,22 +525,22 @@ export default function PatientDetailClient({ patient, initialDocuments, initial
                     <p className="font-mono text-[9px] text-muted-foreground">Every claim traced to source</p>
                   </div>
                   <div className="flex items-center gap-4 ml-auto">
-                    {supportedCount > 0 && (
+                    {supported > 0 && (
                       <div className="flex items-center gap-1.5">
                         <div className="w-1.5 h-1.5 rounded-full bg-success" />
-                        <span className="font-mono text-[10px] text-muted-foreground">{supportedCount} supported</span>
+                        <span className="font-mono text-[10px] text-muted-foreground">{supported} supported</span>
                       </div>
                     )}
-                    {partialCount > 0 && (
+                    {partial > 0 && (
                       <div className="flex items-center gap-1.5">
                         <div className="w-1.5 h-1.5 rounded-full bg-warning" />
-                        <span className="font-mono text-[10px] text-muted-foreground">{partialCount} partial</span>
+                        <span className="font-mono text-[10px] text-muted-foreground">{partial} partial</span>
                       </div>
                     )}
-                    {unsupportedCount > 0 && (
+                    {unsupported > 0 && (
                       <div className="flex items-center gap-1.5">
                         <div className="w-1.5 h-1.5 rounded-full bg-alert" />
-                        <span className="font-mono text-[10px] text-muted-foreground">{unsupportedCount} unsupported</span>
+                        <span className="font-mono text-[10px] text-muted-foreground">{unsupported} unsupported</span>
                       </div>
                     )}
                   </div>
@@ -643,22 +610,6 @@ export default function PatientDetailClient({ patient, initialDocuments, initial
                 </div>
               )}
 
-              {/* Failed state */}
-              {activeBriefing.status === 'failed' && !activeBriefing.briefing_text && (
-                <div className="border border-alert/30 bg-alert-dim rounded-md px-5 py-6 text-center">
-                  <p className="text-[13px] text-alert mb-3">Briefing generation failed.</p>
-                  {!isGuest && (
-                    <button
-                      onClick={() => retryBriefing(activeBriefing.id)}
-                      disabled={generating}
-                      className="font-mono text-[11px] border border-alert/40 text-alert px-4 py-2 rounded hover:bg-alert/10 transition-colors disabled:opacity-50"
-                    >
-                      {generating ? 'Retrying…' : 'Retry'}
-                    </button>
-                  )}
-                </div>
-              )}
-
               {/* Demo disclaimer */}
               {isDemo && (
                 <div className="border-t border-border mt-8 pt-6">
@@ -692,6 +643,5 @@ export default function PatientDetailClient({ patient, initialDocuments, initial
         </main>
       </div>
     </div>
-  </div>
   )
 }
