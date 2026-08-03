@@ -334,60 +334,56 @@ export default function PatientDetailClient({ patient, initialDocuments, initial
   const age = Math.floor((Date.now() - new Date(patient.date_of_birth).getTime()) / (1000 * 60 * 60 * 24 * 365.25))
 
   return (
-    <div className="min-h-screen bg-background flex flex-col">
+    <div className="px-8 pb-8 flex-1 flex flex-col overflow-hidden">
+      <div className="border border-border rounded-lg bg-surface flex flex-col flex-1 overflow-hidden">
 
-      {/* ── Top nav ── */}
-      <header className="shrink-0 border-b border-border bg-surface flex items-center px-5 py-3 gap-4">
-        <Link href="/dashboard" className="flex items-center gap-1.5 text-muted-foreground hover:text-foreground transition-colors">
-          <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-            <path d="M9.5 6H2.5M5 3L2 6l3 3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
-          </svg>
-          <span className="font-mono text-[10px]">Dashboard</span>
-        </Link>
-        <span className="text-border">/</span>
-        <span className="font-mono text-[10px] text-foreground">{patient.name}</span>
+        {/* ── Inner Header ── */}
+        <header className="shrink-0 border-b border-border bg-surface flex items-center px-5 py-3 gap-4">
+          <span className="font-mono text-[10px] text-muted-foreground uppercase tracking-widest">CareNote</span>
+          <span className="text-border">/</span>
+          <span className="font-mono text-[10px] text-foreground font-semibold">{patient.name}</span>
+          {concerns.length > 0 && (
+            <div className="flex items-center gap-1.5 bg-alert-dim border border-alert/30 rounded px-2 py-0.5">
+              <div className="w-1.5 h-1.5 rounded-full bg-alert" />
+              <span className="font-mono text-[10px] text-alert">{concerns.length} FLAG</span>
+            </div>
+          )}
+          <div className="ml-auto flex items-center gap-2">
+            {isDemo && (
+              <span className="font-mono text-[9px] border border-border text-muted-foreground px-2 py-1 rounded">DEMO RECORD</span>
+            )}
+            {isGuest && (
+              <Link href="/signup" className="font-mono text-[10px] bg-accent text-background px-3 py-1.5 rounded hover:opacity-90 transition-opacity font-semibold">
+                Create account to save
+              </Link>
+            )}
+          </div>
+        </header>
+
+        {/* ── Flagged concerns band ── */}
         {concerns.length > 0 && (
-          <div className="flex items-center gap-1.5 bg-alert-dim border border-alert/30 rounded px-2 py-0.5">
-            <div className="w-1.5 h-1.5 rounded-full bg-alert" />
-            <span className="font-mono text-[10px] text-alert">{concerns.length} flag{concerns.length !== 1 ? 's' : ''}</span>
+          <div className="shrink-0 border-b border-alert/30 bg-alert-dim px-5 py-3">
+            <div className="flex items-start gap-3">
+              <div className="shrink-0 mt-0.5">
+                <span className="font-mono text-[9px] text-alert border border-alert/40 px-1.5 py-0.5 rounded tracking-widest">FLAGGED CONCERNS — RAISE WITH DOCTOR</span>
+              </div>
+              <div className="flex-1 space-y-1">
+                {concerns.map((c, i) => (
+                  <div key={i} className="flex items-start gap-2">
+                    <span className={`font-mono text-[9px] px-1.5 py-0.5 rounded border shrink-0 ${
+                      c.severity === 'high' ? 'text-alert border-alert/40 bg-background/20' :
+                      c.severity === 'medium' ? 'text-warning border-warning/40' : 'text-muted-foreground border-border'
+                    }`}>{c.severity.toUpperCase()}</span>
+                    <p className="text-[12px] text-foreground leading-relaxed">{c.concern || c.description}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
         )}
-        <div className="ml-auto flex items-center gap-2">
-          {isDemo && (
-            <span className="font-mono text-[9px] border border-border text-muted-foreground px-2 py-1 rounded">DEMO RECORD</span>
-          )}
-          {isGuest && (
-            <Link href="/signup" className="font-mono text-[10px] bg-accent text-background px-3 py-1.5 rounded hover:opacity-90 transition-opacity">
-              Create account to save
-            </Link>
-          )}
-        </div>
-      </header>
 
-      {/* ── Flagged concerns band ── */}
-      {concerns.length > 0 && (
-        <div className="shrink-0 border-b border-alert/30 bg-alert-dim px-5 py-3">
-          <div className="flex items-start gap-3">
-            <div className="shrink-0 mt-0.5">
-              <span className="font-mono text-[9px] text-alert border border-alert/40 px-1.5 py-0.5 rounded tracking-widest">FLAGGED — RAISE WITH DOCTOR</span>
-            </div>
-            <div className="flex-1 space-y-1">
-              {concerns.map((c, i) => (
-                <div key={i} className="flex items-start gap-2">
-                  <span className={`font-mono text-[9px] px-1.5 py-0.5 rounded border shrink-0 ${
-                    c.severity === 'high' ? 'text-alert border-alert/40 bg-background/20' :
-                    c.severity === 'medium' ? 'text-warning border-warning/40' : 'text-muted-foreground border-border'
-                  }`}>{c.severity.toUpperCase()}</span>
-                  <p className="text-[12px] text-foreground leading-relaxed">{c.concern || c.description}</p>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── Body ── */}
-      <div className="flex flex-1 overflow-hidden">
+        {/* ── Body ── */}
+        <div className="flex flex-1 overflow-hidden">
 
         {/* Left pane — patient info + documents */}
         <aside className="w-72 shrink-0 border-r border-border bg-surface flex flex-col overflow-hidden">
@@ -696,5 +692,6 @@ export default function PatientDetailClient({ patient, initialDocuments, initial
         </main>
       </div>
     </div>
+  </div>
   )
 }
