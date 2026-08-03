@@ -1,7 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
-import Link from 'next/link'
-import { Button } from '@/components/ui/button'
 import { getPatientSafely } from '@/lib/data/patient'
 import { isValidUUID } from '@/lib/validators'
 import PatientDetailClient from './PatientDetailClient'
@@ -45,29 +43,10 @@ export default async function PatientPage({ params }: { params: Promise<{ id: st
     .order('created_at', { ascending: false })
 
   return (
-    <div className="min-h-screen bg-gray-50 p-8">
-      <div className="max-w-4xl mx-auto space-y-6">
-        <div className="flex items-center space-x-4 mb-6">
-          <Link href="/dashboard">
-            <Button variant="outline" size="sm">← Back to Dashboard</Button>
-          </Link>
-        </div>
-
-        <header>
-          <h1 className="text-3xl font-bold tracking-tight text-gray-900">
-            {patient.name}
-          </h1>
-          <p className="text-gray-600 mt-2">
-            DOB: {new Date(patient.date_of_birth).toLocaleDateString()} • {patient.relationship}
-          </p>
-        </header>
-
-        <PatientDetailClient 
-          patient={patient} 
-          initialDocuments={(documents || []) as Document[]} 
-          initialBriefings={(briefings || []) as Briefing[]}
-        />
-      </div>
-    </div>
+    <PatientDetailClient
+      patient={patient}
+      initialDocuments={(documents || []) as Document[]}
+      initialBriefings={(briefings || []) as Briefing[]}
+    />
   )
 }
