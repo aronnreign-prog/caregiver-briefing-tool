@@ -35,24 +35,19 @@ export async function proxy(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser()
 
-  // If no user and not on a public page, redirect to login
-  const publicPaths = ['/login', '/signup']
+  // Public paths accessible without authentication (for Demo / Guest mode)
+  const publicPaths = ['/login', '/signup', '/dashboard', '/']
   const isPublicPath = publicPaths.some((path) =>
-    request.nextUrl.pathname.startsWith(path)
+    request.nextUrl.pathname === path || request.nextUrl.pathname.startsWith('/dashboard') || request.nextUrl.pathname === '/'
   )
   const isStaticAsset =
     request.nextUrl.pathname.startsWith('/_next') ||
     request.nextUrl.pathname.startsWith('/favicon') ||
     request.nextUrl.pathname.startsWith('/images')
 
-  if (!user && !isPublicPath && !isStaticAsset) {
-    const url = request.nextUrl.clone()
-    url.pathname = '/login'
-    return NextResponse.redirect(url)
-  }
-
   // If user is logged in and tries to access login/signup, redirect to dashboard
-  if (user && isPublicPath) {
+  const isAuthPage = request.nextUrl.pathname.startsWith('/login') || request.nextUrl.pathname.startsWith('/signup')
+  if (user && isAuthPage) {
     const url = request.nextUrl.clone()
     url.pathname = '/dashboard'
     return NextResponse.redirect(url)
