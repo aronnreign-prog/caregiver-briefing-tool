@@ -20,7 +20,7 @@ export async function login(formData: FormData) {
   }
 
   revalidatePath('/', 'layout')
-  redirect('/dashboard')
+  return { success: true }
 }
 
 export async function signup(formData: FormData) {
@@ -30,8 +30,6 @@ export async function signup(formData: FormData) {
   const password = formData.get('password') as string
   const name = formData.get('name') as string
 
-  // Note: we can use a service role client to insert into the caregiver table,
-  // or rely on RLS if the user is authenticated. We'll use the authenticated user.
   const { data: authData, error: authError } = await supabase.auth.signUp({
     email,
     password,
@@ -42,7 +40,6 @@ export async function signup(formData: FormData) {
   }
 
   if (authData.user) {
-    // Insert into caregivers table using service role to bypass RLS
     const adminSupabase = createSupabaseClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.SUPABASE_SERVICE_ROLE_KEY!
@@ -56,12 +53,11 @@ export async function signup(formData: FormData) {
 
     if (dbError) {
       console.error('Failed to create caregiver profile:', dbError)
-      // Even if it fails, they signed up, but we might want to handle it
     }
   }
 
   revalidatePath('/', 'layout')
-  redirect('/dashboard')
+  return { success: true }
 }
 
 export async function logout() {

@@ -8,12 +8,24 @@ export default function SignupPage() {
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
 
-  async function handleSubmit(formData: FormData) {
+  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault()
+    if (loading) return
     setLoading(true)
     setError(null)
-    const result = await signup(formData)
-    if (result?.error) {
-      setError(result.error)
+
+    try {
+      const formData = new FormData(e.currentTarget)
+      const result = await signup(formData)
+      if (result?.error) {
+        setError(result.error)
+        setLoading(false)
+      } else if (result?.success) {
+        window.location.href = '/dashboard'
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Signup failed'
+      setError(msg)
       setLoading(false)
     }
   }
@@ -67,7 +79,7 @@ export default function SignupPage() {
           <h2 className="text-lg font-semibold text-foreground mb-1">Create account</h2>
           <p className="text-sm text-muted-foreground mb-8">Free. No credit card required.</p>
 
-          <form action={handleSubmit} className="space-y-4">
+          <form onSubmit={handleSubmit} className="space-y-4">
             {error && (
               <div className="border border-alert/30 bg-alert-dim rounded px-3 py-2.5">
                 <p className="font-mono text-[11px] text-alert-foreground">{error}</p>
@@ -123,7 +135,7 @@ export default function SignupPage() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full bg-accent text-background font-mono text-xs py-2.5 rounded hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-opacity mt-2"
+              className="w-full bg-accent text-background font-mono text-xs py-2.5 rounded hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-opacity mt-2 cursor-pointer"
             >
               {loading ? 'Creating account...' : 'Create account'}
             </button>

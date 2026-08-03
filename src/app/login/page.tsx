@@ -8,11 +8,26 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
 
-  async function handleSubmit(formData: FormData) {
+  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault()
+    if (loading) return
     setLoading(true)
     setError(null)
-    const result = await login(formData)
-    if (result?.error) { setError(result.error); setLoading(false) }
+
+    try {
+      const formData = new FormData(e.currentTarget)
+      const result = await login(formData)
+      if (result?.error) {
+        setError(result.error)
+        setLoading(false)
+      } else if (result?.success) {
+        window.location.href = '/dashboard'
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Login failed'
+      setError(msg)
+      setLoading(false)
+    }
   }
 
   return (
@@ -88,7 +103,7 @@ export default function LoginPage() {
           <h2 className="text-[22px] font-semibold text-foreground mb-1">Sign in</h2>
           <p className="text-[12px] text-muted-foreground mb-8">Access your caregiving dashboard.</p>
 
-          <form action={handleSubmit} className="space-y-4">
+          <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <label className="font-mono text-[9px] tracking-widest text-muted-foreground uppercase block mb-1.5">Email</label>
               <input
@@ -114,7 +129,7 @@ export default function LoginPage() {
 
             <button
               type="submit" disabled={loading}
-              className="w-full bg-accent text-background font-mono text-[12px] font-bold py-3 rounded-md hover:opacity-90 transition-opacity disabled:opacity-60 mt-2"
+              className="w-full bg-accent text-background font-mono text-[12px] font-bold py-3 rounded-md hover:opacity-90 transition-opacity disabled:opacity-60 mt-2 cursor-pointer"
             >
               {loading ? 'Signing in…' : 'Sign in'}
             </button>
