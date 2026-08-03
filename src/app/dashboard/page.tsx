@@ -1,8 +1,12 @@
 import { createClient } from '@/lib/supabase/server'
-import { redirect } from 'next/navigation'
 import { logout } from '@/app/auth/actions'
 import { addPatient } from '@/app/dashboard/actions'
 import Link from 'next/link'
+
+const DEMO_PATIENTS = [
+  { id: 'demo-1', name: 'Margaret Thompson', relationship: 'Mother', date_of_birth: '1945-03-12', flagCount: 1, docCount: 3, briefingStatus: 'complete' },
+  { id: 'demo-2', name: 'Robert Chen', relationship: 'Father', date_of_birth: '1948-07-24', flagCount: 0, docCount: 1, briefingStatus: 'pending' },
+]
 
 function calcAge(dob: string) {
   const diff = Date.now() - new Date(dob).getTime()
@@ -15,32 +19,22 @@ function initials(name: string) {
 
 export default async function DashboardPage() {
   const supabase = await createClient()
+  const user = supabase ? (await supabase.auth.getUser()).data.user : null
 
-  const { data: { user }, error: authError } = await supabase.auth.getUser()
+  let caregiver: { id: string; name: string } | null = null
+  let patients: { id: string; name: string; relationship: string; date_of_birth: string; flagCount?: number; docCount?: number; briefingStatus?: string }[] = []
+  const isGuest = !user
 
-  if (authError || !user) {
-    redirect('/login')
+  if (user && supabase) {
+    const { data } = await supabase.from('caregivers').select('id, name').eq('auth_user_id', user.id).single()
+    caregiver = data
+    if (caregiver?.id) {
+      const { data: patientData } = await supabase.from('patients').select('*').eq('caregiver_id', caregiver.id).order('created_at', { ascending: false })
+      patients = patientData || []
+    }
+  } else {
+    patients = DEMO_PATIENTS
   }
-
-  // Fetch caregiver profile
-  const { data: caregiver } = await supabase
-    .from('caregivers')
-    .select('id, name')
-    .eq('auth_user_id', user.id)
-    .single()
-
-  if (!caregiver?.id) {
-    throw new Error('Caregiver profile not found')
-  }
-
-  // Fetch patients
-  const { data: patients } = await supabase
-    .from('patients')
-    .select('*')
-    .eq('caregiver_id', caregiver.id)
-    .order('created_at', { ascending: false })
-
-  const patientList = patients || []
 
   return (
     <div className="h-screen bg-background flex overflow-hidden">
@@ -60,7 +54,7 @@ export default async function DashboardPage() {
 
         <div className="flex-1 overflow-y-auto px-2 py-4">
           <p className="font-mono text-[9px] tracking-widest text-muted-foreground uppercase px-3 mb-2">Patients</p>
-          {patientList.map((p) => (
+          {patients.map((p) => (
             <Link key={p.id} href={`/dashboard/patients/${p.id}`}
               className="group flex items-center gap-3 px-3 py-3 rounded-md hover:bg-surface-raised transition-colors">
               <div className="w-8 h-8 rounded-md bg-accent-dim border border-accent/25 flex items-center justify-center shrink-0 font-mono text-[11px] font-bold text-accent">
@@ -70,28 +64,43 @@ export default async function DashboardPage() {
                 <p className="text-[13px] font-medium text-foreground truncate">{p.name}</p>
                 <p className="font-mono text-[10px] text-muted-foreground">{p.relationship} · {calcAge(p.date_of_birth)}y</p>
               </div>
+              {(p.flagCount ?? 0) > 0 && (
+                <div className="w-1.5 h-1.5 rounded-full bg-alert shrink-0" />
+              )}
             </Link>
           ))}
-          {patientList.length === 0 && (
+          {patients.length === 0 && (
             <p className="px-3 py-4 text-xs text-muted-foreground">No patients yet.</p>
           )}
         </div>
 
         <div className="border-t border-border p-4">
-          <form action={async (fd: FormData) => { 'use server'; await addPatient(fd) }}>
-            <p className="font-mono text-[9px] tracking-widest text-muted-foreground uppercase mb-3">Add patient</p>
-            <div className="space-y-2">
-              <input name="name" placeholder="Full name" required
-                className="w-full bg-background border border-border rounded px-3 py-2 text-[12px] text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-accent" />
-              <input name="relationship" placeholder="Relationship" required
-                className="w-full bg-background border border-border rounded px-3 py-2 text-[12px] text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-accent" />
-              <input name="date_of_birth" type="date" required
-                className="w-full bg-background border border-border rounded px-3 py-2 text-[12px] text-foreground font-mono focus:outline-none focus:border-accent" />
-              <button type="submit" className="w-full bg-accent text-background font-mono text-[11px] font-semibold py-2 rounded hover:opacity-90 transition-opacity">
-                Add patient
-              </button>
+          {isGuest ? (
+            <div>
+              <p className="text-[11px] text-muted-foreground leading-relaxed mb-3">Sign in to add patient records and upload documents.</p>
+              <Link href="/signup" className="flex items-center justify-center w-full bg-accent text-background font-mono text-[11px] font-semibold py-2 rounded hover:opacity-90 transition-opacity">
+                Create free account
+              </Link>
+              <Link href="/login" className="flex items-center justify-center w-full border border-border text-muted-foreground font-mono text-[11px] py-2 rounded hover:border-accent hover:text-foreground transition-colors mt-2">
+                Sign in
+              </Link>
             </div>
-          </form>
+          ) : (
+            <form action={async (fd: FormData) => { 'use server'; await addPatient(fd) }}>
+              <p className="font-mono text-[9px] tracking-widest text-muted-foreground uppercase mb-3">Add patient</p>
+              <div className="space-y-2">
+                <input name="name" placeholder="Full name" required
+                  className="w-full bg-background border border-border rounded px-3 py-2 text-[12px] text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-accent" />
+                <input name="relationship" placeholder="Relationship" required
+                  className="w-full bg-background border border-border rounded px-3 py-2 text-[12px] text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-accent" />
+                <input name="date_of_birth" type="date" required
+                  className="w-full bg-background border border-border rounded px-3 py-2 text-[12px] text-foreground font-mono focus:outline-none focus:border-accent" />
+                <button type="submit" className="w-full bg-accent text-background font-mono text-[11px] font-semibold py-2 rounded hover:opacity-90 transition-opacity">
+                  Add patient
+                </button>
+              </div>
+            </form>
+          )}
         </div>
       </aside>
 
@@ -101,26 +110,50 @@ export default async function DashboardPage() {
         <header className="shrink-0 border-b border-border bg-surface/60 backdrop-blur flex items-center justify-between px-6 py-3">
           <div>
             <h1 className="text-[13px] font-semibold text-foreground">
-              {caregiver?.name ?? 'My workspace'}
+              {isGuest ? 'Demo workspace' : caregiver?.name ?? 'My workspace'}
             </h1>
             <p className="font-mono text-[10px] text-muted-foreground mt-0.5">
-              {patientList.length} patient{patientList.length !== 1 ? 's' : ''}
+              {isGuest ? 'Sample records — sign in to manage your own' : `${patients.length} patient${patients.length !== 1 ? 's' : ''}`}
             </p>
           </div>
-          <form action={async () => { 'use server'; await logout() }}>
-            <button type="submit" className="font-mono text-[11px] text-muted-foreground border border-border px-3 py-1.5 rounded hover:text-foreground hover:border-foreground/30 transition-colors">
-              Sign out
-            </button>
-          </form>
+          {!isGuest ? (
+            <form action={async () => { 'use server'; await logout() }}>
+              <button type="submit" className="font-mono text-[11px] text-muted-foreground border border-border px-3 py-1.5 rounded hover:text-foreground hover:border-foreground/30 transition-colors">
+                Sign out
+              </button>
+            </form>
+          ) : (
+            <div className="flex items-center gap-2">
+              <Link href="/login" className="font-mono text-[11px] text-muted-foreground border border-border px-3 py-1.5 rounded hover:text-foreground hover:border-foreground/30 transition-colors">
+                Sign in
+              </Link>
+              <Link href="/signup" className="font-mono text-[11px] bg-accent text-background px-3 py-1.5 rounded hover:opacity-90 transition-opacity">
+                Create account
+              </Link>
+            </div>
+          )}
         </header>
 
         <main className="flex-1 overflow-y-auto px-6 py-6">
 
+          {isGuest && (
+            <div className="mb-5 flex items-center gap-3 bg-warning-dim border border-warning/25 rounded-md px-4 py-3">
+              <div className="w-1.5 h-1.5 rounded-full bg-warning shrink-0" />
+              <p className="text-[12px] text-muted-foreground">
+                <span className="text-warning-foreground font-mono text-[10px] tracking-widest uppercase mr-2">Demo mode</span>
+                Viewing sample data.{' '}
+                <Link href="/signup" className="text-accent hover:underline">Create an account</Link>{' '}
+                to manage real patient records.
+              </p>
+            </div>
+          )}
+
           {/* Patient cards */}
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 mb-8">
-            {patientList.map((p) => (
+            {patients.map((p) => (
               <Link key={p.id} href={`/dashboard/patients/${p.id}`} className="group block">
                 <article className="border border-border bg-surface rounded-lg overflow-hidden hover:border-accent/40 hover:bg-surface-raised transition-all h-full flex flex-col">
+                  {(p.flagCount ?? 0) > 0 && <div className="h-0.5 bg-alert w-full" />}
                   <div className="p-5 flex-1">
                     <div className="flex items-start gap-3">
                       <div className="w-10 h-10 rounded-lg bg-accent-dim border border-accent/20 flex items-center justify-center shrink-0 font-mono text-[13px] font-bold text-accent">
@@ -129,6 +162,7 @@ export default async function DashboardPage() {
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
                           <h2 className="text-[13px] font-semibold text-foreground truncate">{p.name}</h2>
+                          {isGuest && <span className="font-mono text-[9px] border border-border text-muted-foreground px-1.5 py-0.5 rounded-sm shrink-0">DEMO</span>}
                         </div>
                         <p className="font-mono text-[10px] text-muted-foreground mt-0.5">
                           {p.relationship} · DOB {p.date_of_birth} · Age {calcAge(p.date_of_birth)}
@@ -142,12 +176,28 @@ export default async function DashboardPage() {
                           <rect x="1" y="1.5" width="9" height="8" rx="1" stroke="currentColor" strokeWidth="1.1"/>
                           <path d="M3.5 4.5h4M3.5 6.5h2.5" stroke="currentColor" strokeWidth="1" strokeLinecap="round"/>
                         </svg>
-                        <span className="font-mono text-[10px] text-muted-foreground">0 docs</span>
+                        <span className="font-mono text-[10px] text-muted-foreground">{p.docCount ?? '0'} docs</span>
                       </div>
-                      <div className="flex items-center gap-1.5">
-                        <div className="w-1.5 h-1.5 rounded-full bg-success" />
-                        <span className="font-mono text-[10px] text-muted-foreground">No flags</span>
-                      </div>
+                      {(p.flagCount ?? 0) > 0 ? (
+                        <div className="flex items-center gap-1.5">
+                          <div className="w-1.5 h-1.5 rounded-full bg-alert" />
+                          <span className="font-mono text-[10px] text-alert">{p.flagCount} concern{(p.flagCount ?? 0) !== 1 ? 's' : ''}</span>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-1.5">
+                          <div className="w-1.5 h-1.5 rounded-full bg-success" />
+                          <span className="font-mono text-[10px] text-muted-foreground">No flags</span>
+                        </div>
+                      )}
+                      {p.briefingStatus && (
+                        <span className={`ml-auto font-mono text-[9px] px-1.5 py-0.5 rounded border ${
+                          p.briefingStatus === 'complete'
+                            ? 'text-success border-success/30 bg-success-dim'
+                            : 'text-muted-foreground border-border'
+                        }`}>
+                          {p.briefingStatus === 'complete' ? 'BRIEFING READY' : 'NO BRIEFING'}
+                        </span>
+                      )}
                     </div>
                   </div>
                   <div className="border-t border-border px-5 py-2.5 flex items-center justify-between">
@@ -159,13 +209,6 @@ export default async function DashboardPage() {
                 </article>
               </Link>
             ))}
-
-            {patientList.length === 0 && (
-              <div className="col-span-full border border-dashed border-border rounded-lg p-12 text-center">
-                <p className="font-mono text-[9px] tracking-widest text-muted-foreground uppercase mb-2">No patients yet</p>
-                <p className="text-[12px] text-muted-foreground">Add your first patient using the panel on the left.</p>
-              </div>
-            )}
           </div>
 
           {/* How it works */}
