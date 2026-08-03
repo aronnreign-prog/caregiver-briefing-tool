@@ -307,7 +307,7 @@ export default function PatientDetailClient({ patient, initialDocuments, initial
   const age = Math.floor((Date.now() - new Date(patient.date_of_birth).getTime()) / (1000 * 60 * 60 * 24 * 365.25))
 
   return (
-    <div className="min-h-screen bg-background flex flex-col">
+    <div className="border border-border rounded-lg bg-surface overflow-hidden flex flex-col min-h-[600px]">
 
       {/* ── Top nav ── */}
       <header className="shrink-0 border-b border-border bg-surface flex items-center px-5 py-3 gap-4">
