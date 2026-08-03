@@ -17,6 +17,7 @@ import json
 import re
 import base64
 import logging
+import asyncio
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Optional, Any
@@ -417,23 +418,36 @@ async def lifespan(app: FastAPI):
         )
     )
 
-    falkor_driver = FalkorDriver(host=FALKORDB_HOST, port=FALKORDB_PORT, password=FALKORDB_PASSWORD, username="falkordb")
+    falkor_driver = None
+    graphiti = None
+    max_retries = 5
 
-    graphiti = Graphiti(
-        graph_driver=falkor_driver,
-        llm_client=llm_client,
-        embedder=embedder,
-        cross_encoder=cross_encoder,
-    )
-
-    logger.info("Building Graphiti indices and constraints…")
-    await graphiti.build_indices_and_constraints()
-    logger.info("Graphiti ready ✓")
+    for attempt in range(1, max_retries + 1):
+        try:
+            logger.info(f"Connecting to FalkorDB (attempt {attempt}/{max_retries}) at {FALKORDB_HOST}:{FALKORDB_PORT}...")
+            falkor_driver = FalkorDriver(host=FALKORDB_HOST, port=FALKORDB_PORT, password=FALKORDB_PASSWORD, username="falkordb")
+            graphiti = Graphiti(
+                graph_driver=falkor_driver,
+                llm_client=llm_client,
+                embedder=embedder,
+                cross_encoder=cross_encoder,
+            )
+            logger.info("Building Graphiti indices and constraints…")
+            await graphiti.build_indices_and_constraints()
+            logger.info("Graphiti ready ✓")
+            break
+        except Exception as e:
+            logger.warning(f"FalkorDB connection attempt {attempt} failed: {e}")
+            if attempt == max_retries:
+                logger.error("Failed to connect to FalkorDB after max retries. Exiting.")
+                raise e
+            await asyncio.sleep(2 * attempt)
 
     yield
 
-    await graphiti.close()
-    logger.info("Graphiti connection closed.")
+    if graphiti is not None:
+        await graphiti.close()
+        logger.info("Graphiti connection closed.")
 
 
 app = FastAPI(title="Graphiti Medical Wrapper", lifespan=lifespan)
