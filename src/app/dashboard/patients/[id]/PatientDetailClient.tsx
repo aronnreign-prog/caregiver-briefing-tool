@@ -185,7 +185,7 @@ export default function PatientDetailClient({ patient, initialDocuments, initial
   useEffect(() => {
     if (!supabase || isDemo) return
     const hasPendingBriefing = briefings.some(b => b.status === 'queued' || b.status === 'processing')
-    const hasPendingDoc = documents.some(d => d.status === 'uploaded')
+    const hasPendingDoc = documents.some(d => ['uploaded', 'processing', 'extracting'].includes(d.status))
 
     if (!hasPendingBriefing && !hasPendingDoc) return
 

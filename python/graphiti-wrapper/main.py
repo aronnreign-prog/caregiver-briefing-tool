@@ -22,6 +22,12 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Optional, Any
 
+# Enforce SEMAPHORE_LIMIT=10 for 10x parallel deduplication/concurrency (Requirement R2)
+os.environ["SEMAPHORE_LIMIT"] = os.getenv("SEMAPHORE_LIMIT", "10")
+import graphiti_core.helpers
+graphiti_core.helpers.SEMAPHORE_LIMIT = 10
+
+from google.genai import types
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
@@ -32,22 +38,43 @@ from graphiti_core.llm_client.config import LLMConfig, ModelSize
 from graphiti_core.prompts.models import Message
 
 
+
 def extract_json_from_response(content: str) -> dict[str, Any]:
     """
     Extract and parse the first valid JSON object from response content.
     Handles: pure JSON, code fences, leading/trailing text, multiple objects.
+    Rejects empty strings, whitespace, and HTML error pages early with ValueError.
     """
-    content = re.sub(r'^```(?:json)?\s*', '', content, flags=re.MULTILINE)
-    content = re.sub(r'\s*```$', '', content, flags=re.MULTILINE)
+    if content is None or not str(content).strip():
+        raise ValueError("Empty or whitespace LLM response payload")
+
+    cleaned = str(content).strip()
+
+    if (
+        cleaned.startswith("<")
+        or cleaned.lower().startswith("rate limit")
+        or "502 bad gateway" in cleaned.lower()
+        or "503 service unavailable" in cleaned.lower()
+        or "504 gateway timeout" in cleaned.lower()
+    ):
+        raise ValueError(f"HTML or API error response returned: {cleaned[:100]}")
+
+    cleaned = re.sub(r'^```(?:json)?\s*', '', cleaned, flags=re.MULTILINE)
+    cleaned = re.sub(r'\s*```$', '', cleaned, flags=re.MULTILINE).strip()
+
+    if not cleaned:
+        raise ValueError("Empty LLM response payload after stripping code fences")
 
     try:
-        return json.loads(content)
+        res = json.loads(cleaned)
+        if isinstance(res, dict):
+            return res
     except json.JSONDecodeError:
         pass
 
     brace_count = 0
     start_idx = None
-    for i, char in enumerate(content):
+    for i, char in enumerate(cleaned):
         if char == '{':
             if start_idx is None:
                 start_idx = i
@@ -55,23 +82,24 @@ def extract_json_from_response(content: str) -> dict[str, Any]:
         elif char == '}':
             brace_count -= 1
             if brace_count == 0 and start_idx is not None:
-                json_str = content[start_idx:i+1]
+                json_str = cleaned[start_idx:i+1]
                 try:
-                    return json.loads(json_str)
+                    res = json.loads(json_str)
+                    if isinstance(res, dict):
+                        return res
                 except json.JSONDecodeError:
                     start_idx = None
 
-    json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', content, re.DOTALL)
+    json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', cleaned, re.DOTALL)
     if json_match:
         try:
-            return json.loads(json_match.group())
+            res = json.loads(json_match.group())
+            if isinstance(res, dict):
+                return res
         except json.JSONDecodeError:
             pass
 
-    raise json.JSONDecodeError(
-        f"Could not extract valid JSON from response. Preview: {content[:200]}",
-        content, 0,
-    )
+    raise ValueError(f"Could not extract valid JSON object from LLM output (length {len(content)})")
 
 
 # Patch OpenAIGenericClient._generate_response to handle OpenRouter failure modes
@@ -79,194 +107,237 @@ _original_generic_generate = OpenAIGenericClient._generate_response
 
 async def _patched_generic_generate(self, messages, response_model=None, max_tokens=16384, model_size=None):
     openai_messages = []
+    user_text_content = ""
     for m in messages:
         m.content = self._clean_input(m.content)
         if m.role == 'user':
             openai_messages.append({'role': 'user', 'content': m.content})
+            user_text_content += f"\n{m.content}"
         elif m.role == 'system':
             openai_messages.append({'role': 'system', 'content': m.content})
 
     import openai as _openai
+    import httpx
+    from tenacity import (
+        AsyncRetrying,
+        stop_after_attempt,
+        wait_exponential_jitter,
+        retry_if_exception_type,
+    )
+    from model_resolver import get_model_fallback_chain
 
-    for attempt in range(3):
+    models_to_try = get_model_fallback_chain()
+    if getattr(self, "model", None) and self.model not in models_to_try:
+        models_to_try = [self.model] + models_to_try
+
+    last_error = None
+
+    for model_name in models_to_try:
         try:
-            response = await self.client.chat.completions.create(
-                model=self.model or 'gpt-4.1-mini',
-                messages=openai_messages,
-                temperature=self.temperature,
-                max_tokens=max_tokens,
-                response_format=self._build_response_format(response_model),
-            )
-            result = response.choices[0].message.content or ''
-            if not result:
-                raise Exception('LLM returned an empty response')
-
-            parsed = extract_json_from_response(result)
-
-            if response_model and any(k in parsed for k in ('$defs', '$def', '$schema')):
-                raise ValueError('LLM returned schema definition instead of data')
-
-            if isinstance(parsed, list):
-                raise ValueError('LLM returned list instead of object')
-
-            if not isinstance(parsed, dict):
-                raise ValueError(f'LLM returned non-dict type: {type(parsed).__name__}')
-
-            top_keys = set(parsed.keys())
-            if top_keys <= {'type', 'properties', 'title', 'description', 'required', 'allOf', 'anyOf', 'oneOf', 'enum', 'items', 'additionalProperties', 'definitions'}:
-                raise ValueError('LLM returned schema fragment instead of data')
-
-            # Post-process: remap field names from OpenRouter's common variations
-            # to graphiti-core's expected field names. DeepSeek free models often
-            # return 'entities' instead of 'extracted_entities', etc.
-            #
-            # NOTE: ExtractedEdges uses "edges" (not "extracted_edges") as its
-            # top-level key in the actual schema — do NOT remap it.
-            if response_model and isinstance(parsed, dict):
-                expected_schema = response_model.model_json_schema()
-                expected_props = set(expected_schema.get('properties', {}).keys())
-                actual_keys = set(parsed.keys())
-                if not expected_props <= actual_keys:
-                    # Try fuzzy remapping for common top-level mismatches.
-                    remapped = dict(parsed)
-                    # Only remap 'entities'->'extracted_entities' and
-                    # 'nodes'->'extracted_nodes'. DO NOT remap 'edges' because
-                    # ExtractedEdges.model_json_schema() has "edges" as the
-                    # correct top-level key (the old 'extracted_edges' entry
-                    # was wrong and would have hidden valid data).
-                    known_top_remaps = {
-                        'entities': 'extracted_entities',
-                        'nodes': 'extracted_nodes',
-                    }
-                    for actual_key, remap_key in known_top_remaps.items():
-                        if actual_key in remapped and remap_key in expected_props and remap_key not in remapped:
-                            logger.info(f'[OpenRouter] top-level remap: "{actual_key}" -> "{remap_key}"')
-                            remapped[remap_key] = remapped.pop(actual_key)
-                    parsed = remapped
-
-            # Remap nested field names inside array items.
-            # LLMs (especially DeepSeek free via OpenRouter) frequently use
-            # natural-language variants of field names inside nested objects:
-            #   ExtractedEntity: entity_name -> name, entity_type_name -> entity_type_id
-            # These remaps are keyed by response_model class name so they only
-            # fire for the relevant Pydantic model, avoiding false positives.
-            if response_model and isinstance(parsed, dict):
-                model_name = getattr(response_model, '__name__', '')
-
-                # --- ExtractedEntities nested item remapper ---
-                if model_name == 'ExtractedEntities' and isinstance(parsed.get('extracted_entities'), list):
-                    ENTITY_ITEM_REMAPS = {
-                        # LLM alias          -> correct Pydantic field name
-                        'entity_name':        'name',
-                        'entityName':         'name',
-                        'entity_type_name':   'entity_type_id',
-                        'entity_type':        'entity_type_id',
-                        'type':               'entity_type_id',
-                        'typeId':             'entity_type_id',
-                        'type_id':            'entity_type_id',
-                        'indices':            'episode_indices',
-                        'episode_index':      'episode_indices',
-                    }
-                    fixed_items = []
-                    for item in parsed['extracted_entities']:
-                        if isinstance(item, str):
-                            logger.warning(
-                                f'[OpenRouter] extracted_entities item is bare string, coercing: "{item[:60]}"'
+            current_messages = list(openai_messages)
+            for attempt in range(2):
+                try:
+                    async for retry_state in AsyncRetrying(
+                        stop=stop_after_attempt(3),
+                        wait=wait_exponential_jitter(initial=1, max=6, jitter=1),
+                        retry=retry_if_exception_type((
+                            _openai.RateLimitError,
+                            _openai.APIConnectionError,
+                            _openai.APITimeoutError,
+                            _openai.InternalServerError,
+                            httpx.TimeoutException,
+                            httpx.HTTPStatusError,
+                        )),
+                        reraise=True,
+                    ):
+                        with retry_state:
+                            response = await self.client.chat.completions.create(
+                                model=model_name,
+                                messages=current_messages,
+                                temperature=self.temperature,
+                                max_tokens=max_tokens,
+                                response_format=self._build_response_format(response_model),
                             )
-                            fixed_items.append({'name': item, 'entity_type_id': 0, 'episode_indices': [0]})
-                            continue
-                        if not isinstance(item, dict):
-                            logger.warning(
-                                f'[OpenRouter] extracted_entities item has unexpected type '
-                                f'{type(item).__name__}, skipping'
-                            )
-                            continue
-                        fixed = dict(item)
-                        for alias, canonical in ENTITY_ITEM_REMAPS.items():
-                            if alias in fixed and canonical not in fixed:
-                                logger.info(f'[OpenRouter] nested entity remap: "{alias}" -> "{canonical}"')
-                                fixed[canonical] = fixed.pop(alias)
-                        # entity_type_id must be an int; if the LLM gave a string
-                        # label (e.g. "Medication"), convert to 0 so Pydantic
-                        # doesn't crash — graphiti will re-classify from context.
-                        if 'entity_type_id' in fixed and not isinstance(fixed['entity_type_id'], int):
-                            logger.warning(
-                                f'[OpenRouter] entity_type_id is non-int '
-                                f'("{fixed["entity_type_id"]}"), defaulting to 0'
-                            )
-                            fixed['entity_type_id'] = 0
-                        # episode_indices must be a list; coerce scalar to list
-                        if 'episode_indices' in fixed and not isinstance(fixed['episode_indices'], list):
-                            fixed['episode_indices'] = [fixed['episode_indices']]
-                        # Ensure required fields have sane defaults if still missing
-                        fixed.setdefault('episode_indices', [0])
-                        fixed_items.append(fixed)
-                    parsed['extracted_entities'] = fixed_items
+                            result = response.choices[0].message.content or ''
+                            parsed = extract_json_from_response(result)
 
-                # --- ExtractedEdges nested item remapper ---
-                if model_name == 'ExtractedEdges' and isinstance(parsed.get('edges'), list):
-                    EDGE_ITEM_REMAPS = {
-                        'source': 'source_entity_name',
-                        'source_entity': 'source_entity_name',
-                        'target': 'target_entity_name',
-                        'target_entity': 'target_entity_name',
-                        'relation': 'relation_type',
-                        'relationship': 'relation_type',
-                        'type': 'relation_type',
-                    }
-                    fixed_edges = []
-                    for item in parsed['edges']:
-                        if not isinstance(item, dict):
-                            logger.warning(f'[OpenRouter] edges item has unexpected type {type(item).__name__}, skipping')
-                            continue
-                        fixed = dict(item)
-                        for alias, canonical in EDGE_ITEM_REMAPS.items():
-                            if alias in fixed and canonical not in fixed:
-                                logger.info(f'[OpenRouter] nested edge remap: "{alias}" -> "{canonical}"')
-                                fixed[canonical] = fixed.pop(alias)
-                        # Ensure required fields have fallback string if missing
-                        fixed.setdefault('source_entity_name', 'Unknown')
-                        fixed.setdefault('target_entity_name', 'Unknown')
-                        fixed.setdefault('relation_type', 'ASSOCIATED_WITH')
-                        fixed.setdefault('fact', 'Relationship extracted')
-                        if 'episode_indices' in fixed and not isinstance(fixed['episode_indices'], list):
-                            fixed['episode_indices'] = [fixed['episode_indices']]
-                        fixed.setdefault('episode_indices', [0])
-                        fixed_edges.append(fixed)
-                    parsed['edges'] = fixed_edges
+                    if response_model and any(k in parsed for k in ('$defs', '$def', '$schema')):
+                        raise ValueError('LLM returned schema definition instead of data')
 
-            return parsed
+                    if isinstance(parsed, list):
+                        raise ValueError('LLM returned list instead of object')
 
-        except _openai.RateLimitError:
-            raise
-        except _openai.BadRequestError:
-            # json_schema format not supported by this model — fall back to json_object
-            if self.structured_output_mode == 'json_schema' and attempt == 0:
-                logger.warning('json_schema not supported by model, falling back to json_object')
-                self.structured_output_mode = 'json_object'
-                continue
-            raise
-        except (json.JSONDecodeError, ValueError, KeyError) as e:
-            logger.warning(
-                f'[OpenRouter] parse error on attempt {attempt+1}/3: {e}'
-            )
-            if attempt >= 2:
-                raise
-            error_msg = Message(
-                role='user',
-                content=(
-                    f'Your last response was rejected because: {e}. '
-                    f'OUTPUT ONLY THE REQUESTED DATA as a plain JSON object. '
-                    f'NEVER return a JSON Schema definition, type descriptors, $defs, or property listings. '
-                    f'Fill in the actual values.'
-                ),
-            )
-            openai_messages.append({'role': 'user', 'content': error_msg.content})
-        except Exception:
-            raise
+                    if not isinstance(parsed, dict):
+                        raise ValueError(f'LLM returned non-dict type: {type(parsed).__name__}')
+
+                    top_keys = set(parsed.keys())
+                    if top_keys <= {'type', 'properties', 'title', 'description', 'required', 'allOf', 'anyOf', 'oneOf', 'enum', 'items', 'additionalProperties', 'definitions'}:
+                        raise ValueError('LLM returned schema fragment instead of data')
+
+                    # Post-process: remap field names from OpenRouter's common variations
+                    if response_model and isinstance(parsed, dict):
+                        expected_schema = response_model.model_json_schema()
+                        expected_props = set(expected_schema.get('properties', {}).keys())
+                        actual_keys = set(parsed.keys())
+                        if not expected_props <= actual_keys:
+                            remapped = dict(parsed)
+                            known_top_remaps = {
+                                'entities': 'extracted_entities',
+                                'nodes': 'extracted_nodes',
+                            }
+                            for actual_key, remap_key in known_top_remaps.items():
+                                if actual_key in remapped and remap_key in expected_props and remap_key not in remapped:
+                                    logger.info(f'[OpenRouter] top-level remap: "{actual_key}" -> "{remap_key}"')
+                                    remapped[remap_key] = remapped.pop(actual_key)
+                            parsed = remapped
+
+                    # Remap nested field names inside array items
+                    if response_model and isinstance(parsed, dict):
+                        model_name_str = getattr(response_model, '__name__', '')
+
+                        if model_name_str == 'ExtractedEntities' and isinstance(parsed.get('extracted_entities'), list):
+                            ENTITY_ITEM_REMAPS = {
+                                'entity_name':        'name',
+                                'entityName':         'name',
+                                'entity_type_name':   'entity_type_id',
+                                'entity_type':        'entity_type_id',
+                                'type':               'entity_type_id',
+                                'typeId':             'entity_type_id',
+                                'type_id':            'entity_type_id',
+                                'indices':            'episode_indices',
+                                'episode_index':      'episode_indices',
+                            }
+                            fixed_items = []
+                            for item in parsed['extracted_entities']:
+                                if isinstance(item, str):
+                                    fixed_items.append({'name': item, 'entity_type_id': 0, 'episode_indices': [0]})
+                                    continue
+                                if not isinstance(item, dict):
+                                    continue
+                                fixed = dict(item)
+                                for alias, canonical in ENTITY_ITEM_REMAPS.items():
+                                    if alias in fixed and canonical not in fixed:
+                                        fixed[canonical] = fixed.pop(alias)
+                                if 'entity_type_id' in fixed and not isinstance(fixed['entity_type_id'], int):
+                                    fixed['entity_type_id'] = 0
+                                if 'episode_indices' in fixed and not isinstance(fixed['episode_indices'], list):
+                                    fixed['episode_indices'] = [fixed['episode_indices']]
+                                fixed.setdefault('episode_indices', [0])
+                                fixed_items.append(fixed)
+                            parsed['extracted_entities'] = fixed_items
+
+                        if model_name_str == 'ExtractedEdges' and isinstance(parsed.get('edges'), list):
+                            EDGE_ITEM_REMAPS = {
+                                'source': 'source_entity_name',
+                                'source_entity': 'source_entity_name',
+                                'target': 'target_entity_name',
+                                'target_entity': 'target_entity_name',
+                                'relation': 'relation_type',
+                                'relationship': 'relation_type',
+                                'type': 'relation_type',
+                            }
+                            fixed_edges = []
+                            for item in parsed['edges']:
+                                if not isinstance(item, dict):
+                                    continue
+                                fixed = dict(item)
+                                for alias, canonical in EDGE_ITEM_REMAPS.items():
+                                    if alias in fixed and canonical not in fixed:
+                                        fixed[canonical] = fixed.pop(alias)
+                                fixed.setdefault('source_entity_name', 'Unknown')
+                                fixed.setdefault('target_entity_name', 'Unknown')
+                                fixed.setdefault('relation_type', 'ASSOCIATED_WITH')
+                                fixed.setdefault('fact', 'Relationship extracted')
+                                if 'episode_indices' in fixed and not isinstance(fixed['episode_indices'], list):
+                                    fixed['episode_indices'] = [fixed['episode_indices']]
+                                fixed.setdefault('episode_indices', [0])
+                                fixed_edges.append(fixed)
+                            parsed['edges'] = fixed_edges
+
+                    return parsed
+
+                except (json.JSONDecodeError, ValueError, KeyError) as parse_err:
+                    logger.warning(f"[OpenRouter] parse error on model '{model_name}' attempt {attempt+1}/2: {parse_err}")
+                    if attempt >= 1:
+                        raise parse_err
+                    current_messages.append({
+                        'role': 'user',
+                        'content': (
+                            f'Your last response was rejected because: {parse_err}. '
+                            f'OUTPUT ONLY THE REQUESTED DATA as a plain JSON object. '
+                            f'NEVER return a JSON Schema definition, type descriptors, $defs, or property listings.'
+                        )
+                    })
+
+        except Exception as e:
+            logger.warning(f"[OpenRouter Fallback] Model '{model_name}' failed: {e}. Trying next fallback model...")
+            last_error = e
+            continue
+
+    # R3.e: Wire local spaCy Matcher failover if all LLMs in fallback chain fail
+    logger.warning(f"[R3 Fallback] All OpenRouter LLMs in fallback chain failed (last error: {last_error}). Synthesizing structure via local spaCy Matcher.")
+    try:
+        from extractor import _extract_labs_with_matcher
+        labs = _extract_labs_with_matcher(user_text_content)
+    except Exception as spacy_err:
+        logger.warning(f"[R3 Fallback] spaCy matcher failed: {spacy_err}")
+        labs = []
+
+    model_name_str = getattr(response_model, '__name__', '') if response_model else ''
+    if model_name_str == 'ExtractedEntities' or (response_model and 'extracted_entities' in response_model.model_json_schema().get('properties', {})):
+        entities_list = [
+            {"name": lab["test"].upper(), "entity_type_id": 0, "episode_indices": [0]}
+            for lab in labs
+        ]
+        if not entities_list:
+            entities_list = [{"name": "Patient", "entity_type_id": 0, "episode_indices": [0]}]
+        return {"extracted_entities": entities_list}
+
+    if model_name_str == 'ExtractedEdges' or (response_model and 'edges' in response_model.model_json_schema().get('properties', {})):
+        edges_list = [
+            {
+                "source_entity_name": "Patient",
+                "target_entity_name": lab["test"].upper(),
+                "relation_type": "HAS_LAB_VALUE",
+                "fact": f"{lab['test']} is {lab['value']} {lab['unit']}".strip(),
+                "episode_indices": [0],
+            }
+            for lab in labs
+        ]
+        return {"edges": edges_list}
+
+    return {"extracted_entities": [], "edges": []}
 
 OpenAIGenericClient._generate_response = _patched_generic_generate
+
 from graphiti_core.embedder.gemini import GeminiEmbedder, GeminiEmbedderConfig
+
+# Patch GeminiEmbedder.create_batch with asyncio.Semaphore(10) + asyncio.gather() (Requirement R2)
+_embed_semaphore = asyncio.Semaphore(10)
+
+async def _patched_gemini_create_batch(self, input_data_list: list[str]) -> list[list[float]]:
+    if not input_data_list:
+        return []
+
+    async def _embed_single(text: str) -> list[float]:
+        async with _embed_semaphore:
+            result = await self.client.aio.models.embed_content(
+                model=self.config.embedding_model or 'gemini-embedding-001',
+                contents=[text],
+                config=types.EmbedContentConfig(
+                    output_dimensionality=self.config.embedding_dim
+                ),
+            )
+            if not result.embeddings or len(result.embeddings) == 0:
+                raise ValueError('No embeddings returned from Gemini API')
+            if not result.embeddings[0].values:
+                raise ValueError('Empty embedding values returned')
+            return result.embeddings[0].values
+
+    return list(await asyncio.gather(*[_embed_single(t) for t in input_data_list]))
+
+GeminiEmbedder.create_batch = _patched_gemini_create_batch
+
 from graphiti_core.cross_encoder.openai_reranker_client import OpenAIRerankerClient
 from graphiti_core.driver.falkordb_driver import FalkorDriver
 
@@ -514,16 +585,39 @@ async def health():
     }
 
 
+async def _process_add_episode_bg(req: AddFactsRequest, episode_body: str):
+    """Background task function to run Graphiti add_episode asynchronously."""
+    if graphiti is None:
+        logger.error(f"[R1 Background] Cannot process doc_{req.source_doc_id}: Graphiti not initialized")
+        return
+    try:
+        logger.info(f"[R1 Background] Starting add_episode for doc_{req.source_doc_id} (patient {req.patient_id})")
+        result = await graphiti.add_episode(
+            name=f"doc_{req.source_doc_id}",
+            episode_body=episode_body,
+            source=EpisodeType.text,
+            reference_time=_parse_iso(req.reference_time),
+            source_description=(
+                f"Medical document {req.source_doc_id} "
+                f"for patient {req.patient_id}, "
+                f"dated {req.source_doc_date or 'unknown'}"
+            ),
+        )
+        logger.info(
+            f"[R1 Background] Successfully processed doc_{req.source_doc_id}: "
+            f"uuid={result.episode.uuid}, nodes={len(result.nodes)}, edges={len(result.edges)}"
+        )
+    except Exception as e:
+        logger.error(f"[R1 Background] Error processing doc_{req.source_doc_id}: {e}", exc_info=True)
+
+
 @app.post("/add-facts")
 async def add_facts(req: AddFactsRequest):
     """
     Ingest a processed PDF episode into the temporal knowledge graph.
 
-    Graphiti will:
-      • Extract entities (Patient, Medication, Condition, LabValue, Provider)
-      • Resolve duplicates / aliases (Lisinopril == lisinopril)
-      • Invalidate old facts superseded by new values (sets valid_to)
-      • Store bi-temporal metadata using reference_time as the anchor
+    Non-blocking async ingestion: launches Graphiti add_episode in background task
+    and returns 200 OK immediately (< 1s) with status="processing".
     """
     if graphiti is None:
         raise HTTPException(status_code=503, detail="Graphiti not initialised")
@@ -548,24 +642,14 @@ async def add_facts(req: AddFactsRequest):
         f"{entity_context}"
     )
 
-    result = await graphiti.add_episode(
-        name=f"doc_{req.source_doc_id}",
-        episode_body=episode_body,
-        source=EpisodeType.text,
-        reference_time=_parse_iso(req.reference_time),
-        source_description=(
-            f"Medical document {req.source_doc_id} "
-            f"for patient {req.patient_id}, "
-            f"dated {req.source_doc_date or 'unknown'}"
-        ),
-    )
+    asyncio.create_task(_process_add_episode_bg(req, episode_body))
 
     return {
-        "status": "ok",
-        "episode_uuid": str(result.episode.uuid),
-        "nodes_extracted": len(result.nodes),
-        "edges_extracted": len(result.edges),
+        "status": "processing",
+        "episode_id": f"doc_{req.source_doc_id}",
+        "patient_id": req.patient_id,
     }
+
 
 
 @app.get("/patient-state/{patient_id}")
