@@ -251,23 +251,26 @@ async def _llm_extract_fallback(text: str) -> tuple[list[dict], list[dict]]:
             "response_format": {"type": "json_object"},
             "temperature": 0.0,
         }
-        try:
-            async with httpx.AsyncClient() as client:
-                resp = await client.post(
-                    f"{OPENROUTER_BASE_URL}/chat/completions",
-                    headers=HEADERS,
-                    json=payload,
-                    timeout=30.0,
-                )
-                resp.raise_for_status()
-                parsed = json.loads(resp.json()["choices"][0]["message"]["content"])
-                meds = parsed.get("medications", [])
-                labs = parsed.get("lab_values", [])
-                logger.info(f"LLM fallback ({model_name}) found {len(meds)} meds, {len(labs)} labs.")
-                return meds, labs
-        except Exception as e:
-            logger.warning(f"Model {model_name} failed ({e}). Trying next fallback...")
-            continue
+        for attempt in range(2):
+            try:
+                async with httpx.AsyncClient() as client:
+                    resp = await client.post(
+                        f"{OPENROUTER_BASE_URL}/chat/completions",
+                        headers=HEADERS,
+                        json=payload,
+                        timeout=30.0,
+                    )
+                    resp.raise_for_status()
+                    parsed = json.loads(resp.json()["choices"][0]["message"]["content"])
+                    meds = parsed.get("medications", [])
+                    labs = parsed.get("lab_values", [])
+                    logger.info(f"LLM fallback ({model_name}) found {len(meds)} meds, {len(labs)} labs.")
+                    return meds, labs
+            except Exception as e:
+                logger.warning(f"Model {model_name} attempt {attempt+1}/2 failed ({e}).")
+                if attempt == 0:
+                    await asyncio.sleep(2.0)
+                continue
 
     logger.warning("All LLM fallback models failed.")
     return [], []

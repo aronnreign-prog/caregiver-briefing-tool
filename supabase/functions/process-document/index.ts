@@ -154,9 +154,23 @@ Deno.serve(async (req: Request) => {
     if (entityResponse.ok) {
       extractedEntities = await entityResponse.json();
     } else {
-      // [Fix] No silent failures — log the error clearly (non-fatal: pipeline continues with empty entities)
       const errText = await entityResponse.text();
-      console.warn(`[WARN] /extract-entities failed (${entityResponse.status}): ${errText}. Continuing with empty entities.`);
+      console.warn(`[WARN] /extract-entities failed (${entityResponse.status}): ${errText}. Retrying...`);
+    }
+
+    if (
+      (!extractedEntities?.medications || extractedEntities.medications.length === 0) &&
+      (!extractedEntities?.lab_values || extractedEntities.lab_values.length === 0)
+    ) {
+      console.warn(`[WARN] /extract-entities returned empty entities. Retrying in 3 seconds...`);
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+      const { response: retryResponse } = await fetchRender("/extract-entities", {
+        method: "POST",
+        body: JSON.stringify({ text: extractedText }),
+      });
+      if (retryResponse.ok) {
+        extractedEntities = await retryResponse.json();
+      }
     }
 
 
