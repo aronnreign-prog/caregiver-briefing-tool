@@ -28,10 +28,9 @@ logger = logging.getLogger(__name__)
 #                  not yet downloaded). Never relied on as primary extractor.
 # ---------------------------------------------------------------------------
 
-# ── Med7 Hugging Face API Configuration ──────────────────────────────────────
+# ── Med7 / Biomedical Hugging Face API Configuration ──────────────────────────
 HF_TOKEN = os.getenv("HF_TOKEN")
-HF_API_URL = "https://api-inference.huggingface.co/models/kormilitzin/en_core_med7_lg"
-
+HF_API_URL = "https://router.huggingface.co/hf-inference/models/d4data/biomedical-ner-all"
 
 # ── spaCy Matcher for lab values (deterministic rules) ───────────────────────
 _lab_matcher = None
@@ -147,10 +146,10 @@ def _extract_labs_with_matcher(text: str) -> list[dict]:
 
 
 async def _extract_meds_with_med7_api(text: str) -> list[dict]:
-    """Extract medications using Hugging Face Inference API for Med7.
+    """Extract medications using Hugging Face Inference API for d4data/biomedical-ner-all.
 
-    Uses a short 5s timeout so DNS failures on Render's network fail fast
-    and fall through to the LLM fallback immediately instead of blocking 30s.
+    Uses a short 5s timeout so DNS failures or model cold starts fail fast
+    and fall through to the LLM fallback immediately.
     """
     if not HF_TOKEN:
         logger.warning("HF_TOKEN not set — cannot extract medications via Hugging Face API.")
@@ -171,43 +170,46 @@ async def _extract_meds_with_med7_api(text: str) -> list[dict]:
             current_drug = {}
             for ent in entities:
                 label = ent.get("entity_group", "")
-                word = ent.get("word", "").strip()
+                raw_word = ent.get("word", "").strip()
                 
-                if label == "DRUG":
-                    if current_drug and "name" in current_drug:
-                        name_lower = current_drug["name"].lower()
-                        if name_lower not in seen_drugs:
-                            seen_drugs.add(name_lower)
-                            meds.append({**current_drug, "source": "med7-hf-api"})
-                    current_drug = {"name": word}
-                elif label == "DOSAGE":
-                    current_drug["dosage"] = word
-                elif label == "FREQUENCY":
-                    current_drug["frequency"] = word
-                elif label == "ROUTE":
-                    current_drug["route"] = word
-                elif label == "FORM":
-                    current_drug["form"] = word
-                elif label == "STRENGTH":
-                    current_drug["strength"] = word
-                elif label == "DURATION":
-                    current_drug["duration"] = word
+                # Merge BERT subword tokens (e.g. "li" + "##sin" + "##opril" -> "lisinopril")
+                if raw_word.startswith("##"):
+                    word = raw_word[2:]
+                    is_subword = True
+                else:
+                    word = raw_word
+                    is_subword = False
+
+                if label in ("Medication", "DRUG"):
+                    if is_subword and current_drug.get("name"):
+                        current_drug["name"] += word
+                    else:
+                        if current_drug and "name" in current_drug:
+                            name_lower = current_drug["name"].lower()
+                            if name_lower not in seen_drugs and len(name_lower) > 2:
+                                seen_drugs.add(name_lower)
+                                meds.append({**current_drug, "source": "d4data-biomedical-ner"})
+                        current_drug = {"name": word}
+                elif label == "Dosage":
+                    if is_subword and current_drug.get("dosage"):
+                        current_drug["dosage"] += f"{word}"
+                    else:
+                        current_drug["dosage"] = f"{current_drug.get('dosage', '')} {word}".strip()
                     
             # Flush last drug
             if current_drug and "name" in current_drug:
                 name_lower = current_drug["name"].lower()
-                if name_lower not in seen_drugs:
-                    meds.append({**current_drug, "source": "med7-hf-api"})
-            logger.info(f"Med7 HF API found {len(meds)} medications.")
+                if name_lower not in seen_drugs and len(name_lower) > 2:
+                    meds.append({**current_drug, "source": "d4data-biomedical-ner"})
+            logger.info(f"Biomedical HF API found {len(meds)} medications.")
             return meds
     except (httpx.ConnectError, httpx.TimeoutException) as e:
-        # DNS failure or network timeout — expected on Render when HF is unreachable.
-        # Log at DEBUG to avoid noise; LLM fallback handles medication extraction.
-        logger.debug(f"Med7 HF API unreachable (network/DNS): {e}")
+        logger.debug(f"Biomedical HF API unreachable (network/DNS): {e}")
         return []
     except Exception as e:
-        logger.warning(f"Med7 HF API extraction failed: {e}")
+        logger.warning(f"Biomedical HF API extraction failed: {e}")
         return []
+
 
 
 # ── OpenRouter LLM (fallback only) ───────────────────────────────────────────
