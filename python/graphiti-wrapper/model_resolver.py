@@ -24,10 +24,10 @@ FALLBACK_CHAIN = [
 
 EXTRACTOR_FALLBACK_CHAIN = [
     os.getenv("ENTITY_EXTRACT_MODEL", ""),
+    os.getenv("METADATA_MODEL", "deepseek/deepseek-v4-flash"),
+    "deepseek/deepseek-v4-flash",
     "openrouter/free",
     "google/gemma-4-26b-a4b-it:free",
-    "google/gemma-4-31b-it:free",
-    "nvidia/nemotron-nano-12b-v2-vl:free",
 ]
 
 VISION_FALLBACK_CHAIN = [

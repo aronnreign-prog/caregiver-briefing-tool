@@ -345,6 +345,9 @@ async def extract_entities(text: str) -> dict:
             labs.append(l)
             seen_tests.add(test_name)
 
+    # Filter out junk NER artifacts (like single character meds or "medications" header)
+    meds = [m for m in meds if m.get("name") and len(m["name"]) > 2 and m["name"].lower() not in ("medications", "hcl")]
+
     # --- Step 4: Enrich medications with RxNorm codes (NIH API, deterministic) ---
     rxnorm_tasks = [
         fetch_rxnorm_code(m["name"])
