@@ -1,5 +1,6 @@
 import os
 import json
+import re
 import logging
 import asyncio
 import httpx
@@ -53,7 +54,7 @@ LAB_TEST_NAMES = [
     # Electrolytes
     "sodium", "potassium", "chloride", "bicarbonate", "calcium", "magnesium", "phosphorus",
     # Cardiac
-    "troponin", "bnp", "pro-bnp", "ck-mb", "creatine kinase",
+    "troponin", "bnp", "pro-bnp", "nt-probnp", "nt-pro-bnp", "nt probnp", "ntprobnp", "ck-mb", "creatine kinase",
     # Coagulation
     "inr", "pt", "ptt", "aptt",
     # Vitamins / Other
@@ -117,7 +118,8 @@ def _extract_labs_with_matcher(text: str) -> list[dict]:
     if result is None:
         return []
     nlp, matcher = result
-    doc = nlp(text[:200_000])
+    text_clean = re.sub(r'[*_`#]', ' ', text)
+    doc = nlp(text_clean[:200_000])
     matches = matcher(doc)
     labs = []
     seen = set()
@@ -311,27 +313,37 @@ async def extract_entities(text: str) -> dict:
     Strategy (as decided in architecture session):
       1. Med7 ML model → medications (local, zero API, handles messy drug text)
       2. spaCy Matcher rules → lab values (deterministic, rules beat ML for structured data)
-      3. LLM fallback → only if Med7 is unavailable (not downloaded yet)
+      3. LLM fallback → run if Med7 is unavailable or returns insufficient entities (< 4)
       4. NIH RxNav API → enrich medications with RxNorm codes (deterministic)
 
     Returns: {"medications": [...], "lab_values": [...]}
     """
+    clean_text = re.sub(r'[*_`#]', ' ', text)
+
     # --- Step 1: Deterministic lab value extraction (spaCy Matcher) ---
-    labs = _extract_labs_with_matcher(text)
+    labs = _extract_labs_with_matcher(clean_text)
 
     # --- Step 2: Medication extraction (Med7 via Hugging Face Inference API) ---
-    meds = await _extract_meds_with_med7_api(text)
+    meds = await _extract_meds_with_med7_api(clean_text)
 
-    # --- Step 3: LLM fallback only if Med7 API fails ---
-    if not meds:
-        logger.info("Med7 unavailable — using LLM fallback for medication extraction.")
-        llm_meds, llm_labs = await _llm_extract_fallback(text)
-        # Merge LLM labs with Matcher labs (deduplicate by test name)
-        seen_tests = {l["test"].lower() for l in labs}
-        for l in llm_labs:
-            if l.get("test", "").lower() not in seen_tests:
-                labs.append(l)
-        meds = llm_meds
+    # --- Step 3: LLM fallback to enrich medication and lab extraction ---
+    llm_meds, llm_labs = await _llm_extract_fallback(clean_text)
+
+    # Merge LLM meds avoiding duplicates
+    seen_meds = {m.get("name", "").lower() for m in meds if "name" in m}
+    for lm in llm_meds:
+        lm_name = lm.get("name", "").lower()
+        if lm_name and lm_name not in seen_meds:
+            meds.append(lm)
+            seen_meds.add(lm_name)
+
+    # Merge LLM labs with Matcher labs (deduplicate by test name)
+    seen_tests = {l.get("test", "").lower() for l in labs if "test" in l}
+    for l in llm_labs:
+        test_name = l.get("test", "").lower()
+        if test_name and test_name not in seen_tests:
+            labs.append(l)
+            seen_tests.add(test_name)
 
     # --- Step 4: Enrich medications with RxNorm codes (NIH API, deterministic) ---
     rxnorm_tasks = [
