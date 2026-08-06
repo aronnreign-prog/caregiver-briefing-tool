@@ -102,10 +102,10 @@ Each step's failure is explicit and handled immediately.
 - **Why**: Collapses 9 round trips → 3 for documents, 20+ → 4 for briefings
 - **Files**: `python/graphiti-wrapper/main.py`, `supabase/functions/process-document/index.ts`, `supabase/functions/process-briefing/index.ts`
 
-### 3. MOVE PaperTrail INSIDE Python Wrapper
-- **Why**: PaperTrail makes 6-10 OpenRouter calls per briefing. It also re-fetches documents from Supabase that were already ingested into FalkorDB. Doing it in the Python wrapper eliminates HTTPS round trips + re-fetch.
-- **Impact**: Eliminates 6-10 HTTPS round trips and 1 Supabase re-fetch per briefing.
-- **Files**: `supabase/functions/process-briefing/index.ts`, `python/graphiti-wrapper/`
+### 3. MOVE PaperTrail INSIDE Python + PRE-INDEX EVIDENCE
+- **Why**: PaperTrail makes 6-10 OpenRouter calls per briefing. Also re-fetches documents from Supabase. Now uses Graphiti's pre-built search index for evidence (built during ingestion).
+- **Impact**: Eliminates N per-document LLM extraction calls + 1 Supabase re-fetch per briefing. Evidence search is now in-memory via FalkorDB index.
+- **Files**: `python/graphiti-wrapper/main.py`
 
 ---
 
@@ -144,5 +144,5 @@ Each step's failure is explicit and handled immediately.
 - [x] Tier 0: Result<T,E> pattern across Edge Functions (v13, v20)
 - [x] Tier 0: Structured timing logging on every external call
 - [x] Tier 0: Timestamps on Python bulk endpoints (`@timing` decorator)
-- [ ] Tier 0: Module decomposition — PatientDetailClient (714 lines → extract FileUpload, DocumentList, BriefingViewer)
-- [ ] Tier 0: Pre-index documents at ingestion rather than re-fetching on every briefing
+- [x] Tier 0: Module decomposition — PatientDetailClient (714 lines → 4 deep modules + thin composer)
+- [x] Tier 0: Pre-index documents: PaperTrail uses Graphiti's existing search index instead of N LLM evidence extraction calls per document

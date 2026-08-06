@@ -1201,62 +1201,34 @@ async def api_verify_briefing(req: VerifyBriefingRequest):
             "final_briefing_text": generated_briefing,
         }
 
-    # --- Stage 2: Get document texts from FalkorDB ---
-    doc_texts = {}
-    try:
-        cypher = "MATCH (n:Episodic) WHERE n.group_id = $group_id RETURN n.name AS name, n.content AS text LIMIT 50"
-        rows = await _run_cypher(cypher, {"group_id": req.patient_id})
-        for row in rows:
-            if row:
-                name = row[0]
-                text = row[1] if len(row) > 1 and row[1] else ""
-                if text:
-                    doc_id = name.replace("doc_", "") if isinstance(name, str) and name.startswith("doc_") else name
-                    doc_texts[doc_id] = str(text)[:15000]
-    except Exception as e:
-        logger.warning(f"Failed to fetch document texts from FalkorDB: {e}")
-
-    if not doc_texts:
-        return {
-            "status": "ok",
-            "verified_claims": [
-                {**claim, "flag": "UNVERIFIED", "evidence": None}
-                for claim in atomic_claims
-            ],
-            "rejected_claims": [],
-            "final_briefing_text": generated_briefing,
-        }
-
-    doc_ids = list(doc_texts.keys())
-
-    # --- Stage 3: Atomic Evidence Extraction (parallel per document) ---
-    async def extract_evidence_for_doc(doc_id: str) -> list[dict]:
-        text = doc_texts[doc_id]
-        if not text:
-            return []
-        extract_prompt = (
-            f"Extract atomic evidence from the following source document text. "
-            f"Each evidence should be a single fact with the exact source quote.\n"
-            f"Document text: {text}\n"
-            f'Output as JSON array of {{evidence_id, evidence_text, source_quote, source_doc_id: "{doc_id}"}}.'
-        )
-        try:
-            ev_result = await llm.generate_response(
-                messages=[Message(role="user", content=extract_prompt)],
-                max_tokens=4096,
-            )
-            parsed = json.loads(ev_result) if isinstance(ev_result, str) else ev_result
-            return parsed if isinstance(parsed, list) else parsed.get("evidence", parsed.get("atomic_evidence", []))
-        except Exception as e:
-            logger.warning(f"Evidence extraction failed for doc {doc_id}: {e}")
-            return []
-
-    evidence_tasks = [extract_evidence_for_doc(did) for did in doc_ids]
-    evidence_results = await asyncio.gather(*evidence_tasks)
-
+    # --- Stage 2: Search pre-indexed document evidence via Graphiti ---
+    # Instead of fetching all document texts and running N LLM calls for evidence
+    # extraction, we use Graphiti's existing search index (built during ingestion).
+    # This trades N LLM calls (expensive) for N in-memory searches (cheap).
     atomic_evidence = []
-    for ev_list in evidence_results:
-        atomic_evidence.extend(ev_list)
+    for claim in atomic_claims:
+        claim_text = claim.get("claim_text", "")
+        if not claim_text or len(claim_text) < 10:
+            continue
+        try:
+            search_results = await graphiti.search(
+                query=claim_text,
+                group_ids=[req.patient_id],
+                num_results=5,
+            )
+            for r in search_results[:3]:
+                if r.fact:
+                    doc_name = getattr(r, "name", "") or ""
+                    doc_id = doc_name.replace("doc_", "") if isinstance(doc_name, str) and doc_name.startswith("doc_") else doc_name
+                    atomic_evidence.append({
+                        "evidence_id": str(r.uuid),
+                        "evidence_text": r.fact,
+                        "source_quote": r.fact[:200],
+                        "source_doc_id": str(doc_id),
+                        "score": getattr(r, "score", 0.5),
+                    })
+        except Exception as e:
+            logger.warning(f"Evidence search failed for claim '{claim_text[:50]}': {e}")
 
     # --- Stage 4: String-match pass ---
     verified_claims = []
@@ -1292,12 +1264,6 @@ async def api_verify_briefing(req: VerifyBriefingRequest):
                 None,
             )
 
-            doc_match = next(
-                (did for did in doc_ids
-                 if claim_lower[:30] in (doc_texts.get(did) or "").lower()),
-                None,
-            )
-
             if matched_ev:
                 flag = "SUPPORTED"
                 evidence = {
@@ -1305,14 +1271,6 @@ async def api_verify_briefing(req: VerifyBriefingRequest):
                     "source_quote": matched_ev.get("source_quote") or matched_ev.get("evidence_text"),
                     "match_type": "exact",
                     "confidence": 1.0,
-                }
-            elif doc_match:
-                flag = "SUPPORTED"
-                evidence = {
-                    "source_doc_id": doc_match,
-                    "source_quote": claim.get("claim_text"),
-                    "match_type": "direct_text",
-                    "confidence": 0.9,
                 }
 
         if flag != "UNSUPPORTED":
