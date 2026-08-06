@@ -1,347 +1,271 @@
 import { serve } from "https://deno.land/std@0.192.0/http/server.ts"
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { fetchWithRetry, fetchRender } from "../_shared/fetch.ts";
+import { ok, err, errStr, logTiming, type Result } from "../_shared/result.ts";
 
-serve(async (req: Request) => {
-  // [Fix] Validate required env vars immediately — fail fast with clear error
-  const SUPABASE_URL = Deno.env.get('SUPABASE_URL')
-  const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
-  if (!SUPABASE_URL) return new Response(JSON.stringify({ error: 'SUPABASE_URL env var is missing' }), { status: 500 })
-  if (!SUPABASE_SERVICE_ROLE_KEY) return new Response(JSON.stringify({ error: 'SUPABASE_SERVICE_ROLE_KEY env var is missing' }), { status: 500 })
+const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
+const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+const OPENROUTER_API_KEY = Deno.env.get('OPENROUTER_API_KEY');
+const LLM_MODEL = Deno.env.get('LLM_MODEL') || 'anthropic/claude-3-haiku';
+const RESEND_API_KEY = Deno.env.get('RESEND_API_KEY');
+const LABS_TO_TRACK = ["GFR", "Creatinine", "HbA1c", "LDL", "Hemoglobin"];
 
-  const supabaseClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+type SupaClient = ReturnType<typeof createClient>;
 
-  // 1. Claim a job using our custom SKIP LOCKED function
-  const { data: job, error: claimError } = await supabaseClient.rpc('claim_next_job', {
-    worker_name: 'briefing-worker-1',
-    job_type_filter: 'generate_briefing',
-  })
+async function claimJob(client: SupaClient): Promise<Result<any>> {
+  const t0 = Date.now();
+  const { data, error } = await client.rpc('claim_next_job', { worker_name: 'briefing-worker-1', job_type_filter: 'generate_briefing' });
+  logTiming("claim_next_job", t0);
+  if (error) return err(error);
+  if (!data) return ok(null);
+  return ok(data);
+}
 
-  if (claimError) {
-    console.error('Error claiming job:', claimError)
-    return new Response(JSON.stringify({ error: claimError.message }), { status: 500 })
+async function fetchBriefing(client: SupaClient, briefingId: string): Promise<Result<any>> {
+  const t0 = Date.now();
+  const { data, error } = await client.from('briefings').select('patient_id, caregiver_id, audience').eq('id', briefingId).single();
+  logTiming("briefings.select", t0);
+  if (error || !data) return err(new Error(`Briefing not found: ${briefingId}`));
+  return ok(data);
+}
+
+async function fetchPatientState(patientId: string): Promise<Result<any>> {
+  const t0 = Date.now();
+  const { response } = await fetchRender("/generate-briefing", {
+    method: "POST",
+    body: JSON.stringify({ patient_id: patientId, audience: "family caregiver", lab_entities: LABS_TO_TRACK }),
+  });
+  logTiming("generate-briefing (bulk)", t0);
+  if (!response.ok) {
+    const errBody = await response.text().catch(() => "");
+    return err(new Error(`generate-briefing: ${response.status} ${errBody}`));
   }
+  return ok(await response.json());
+}
 
-  if (!job) {
-    return new Response(JSON.stringify({ message: 'No queued jobs' }), { status: 200 })
-  }
-
-  if (job.job_type !== 'generate_briefing') {
-    await supabaseClient.from('jobs').update({ status: 'queued', started_at: null, worker_id: null, attempts: job.attempts + 1 }).eq('id', job.id)
-    return new Response(JSON.stringify({ message: 'Re-queued unsupported job' }), { status: 200 })
-  }
-
-  const briefingId = job.payload?.briefing_id
-  if (
-    !briefingId ||
-    briefingId === 'undefined' ||
-    briefingId === 'null' ||
-    typeof briefingId !== 'string' ||
-    briefingId.trim() === ''
-  ) {
-    throw new Error("Job payload missing or invalid briefing_id")
-  }
-
-  try {
-    console.log(`Processing briefing: ${briefingId}`)
-    
-    // 2. Fetch Briefing metadata
-    const { data: briefing, error: briefingError } = await supabaseClient
-      .from('briefings')
-      .select('patient_id, caregiver_id, audience')
-      .eq('id', briefingId)
-      .single()
-
-    if (briefingError || !briefing) throw new Error(`Briefing not found: ${briefingId}`)
-
-    // Update briefing status
-    await supabaseClient.from('briefings').update({ status: 'processing' }).eq('id', briefingId)
-
-    // --- TASK 8: Query Graphiti for Patient State & Trends ---
-    console.log(`Fetching current state for patient ${briefing.patient_id} from Graphiti...`)
-    
-    const labsToTrack = ["GFR", "Creatinine", "HbA1c", "LDL", "Hemoglobin"];
-
-    const { response: briefingResult } = await fetchRender("/generate-briefing", {
-      method: "POST",
-      body: JSON.stringify({
-        patient_id: briefing.patient_id,
-        audience: briefing.audience || "family caregiver",
-        lab_entities: labsToTrack,
-      }),
-    });
-
-    if (!briefingResult.ok) {
-      const errBody = await briefingResult.text().catch(() => "");
-      throw new Error(`generate-briefing error: ${briefingResult.status} ${briefingResult.statusText} ${errBody}`);
-    }
-    const briefingData = await briefingResult.json();
-    const currentFacts = briefingData.current_facts || [];
-    const trends: Record<string, any> = briefingData.trends || {};
-    
-    console.log(`Successfully retrieved facts and ${Object.keys(trends).length} temporal trends.`)
-
-    // --- TASK 9: LLM Reasoning (Layer 3) + Drug Database Verification (Layer 5) ---
-    console.log('Running Layer 5 (Drug Database Verification)...')
-    
-    // 1. Get clean drug names directly from the DB (extracted deterministically by Med7 in Task 5)
-    const { data: docs } = await supabaseClient
-      .from('documents')
-      .select('extracted_entities')
-      .eq('patient_id', briefing.patient_id)
-
-    const activeMeds = new Set<string>()
-    if (docs) {
-      for (const d of docs) {
-        const meds = d.extracted_entities?.medications || []
-        for (const m of meds) {
-          if (m.name) activeMeds.add(m.name)
-        }
+async function fetchMedications(client: SupaClient, patientId: string): Promise<Result<Set<string>>> {
+  const t0 = Date.now();
+  const { data: docs } = await client.from('documents').select('extracted_entities').eq('patient_id', patientId);
+  logTiming("documents.select meds", t0);
+  const meds = new Set<string>();
+  if (docs) {
+    for (const d of docs) {
+      for (const m of (d.extracted_entities?.medications || [])) {
+        if (m.name) meds.add(m.name);
       }
     }
+  }
+  return ok(meds);
+}
 
-    const layer5Results: any[] = []
-    
-    // 2. Map drugs to RxCUIs via NIH RxNav API
-    const rxcuis: string[] = []
-    const rxcuiToName: Record<string, string> = {}
-    
-    for (const med of Array.from(activeMeds)) {
-      try {
-        const url = `https://rxnav.nlm.nih.gov/REST/approximateTerm.json?term=${encodeURIComponent(med)}&maxEntries=1`
-        const { response: res } = await fetchWithRetry(url, { timeoutMs: 15000, maxRetries: 1 });
-        if (res.ok) {
-          const data = await res.json()
-          const candidates = data.approximateGroup?.candidate
-          if (candidates && candidates.length > 0) {
-            const rxcui = candidates[0].rxcui
-            rxcuis.push(rxcui)
-            rxcuiToName[rxcui] = med
-          }
+async function checkDrugInteractions(meds: Set<string>): Promise<Result<{ results: any[]; rxcuis: string[]; rxcuiToName: Record<string, string> }>> {
+  const results: any[] = [];
+  const rxcuis: string[] = [];
+  const rxcuiToName: Record<string, string> = {};
+
+  for (const med of Array.from(meds)) {
+    try {
+      const t0 = Date.now();
+      const { response: res } = await fetchWithRetry(
+        `https://rxnav.nlm.nih.gov/REST/approximateTerm.json?term=${encodeURIComponent(med)}&maxEntries=1`,
+        { timeoutMs: 15000, maxRetries: 1 }
+      );
+      logTiming(`rxnav ${med}`, t0);
+      if (res.ok) {
+        const data = await res.json();
+        const candidates = data.approximateGroup?.candidate;
+        if (candidates?.length > 0) {
+          rxcuis.push(candidates[0].rxcui);
+          rxcuiToName[candidates[0].rxcui] = med;
         }
-      } catch (e) {
-        console.warn(`Failed to fetch RxCUI for ${med}: `, e)
       }
-    }
+    } catch (e) { console.warn(`RxNav failed for ${med}:`, e); }
+  }
 
-    // 3. Check for Drug-Drug Interactions via NIH RxNav Interaction API
-    if (rxcuis.length > 1) {
-      try {
-        const ddiUrl = `https://rxnav.nlm.nih.gov/REST/interaction/list.json?rxcuis=${rxcuis.join('+')}`
-        const { response: ddiRes } = await fetchWithRetry(ddiUrl, { timeoutMs: 30000, maxRetries: 1 });
-        if (ddiRes.ok) {
-          const ddiData = await ddiRes.json()
-          if (ddiData.fullInteractionTypeGroup) {
-            for (const group of ddiData.fullInteractionTypeGroup) {
-              for (const type of group.fullInteractionType) {
-                for (const interaction of type.interactionPair) {
-                  layer5Results.push({
-                    type: "drug-drug-interaction",
-                    medications: [rxcuiToName[interaction.interactionConcept[0].minConceptItem.rxcui] || "Unknown", 
-                                  rxcuiToName[interaction.interactionConcept[1].minConceptItem.rxcui] || "Unknown"],
-                    severity: interaction.severity,
-                    citation: `NIH RxNav Interaction API: ${interaction.description}`
-                  })
-                }
+  if (rxcuis.length > 1) {
+    try {
+      const t0 = Date.now();
+      const { response: ddiRes } = await fetchWithRetry(
+        `https://rxnav.nlm.nih.gov/REST/interaction/list.json?rxcuis=${rxcuis.join('+')}`,
+        { timeoutMs: 30000, maxRetries: 1 }
+      );
+      logTiming("rxnav DDI", t0);
+      if (ddiRes.ok) {
+        const ddiData = await ddiRes.json();
+        if (ddiData.fullInteractionTypeGroup) {
+          for (const group of ddiData.fullInteractionTypeGroup) {
+            for (const type of group.fullInteractionType) {
+              for (const interaction of type.interactionPair) {
+                results.push({
+                  type: "drug-drug-interaction",
+                  medications: [rxcuiToName[interaction.interactionConcept[0].minConceptItem.rxcui] || "Unknown",
+                                rxcuiToName[interaction.interactionConcept[1].minConceptItem.rxcui] || "Unknown"],
+                  severity: interaction.severity,
+                  citation: `NIH RxNav: ${interaction.description}`
+                });
               }
             }
           }
         }
-      } catch (e) {
-        console.warn("Failed to fetch DDIs from RxNav:", e)
       }
-    }
+    } catch (e) { console.warn("DDI fetch failed:", e); }
+  }
 
-    console.log('Calling LLM Reasoning engine (Task 9)...')
-    const OPENROUTER_API_KEY = Deno.env.get('OPENROUTER_API_KEY')
-    // [Fix] Validate OPENROUTER_API_KEY before any LLM call — fail fast with clear error
-    if (!OPENROUTER_API_KEY) throw new Error('OPENROUTER_API_KEY env var is missing. Set it in Supabase Secrets or supabase/functions/.env.local')
-    // Pull the LLM model from the environment instead of hardcoding
-    const LLM_MODEL = Deno.env.get('LLM_MODEL') || 'anthropic/claude-3-haiku'
+  return ok({ results, rxcuis, rxcuiToName });
+}
 
-    const systemPrompt = `You are generating a medical briefing for a caregiver to bring to a doctor.
+async function generateBriefingLLM(currentFacts: any, trends: any, drugResults: any[], audience: string): Promise<Result<any>> {
+  if (!OPENROUTER_API_KEY) return errStr("OPENROUTER_API_KEY is required");
 
-Patient state: ${JSON.stringify(currentFacts, null, 2)}
-Temporal trends: ${JSON.stringify(trends, null, 2)}
-Drug contraindication checks: ${JSON.stringify(layer5Results, null, 2)}
+  const systemPrompt = `You are generating a medical briefing for a caregiver to bring to a doctor.\n\nPatient state: ${JSON.stringify(currentFacts, null, 2)}\nTemporal trends: ${JSON.stringify(trends, null, 2)}\nDrug contraindication checks: ${JSON.stringify(drugResults, null, 2)}\n\nGenerate a briefing for this audience: ${audience}\n\nRules:\n1. For each claim, note which source document it comes from.\n2. Flag any trends (e.g., "GFR declining over 18 months").\n3. Flag any conflicts between providers.\n4. Flag any contraindications.\n5. Be honest about uncertainty.\n6. Output strictly valid JSON: { "briefing_text": "Markdown...", "claims": [{ "claim_text": "...", "expected_source": "...", "claim_type": "..." }], "flagged_concerns": [{ "concern": "...", "severity": "high/medium/low", "related_claims": ["..."] }] }`;
 
-Generate a briefing for this audience: ${briefing.audience}
+  const t0 = Date.now();
+  const { response } = await fetchWithRetry("https://openrouter.ai/api/v1/chat/completions", {
+    method: "POST", timeoutMs: 90000, maxRetries: 1,
+    headers: { "Authorization": `Bearer ${OPENROUTER_API_KEY}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: LLM_MODEL, response_format: { type: "json_object" },
+      messages: [{ role: "system", content: systemPrompt }, { role: "user", content: "Please generate the briefing now as JSON." }]
+    })
+  });
+  logTiming("openrouter briefing", t0);
+  if (!response.ok) return err(new Error(`LLM API error: ${response.statusText}`));
 
-Rules:
-1. For each claim, note which source document it comes from.
-2. Flag any trends (e.g., "GFR declining over 18 months").
-3. Flag any conflicts between providers (e.g., different doses from different doctors).
-4. Flag any contraindications (e.g., medication + condition that shouldn't go together).
-5. Be honest about uncertainty — don't make claims you can't ground in the data.
-6. Output as strictly valid JSON exactly matching this structure:
-{
-  "briefing_text": "Markdown formatted text...",
-  "claims": [
-    {
-      "claim_text": "text",
-      "expected_source": "source document name or uuid",
-      "claim_type": "string"
-    }
-  ],
-  "flagged_concerns": [
-    {
-      "concern": "text",
-      "severity": "high/medium/low",
-      "related_claims": ["text"]
-    }
-  ]
-}`
+  const llmData = await response.json();
+  try {
+    return ok(JSON.parse(llmData.choices[0].message.content));
+  } catch (e) {
+    return err(new Error("LLM did not return valid JSON"));
+  }
+}
 
-    const userPrompt = `Please generate the briefing now as JSON.`
+async function runPaperTrail(patientId: string, briefingText: string, claims: any[], drugResults: any[], audience: string): Promise<Result<any>> {
+  const t0 = Date.now();
+  const { response } = await fetchRender("/verify-briefing", {
+    method: "POST",
+    body: JSON.stringify({ patient_id: patientId, generated_briefing: briefingText, raw_claims: claims, layer5_results: drugResults, audience }),
+  });
+  logTiming("verify-briefing (PaperTrail)", t0);
+  if (!response.ok) return err(new Error(`PaperTrail error: ${response.status}`));
+  return ok(await response.json());
+}
 
-    const { response: llmResponse } = await fetchWithRetry("https://openrouter.ai/api/v1/chat/completions", {
-      method: "POST",
-      timeoutMs: 90000,
-      maxRetries: 1,
-      headers: {
-        "Authorization": `Bearer ${OPENROUTER_API_KEY}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        model: LLM_MODEL,
-        response_format: { type: "json_object" },
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userPrompt }
-        ]
-      })
-    });
+async function saveBriefing(client: SupaClient, briefingId: string, text: string, claims: any[], concerns: any[]): Promise<Result<void>> {
+  const t0 = Date.now();
+  const { error } = await client.from('briefings').update({
+    status: 'complete', completed_at: new Date().toISOString(),
+    briefing_text: text, claims, flagged_concerns: concerns
+  }).eq('id', briefingId);
+  logTiming("briefings.update", t0);
+  if (error) return err(error);
+  return ok(undefined);
+}
 
-    if (!llmResponse.ok) {
-      throw new Error(`LLM API error: ${llmResponse.statusText}`)
-    }
+async function completeJob(client: SupaClient, jobId: string): Promise<Result<void>> {
+  const { error } = await client.from('jobs').update({ status: 'complete', completed_at: new Date().toISOString() }).eq('id', jobId);
+  if (error) return err(error);
+  return ok(undefined);
+}
 
-    const llmData = await llmResponse.json()
-    const content = llmData.choices[0].message.content
-    
-    let parsedContent;
-    try {
-      parsedContent = JSON.parse(content)
-    } catch (e) {
-      console.error("Failed to parse LLM JSON output:", content)
-      throw new Error("LLM did not return valid JSON.")
-    }
-
-    const generatedBriefing = parsedContent.briefing_text || "Failed to generate briefing text."
-    let claims = parsedContent.claims || []
-    const flaggedConcerns = parsedContent.flagged_concerns || []
-    
-    // --- PaperTrail Verification (Layer 4) — delegated to Python wrapper ---
-    console.log(`Running PaperTrail Verification via /verify-briefing...`)
-    
-    let verifiedClaims: any[] = claims.map((c: any) => ({ ...c, flag: "UNVERIFIED", evidence: null }))
-    let rejectedClaims: any[] = []
-    let finalBriefingText = generatedBriefing
-
-    try {
-      const { response: verifyResult } = await fetchRender("/verify-briefing", {
-        method: "POST",
-        body: JSON.stringify({
-          patient_id: briefing.patient_id,
-          generated_briefing: generatedBriefing,
-          raw_claims: claims,
-          layer5_results: layer5Results,
-          audience: briefing.audience || "family caregiver",
-        }),
-      });
-
-      if (verifyResult.ok) {
-        const verifyData = await verifyResult.json();
-        verifiedClaims = verifyData.verified_claims || verifiedClaims;
-        rejectedClaims = verifyData.rejected_claims || [];
-        finalBriefingText = verifyData.final_briefing_text || generatedBriefing;
-      } else {
-        const errText = await verifyResult.text().catch(() => "");
-        console.warn(`[WARN] /verify-briefing failed (${verifyResult.status}): ${errText}`);
-      }
-    } catch (e) {
-      console.warn("PaperTrail verification failed, using unverified claims:", e);
-    }
-
-    console.log(`PaperTrail complete: ${verifiedClaims.length} supported, ${rejectedClaims.length} rejected.`)
-
-    // Save final rendered briefing
-    await supabaseClient.from('briefings').update({
-      status: 'complete',
-      completed_at: new Date().toISOString(),
-      briefing_text: finalBriefingText,
-      claims: verifiedClaims,
-      flagged_concerns: flaggedConcerns
-    }).eq('id', briefingId)
-
-    // Mark Job as complete
-    await supabaseClient.from('jobs').update({
-      status: 'complete',
-      completed_at: new Date().toISOString()
-    }).eq('id', job.id)
-
-    // 5. Send Email Notification via Resend (Task 11)
-    const RESEND_API_KEY = Deno.env.get('RESEND_API_KEY')
-    if (RESEND_API_KEY) {
-      console.log('Sending email notification to caregiver...')
-      try {
-        const { data: caregiver } = await supabaseClient.from('caregivers').select('auth_user_id').eq('id', briefing.caregiver_id).single()
-        if (caregiver?.auth_user_id) {
-          const { data: authUser } = await supabaseClient.auth.admin.getUserById(caregiver.auth_user_id)
-          const email = authUser?.user?.email
-          
-          if (email) {
-            const { response: emailRes } = await fetchWithRetry('https://api.resend.com/emails', {
-          method: 'POST',
-          timeoutMs: 30000,
-          maxRetries: 1,
-          headers: {
-            'Authorization': `Bearer ${RESEND_API_KEY}`,
-            'Content-Type': 'application/json'
-          },
+async function sendEmail(client: SupaClient, caregiverId: string): Promise<void> {
+  if (!RESEND_API_KEY) return;
+  try {
+    const { data: caregiver } = await client.from('caregivers').select('auth_user_id').eq('id', caregiverId).single();
+    if (caregiver?.auth_user_id) {
+      const { data: authUser } = await client.auth.admin.getUserById(caregiver.auth_user_id);
+      const email = authUser?.user?.email;
+      if (email) {
+        const t0 = Date.now();
+        const { response } = await fetchWithRetry('https://api.resend.com/emails', {
+          method: 'POST', timeoutMs: 30000, maxRetries: 1,
+          headers: { 'Authorization': `Bearer ${RESEND_API_KEY}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            from: 'Acme Care <onboarding@resend.dev>',
-            to: [email],
-            subject: `Briefing ready for Patient ${briefing.patient_id.slice(0, 8)}`,
+            from: 'Acme Care <onboarding@resend.dev>', to: [email],
+            subject: `Briefing ready — CareNote`,
             html: `<p>Your requested medical briefing is now ready to view in the dashboard.</p>`
           })
         });
-        if (!emailRes.ok) {
-          console.warn(`Email notification failed: ${emailRes.status}`);
-        }
-          }
-        }
-      } catch (emailError) {
-        console.error('Failed to send notification email:', emailError)
-        // Non-fatal error, don't throw
+        logTiming("resend email", t0);
+        if (!response.ok) console.warn(`Email failed: ${response.status}`);
       }
     }
+  } catch (e) { console.error("Email error:", e); }
+}
 
-    return new Response(JSON.stringify({ message: 'Success', briefingId }), { status: 200 })
+async function failJob(client: SupaClient, job: any, briefingId: string, message: string): Promise<void> {
+  await Promise.allSettled([
+    client.from('jobs').update({ status: 'failed', error_message: message }).eq('id', job?.id),
+    client.from('briefings').update({ status: 'failed', error_message: message }).eq('id', briefingId),
+  ]);
+}
+
+serve(async (req: Request) => {
+  try {
+    if (!SUPABASE_URL) return new Response(JSON.stringify({ error: 'SUPABASE_URL missing' }), { status: 500 });
+    if (!SUPABASE_SERVICE_ROLE_KEY) return new Response(JSON.stringify({ error: 'SUPABASE_SERVICE_ROLE_KEY missing' }), { status: 500 });
+
+    const client = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+
+    const claimed = await claimJob(client);
+    if (!claimed.ok) return new Response(JSON.stringify({ error: claimed.error.message }), { status: 500 });
+    if (!claimed.value) return new Response(JSON.stringify({ message: 'No queued jobs' }), { status: 200 });
+
+    const job = claimed.value;
+    if (job.job_type !== 'generate_briefing') {
+      await client.from('jobs').update({ status: 'queued', started_at: null, worker_id: null, attempts: job.attempts + 1 }).eq('id', job.id);
+      return new Response(JSON.stringify({ message: 'Re-queued unsupported job' }), { status: 200 });
+    }
+
+    const briefingId = job.payload?.briefing_id;
+    if (!briefingId || briefingId === 'undefined' || briefingId === 'null' || typeof briefingId !== 'string' || !briefingId.trim()) {
+      return new Response(JSON.stringify({ error: "Missing or invalid briefing_id" }), { status: 400 });
+    }
+
+    const briefing = await fetchBriefing(client, briefingId);
+    if (!briefing.ok) { await failJob(client, job, briefingId, briefing.error.message); return new Response(JSON.stringify({ error: briefing.error.message }), { status: 500 }); }
+
+    await client.from('briefings').update({ status: 'processing' }).eq('id', briefingId);
+
+    const state = await fetchPatientState(briefing.value.patient_id);
+    if (!state.ok) { await failJob(client, job, briefingId, state.error.message); return new Response(JSON.stringify({ error: state.error.message }), { status: 500 }); }
+
+    const medsResult = await fetchMedications(client, briefing.value.patient_id);
+    const meds = medsResult.ok ? medsResult.value : new Set<string>();
+
+    const drugResult = await checkDrugInteractions(meds);
+    const { results: drugResults } = drugResult.value;
+
+    const llmResult = await generateBriefingLLM(state.value.current_facts, state.value.trends, drugResults, briefing.value.audience);
+    if (!llmResult.ok) { await failJob(client, job, briefingId, llmResult.error.message); return new Response(JSON.stringify({ error: llmResult.error.message }), { status: 500 }); }
+
+    const briefingText = llmResult.value.briefing_text || "";
+    const claims = llmResult.value.claims || [];
+    const concerns = llmResult.value.flagged_concerns || [];
+
+    const verified = await runPaperTrail(briefing.value.patient_id, briefingText, claims, drugResults, briefing.value.audience);
+
+    let finalText = briefingText;
+    let finalClaims = claims.map((c: any) => ({ ...c, flag: "UNVERIFIED", evidence: null }));
+    let rejectedClaims: any[] = [];
+
+    if (verified.ok) {
+      finalText = verified.value.final_briefing_text || briefingText;
+      finalClaims = verified.value.verified_claims || finalClaims;
+      rejectedClaims = verified.value.rejected_claims || [];
+    } else {
+      console.warn("PaperTrail failed, using unverified claims:", verified.error.message);
+    }
+
+    console.log(`PaperTrail: ${finalClaims.length} supported, ${rejectedClaims.length} rejected.`);
+
+    await saveBriefing(client, briefingId, finalText, finalClaims, concerns);
+    await completeJob(client, job.id);
+    sendEmail(client, briefing.value.caregiver_id).catch(() => {});
+
+    return new Response(JSON.stringify({ message: 'Success', briefingId }), { status: 200 });
 
   } catch (error: any) {
-    console.error('Job failed:', error)
-    
-    // Fail the job
-    await supabaseClient.from('jobs').update({
-      status: 'failed',
-      error_message: error.message
-    }).eq('id', job.id)
-
-    // Fail the briefing
-    await supabaseClient.from('briefings').update({
-      status: 'failed',
-      error_message: error.message
-    }).eq('id', briefingId)
-
-    return new Response(JSON.stringify({ error: error.message }), { status: 500 })
+    console.error('[FATAL]', error?.message || String(error));
+    return new Response(JSON.stringify({ fatal_error: error?.message || String(error) }), { status: 500 });
   }
-}, {
-  // [Fix M8] Outer fatal error handler: catches module-load or top-level errors
-  // and returns them in the response body instead of a generic Deno 500.
-  onError(error: unknown) {
-    const msg = error instanceof Error ? error.message : String(error)
-    console.error('[FATAL] Unhandled module-level error:', msg)
-    return new Response(JSON.stringify({ error: `Fatal: ${msg}` }), { status: 500 })
-  }
-})
+});

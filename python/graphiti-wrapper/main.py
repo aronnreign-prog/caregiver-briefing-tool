@@ -345,8 +345,18 @@ from graphiti_core.driver.falkordb_driver import FalkorDriver
 from extractor import extract_entities
 from pdf_extract import extract_pdf_text
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+import time
+
+def timing(func):
+    """Decorator: log duration of any async route."""
+    async def wrapper(*args, **kwargs):
+        t0 = time.monotonic()
+        result = await func(*args, **kwargs)
+        dur = (time.monotonic() - t0) * 1000
+        logger.info(f"[timing] {func.__name__}: {dur:.0f}ms")
+        return result
+    wrapper.__name__ = func.__name__
+    return wrapper
 
 # ---------------------------------------------------------------------------
 # Pydantic models
@@ -994,6 +1004,7 @@ async def api_extract_pdf(req: ExtractPdfRequest):
 
 
 @app.post("/process-document")
+@timing
 async def api_process_document(req: ProcessDocumentRequest):
     """
     Bulk endpoint: PDF extraction + entity extraction + Graphiti ingestion in ONE call.
@@ -1080,6 +1091,7 @@ async def api_process_document(req: ProcessDocumentRequest):
 
 
 @app.post("/generate-briefing")
+@timing
 async def api_generate_briefing(req: ProcessBriefingRequest):
     """
     Bulk endpoint: patient state + lab trends in ONE call.
@@ -1146,6 +1158,7 @@ async def api_generate_briefing(req: ProcessBriefingRequest):
 
 
 @app.post("/verify-briefing")
+@timing
 async def api_verify_briefing(req: VerifyBriefingRequest):
     """
     PaperTrail: decompose claims → extract evidence per document → match → semantic verify.
