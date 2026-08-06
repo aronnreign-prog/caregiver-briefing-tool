@@ -2,6 +2,7 @@ import { createClient } from '@/lib/supabase/server'
 import Link from 'next/link'
 import AddPatientForm from './AddPatientForm'
 import SignOutButton from './SignOutButton'
+import DeletePatientButton from './DeletePatientButton'
 
 const DEMO_PATIENTS = [
   { id: 'demo-1', name: 'Margaret Thompson', relationship: 'Mother', date_of_birth: '1945-03-12', flagCount: 1, docCount: 3, briefingStatus: 'complete' },
@@ -55,19 +56,26 @@ export default async function DashboardPage() {
         <div className="flex-1 overflow-y-auto px-2 py-4">
           <p className="font-mono text-[9px] tracking-widest text-muted-foreground uppercase px-3 mb-2">Patients</p>
           {patients.map((p) => (
-            <Link key={p.id} href={`/dashboard/patients/${p.id}`}
-              className="group flex items-center gap-3 px-3 py-3 rounded-md hover:bg-surface-raised transition-colors">
-              <div className="w-8 h-8 rounded-md bg-accent-dim border border-accent/25 flex items-center justify-center shrink-0 font-mono text-[11px] font-bold text-accent">
-                {initials(p.name)}
-              </div>
-              <div className="min-w-0 flex-1">
-                <p className="text-[13px] font-medium text-foreground truncate">{p.name}</p>
-                <p className="font-mono text-[10px] text-muted-foreground">{p.relationship} · {calcAge(p.date_of_birth)}y</p>
-              </div>
-              {(p.flagCount ?? 0) > 0 && (
-                <div className="w-1.5 h-1.5 rounded-full bg-alert shrink-0" />
+            <div key={p.id} className="group relative flex items-center rounded-md hover:bg-surface-raised transition-colors">
+              <Link href={`/dashboard/patients/${p.id}`}
+                className="flex items-center gap-3 px-3 py-3 flex-1 min-w-0">
+                <div className="w-8 h-8 rounded-md bg-accent-dim border border-accent/25 flex items-center justify-center shrink-0 font-mono text-[11px] font-bold text-accent">
+                  {initials(p.name)}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-[13px] font-medium text-foreground truncate">{p.name}</p>
+                  <p className="font-mono text-[10px] text-muted-foreground">{p.relationship} · {calcAge(p.date_of_birth)}y</p>
+                </div>
+                {(p.flagCount ?? 0) > 0 && (
+                  <div className="w-1.5 h-1.5 rounded-full bg-alert shrink-0" />
+                )}
+              </Link>
+              {!isGuest && (
+                <div className="pr-2">
+                  <DeletePatientButton patientId={p.id} patientName={p.name} />
+                </div>
               )}
-            </Link>
+            </div>
           ))}
           {patients.length === 0 && (
             <p className="px-3 py-4 text-xs text-muted-foreground">No patients yet.</p>
@@ -134,63 +142,71 @@ export default async function DashboardPage() {
           {/* Patient cards */}
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 mb-8">
             {patients.map((p) => (
-              <Link key={p.id} href={`/dashboard/patients/${p.id}`} className="group block">
-                <article className="border border-border bg-surface rounded-lg overflow-hidden hover:border-accent/40 hover:bg-surface-raised transition-all h-full flex flex-col">
-                  {(p.flagCount ?? 0) > 0 && <div className="h-0.5 bg-alert w-full" />}
-                  <div className="p-5 flex-1">
-                    <div className="flex items-start gap-3">
-                      <div className="w-10 h-10 rounded-lg bg-accent-dim border border-accent/20 flex items-center justify-center shrink-0 font-mono text-[13px] font-bold text-accent">
-                        {initials(p.name)}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          <h2 className="text-[13px] font-semibold text-foreground truncate">{p.name}</h2>
-                          {isGuest && <span className="font-mono text-[9px] border border-border text-muted-foreground px-1.5 py-0.5 rounded-sm shrink-0">DEMO</span>}
+              <div key={p.id} className="group relative block">
+                <Link href={`/dashboard/patients/${p.id}`} className="block h-full">
+                  <article className="border border-border bg-surface rounded-lg overflow-hidden hover:border-accent/40 hover:bg-surface-raised transition-all h-full flex flex-col">
+                    {(p.flagCount ?? 0) > 0 && <div className="h-0.5 bg-alert w-full" />}
+                    <div className="p-5 flex-1">
+                      <div className="flex items-start gap-3">
+                        <div className="w-10 h-10 rounded-lg bg-accent-dim border border-accent/20 flex items-center justify-center shrink-0 font-mono text-[13px] font-bold text-accent">
+                          {initials(p.name)}
                         </div>
-                        <p className="font-mono text-[10px] text-muted-foreground mt-0.5">
-                          {p.relationship} · DOB {p.date_of_birth} · Age {calcAge(p.date_of_birth)}
-                        </p>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <h2 className="text-[13px] font-semibold text-foreground truncate">{p.name}</h2>
+                            {isGuest && <span className="font-mono text-[9px] border border-border text-muted-foreground px-1.5 py-0.5 rounded-sm shrink-0">DEMO</span>}
+                          </div>
+                          <p className="font-mono text-[10px] text-muted-foreground mt-0.5">
+                            {p.relationship} · DOB {p.date_of_birth} · Age {calcAge(p.date_of_birth)}
+                          </p>
+                        </div>
                       </div>
-                    </div>
 
-                    <div className="mt-4 flex items-center gap-4 flex-wrap">
-                      <div className="flex items-center gap-1.5">
-                        <svg width="11" height="11" viewBox="0 0 11 11" fill="none" className="text-muted-foreground">
-                          <rect x="1" y="1.5" width="9" height="8" rx="1" stroke="currentColor" strokeWidth="1.1"/>
-                          <path d="M3.5 4.5h4M3.5 6.5h2.5" stroke="currentColor" strokeWidth="1" strokeLinecap="round"/>
-                        </svg>
-                        <span className="font-mono text-[10px] text-muted-foreground">{p.docCount ?? '0'} docs</span>
+                      <div className="mt-4 flex items-center gap-4 flex-wrap">
+                        <div className="flex items-center gap-1.5">
+                          <svg width="11" height="11" viewBox="0 0 11 11" fill="none" className="text-muted-foreground">
+                            <rect x="1" y="1.5" width="9" height="8" rx="1" stroke="currentColor" strokeWidth="1.1"/>
+                            <path d="M3.5 4.5h4M3.5 6.5h2.5" stroke="currentColor" strokeWidth="1" strokeLinecap="round"/>
+                          </svg>
+                          <span className="font-mono text-[10px] text-muted-foreground">{p.docCount ?? '0'} docs</span>
+                        </div>
+                        {(p.flagCount ?? 0) > 0 ? (
+                          <div className="flex items-center gap-1.5">
+                            <div className="w-1.5 h-1.5 rounded-full bg-alert" />
+                            <span className="font-mono text-[10px] text-alert">{p.flagCount} concern{(p.flagCount ?? 0) !== 1 ? 's' : ''}</span>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-1.5">
+                            <div className="w-1.5 h-1.5 rounded-full bg-success" />
+                            <span className="font-mono text-[10px] text-muted-foreground">No flags</span>
+                          </div>
+                        )}
+                        {p.briefingStatus && (
+                          <span className={`ml-auto font-mono text-[9px] px-1.5 py-0.5 rounded border ${
+                            p.briefingStatus === 'complete'
+                              ? 'text-success border-success/30 bg-success-dim'
+                              : 'text-muted-foreground border-border'
+                          }`}>
+                            {p.briefingStatus === 'complete' ? 'BRIEFING READY' : 'NO BRIEFING'}
+                          </span>
+                        )}
                       </div>
-                      {(p.flagCount ?? 0) > 0 ? (
-                        <div className="flex items-center gap-1.5">
-                          <div className="w-1.5 h-1.5 rounded-full bg-alert" />
-                          <span className="font-mono text-[10px] text-alert">{p.flagCount} concern{(p.flagCount ?? 0) !== 1 ? 's' : ''}</span>
-                        </div>
-                      ) : (
-                        <div className="flex items-center gap-1.5">
-                          <div className="w-1.5 h-1.5 rounded-full bg-success" />
-                          <span className="font-mono text-[10px] text-muted-foreground">No flags</span>
-                        </div>
-                      )}
-                      {p.briefingStatus && (
-                        <span className={`ml-auto font-mono text-[9px] px-1.5 py-0.5 rounded border ${
-                          p.briefingStatus === 'complete'
-                            ? 'text-success border-success/30 bg-success-dim'
-                            : 'text-muted-foreground border-border'
-                        }`}>
-                          {p.briefingStatus === 'complete' ? 'BRIEFING READY' : 'NO BRIEFING'}
-                        </span>
-                      )}
                     </div>
+                    <div className="border-t border-border px-5 py-2.5 flex items-center justify-between">
+                      <span className="font-mono text-[10px] text-muted-foreground">Open record</span>
+                      <svg width="12" height="12" viewBox="0 0 12 12" fill="none" className="text-muted-foreground group-hover:text-accent group-hover:translate-x-0.5 transition-all">
+                        <path d="M2.5 6h7M6 2.5l3.5 3.5L6 9.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
+                      </svg>
+                    </div>
+                  </article>
+                </Link>
+                {/* Delete button — only for authenticated users, appears on card hover */}
+                {!isGuest && (
+                  <div className="absolute top-2.5 right-2.5 z-10">
+                    <DeletePatientButton patientId={p.id} patientName={p.name} />
                   </div>
-                  <div className="border-t border-border px-5 py-2.5 flex items-center justify-between">
-                    <span className="font-mono text-[10px] text-muted-foreground">Open record</span>
-                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" className="text-muted-foreground group-hover:text-accent group-hover:translate-x-0.5 transition-all">
-                      <path d="M2.5 6h7M6 2.5l3.5 3.5L6 9.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
-                    </svg>
-                  </div>
-                </article>
-              </Link>
+                )}
+              </div>
             ))}
 
             {patients.length === 0 && (

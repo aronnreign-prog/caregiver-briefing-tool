@@ -34,3 +34,30 @@ export async function addPatient(formData: FormData) {
 
   revalidatePath('/dashboard')
 }
+
+export async function deletePatient(patientId: string): Promise<{ error?: string }> {
+  const supabase = await createClient()
+
+  const { data: { user }, error: authError } = await supabase.auth.getUser()
+  if (authError || !user) return { error: 'Unauthorized' }
+
+  // Resolve caregiver so RLS confirms ownership
+  const { data: caregiver } = await supabase
+    .from('caregivers')
+    .select('id')
+    .eq('auth_user_id', user.id)
+    .single()
+
+  if (!caregiver) return { error: 'Caregiver not found' }
+
+  const { error } = await supabase
+    .from('patients')
+    .delete()
+    .eq('id', patientId)
+    .eq('caregiver_id', caregiver.id)   // ownership guard — cannot delete another user's patient
+
+  if (error) return { error: error.message }
+
+  revalidatePath('/dashboard')
+  return {}
+}
