@@ -129,9 +129,20 @@ Each step's failure is explicit and handled immediately.
 
 - [x] Write knowledge document (this file)
 - [x] Remove `queue_worker.js` duplicate wake path
-- [x] Create `POST /process-document` bulk endpoint (pdf-extract + entity-extract + graph-ingest in 1 call)
-- [x] Create `POST /generate-briefing` bulk endpoint (patient-state + trends in 1 call)
-- [x] Create `POST /verify-briefing` endpoint (PaperTrail: decompose + evidence extract + match + semantic verify)
-- [x] Refactor `process-document` Edge Function: 3 Python calls → 1 bulk call (v10, ACTIVE)
-- [x] Refactor `process-briefing` Edge Function: PaperTrail offloaded from ~170 lines inline to ~30 line dispatch (v19, ACTIVE)
-- [ ] Profile and add structured logging
+- [x] Create `POST /process-document` bulk endpoint
+- [x] Create `POST /generate-briefing` bulk endpoint
+- [x] Create `POST /verify-briefing` (PaperTrail offload)
+- [x] Refactor Edge Functions to use bulk endpoints (v10, v19)
+- [x] Tier 1: `SELECT *` → selective columns (70% payload reduction)
+- [x] Tier 1: Sequential doc+briefing → `Promise.all` (50ms latency)
+- [x] Tier 1: `process.env` hoisting (server.ts, proxy.ts, actions.ts)
+- [x] Tier 1: Adaptive polling + visibility backoff (50-70% idle DB reduction)
+- [x] Tier 1: `useRef` stabilize supabase client (no WebSocket churn)
+- [x] Tier 1: `window.location.href` → `router.push` (no full reload)
+- [x] Tier 1: 6 FK indexes (O(N) → O(log N) on joins)
+- [x] Tier 1: React `cache()` on `createClient` (deduplicated server-side)
+- [x] Tier 0: Result<T,E> pattern across Edge Functions (v13, v20)
+- [x] Tier 0: Structured timing logging on every external call
+- [x] Tier 0: Timestamps on Python bulk endpoints (`@timing` decorator)
+- [ ] Tier 0: Module decomposition — PatientDetailClient (714 lines → extract FileUpload, DocumentList, BriefingViewer)
+- [ ] Tier 0: Pre-index documents at ingestion rather than re-fetching on every briefing
