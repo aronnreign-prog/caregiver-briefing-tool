@@ -21,6 +21,7 @@ import asyncio
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Optional, Any
+import httpx
 
 # Enforce SEMAPHORE_LIMIT=10 for 10x parallel deduplication/concurrency (Requirement R2)
 os.environ["SEMAPHORE_LIMIT"] = os.getenv("SEMAPHORE_LIMIT", "10")
@@ -404,6 +405,11 @@ FALKORDB_HOST = os.getenv("FALKORDB_HOST", "localhost")
 FALKORDB_PORT = int(os.getenv("FALKORDB_PORT", "49277"))
 FALKORDB_PASSWORD = os.getenv("FALKORDB_PASSWORD")
 
+# Supabase REST — used by background tasks to report graph failures back to the UI
+# Set SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY in Render env vars.
+SUPABASE_URL = os.getenv("SUPABASE_URL", "")
+SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
+
 graphiti: Graphiti | None = None
 
 
@@ -562,6 +568,50 @@ def _get_valid_to(r: Any) -> Optional[datetime]:
     return None
 
 
+async def _supabase_update_document(doc_id: str, patch: dict) -> None:
+    """
+    PATCH a documents row in Supabase via the REST API.
+    Used by background tasks to surface graph failures to the UI so the
+    document badge never freezes in 'processing' state.
+    Silently skips when env vars are missing (local dev without Supabase).
+    """
+    if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
+        logger.warning(
+            f"[Supabase] SUPABASE_URL / SERVICE_ROLE_KEY not set — "
+            f"skipping status update for doc {doc_id}. "
+            "Add these env vars to the Render service to enable failure reporting."
+        )
+        return
+    url = f"{SUPABASE_URL}/rest/v1/documents?id=eq.{doc_id}"
+    headers = {
+        "apikey": SUPABASE_SERVICE_ROLE_KEY,
+        "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
+        "Content-Type": "application/json",
+        "Prefer": "return=minimal",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.patch(url, json=patch, headers=headers)
+        if resp.status_code not in (200, 204):
+            logger.warning(
+                f"[Supabase] documents PATCH failed for doc {doc_id}: "
+                f"{resp.status_code} {resp.text[:200]}"
+            )
+    except Exception as e:
+        logger.warning(f"[Supabase] documents PATCH error for doc {doc_id}: {e}")
+
+
+async def _run_cypher(query: str, params: dict | None = None) -> list:
+    """
+    Execute a raw Cypher query against the FalkorDB graph via the Graphiti driver.
+    Returns the result rows (may be empty) or raises on driver error.
+    Wraps the call in a try/except so callers can decide how to handle failures.
+    """
+    if graphiti is None or graphiti.driver is None:
+        raise RuntimeError("Graphiti driver not initialised")
+    return await graphiti.driver.execute_query(query, params or {})
+
+
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
@@ -586,17 +636,74 @@ async def health():
 
 
 async def _process_add_episode_bg(req: AddFactsRequest, episode_body: str):
-    """Background task function to run Graphiti add_episode asynchronously."""
+    """
+    Background task: ingest one PDF episode into Graphiti.
+
+    Improvements over naive implementation:
+    - Uses document's own date as reference_time (temporal accuracy).
+    - Purges stale episode nodes before re-ingesting (idempotent re-processing).
+    - Reports graph failures back to Supabase so the UI badge doesn't freeze.
+    """
+    episode_name = f"doc_{req.source_doc_id}"
+    ts = datetime.now(timezone.utc).isoformat()
+
     if graphiti is None:
-        logger.error(f"[R1 Background] Cannot process doc_{req.source_doc_id}: Graphiti not initialized")
+        logger.error(
+            f"[{ts}][graph.add][patient={req.patient_id}][doc={req.source_doc_id}] "
+            "Graphiti not initialized — aborting."
+        )
+        await _supabase_update_document(req.source_doc_id, {
+            "status": "failed",
+            "error_message": "[graphiti] Service not initialized",
+        })
         return
+
+    # --- 1. Temporal accuracy: use document's own date, not ingestion wall-clock ---
+    ref_time: datetime
+    if req.source_doc_date:
+        try:
+            ref_time = _parse_iso(req.source_doc_date)
+            logger.info(
+                f"[{ts}][graph.add][patient={req.patient_id}][doc={req.source_doc_id}] "
+                f"reference_time set from document date: {ref_time.isoformat()}"
+            )
+        except Exception:
+            logger.warning(
+                f"[{ts}][graph.add][patient={req.patient_id}][doc={req.source_doc_id}] "
+                f"Cannot parse source_doc_date '{req.source_doc_date}' — falling back to reference_time."
+            )
+            ref_time = _parse_iso(req.reference_time)
+    else:
+        ref_time = _parse_iso(req.reference_time)
+
+    # --- 2. Pre-ingest purge: remove stale episode nodes for idempotent re-processing ---
     try:
-        logger.info(f"[R1 Background] Starting add_episode for doc_{req.source_doc_id} (patient {req.patient_id})")
+        await _run_cypher(
+            "MATCH (n {group_id: $group_id, name: $name}) DETACH DELETE n",
+            {"group_id": req.patient_id, "name": episode_name},
+        )
+        logger.info(
+            f"[{ts}][graph.purge][patient={req.patient_id}][doc={req.source_doc_id}] "
+            "Stale episode nodes purged."
+        )
+    except Exception as purge_err:
+        # Non-fatal — if there were no existing nodes this just returns empty.
+        logger.warning(
+            f"[{ts}][graph.purge][patient={req.patient_id}][doc={req.source_doc_id}] "
+            f"Pre-ingest purge failed (continuing): {purge_err}"
+        )
+
+    # --- 3. Ingest ---
+    try:
+        logger.info(
+            f"[{ts}][graph.add][patient={req.patient_id}][doc={req.source_doc_id}] "
+            f"Starting add_episode (ref={ref_time.isoformat()})"
+        )
         result = await graphiti.add_episode(
-            name=f"doc_{req.source_doc_id}",
+            name=episode_name,
             episode_body=episode_body,
             source=EpisodeType.text,
-            reference_time=_parse_iso(req.reference_time),
+            reference_time=ref_time,
             group_id=req.patient_id,          # ← partition by patient in FalkorDB
             source_description=(
                 f"Medical document {req.source_doc_id} "
@@ -605,11 +712,20 @@ async def _process_add_episode_bg(req: AddFactsRequest, episode_body: str):
             ),
         )
         logger.info(
-            f"[R1 Background] Successfully processed doc_{req.source_doc_id}: "
-            f"uuid={result.episode.uuid}, nodes={len(result.nodes)}, edges={len(result.edges)}"
+            f"[{ts}][graph.add][patient={req.patient_id}][doc={req.source_doc_id}] "
+            f"Success — uuid={result.episode.uuid}, nodes={len(result.nodes)}, edges={len(result.edges)}"
         )
     except Exception as e:
-        logger.error(f"[R1 Background] Error processing doc_{req.source_doc_id}: {e}", exc_info=True)
+        logger.error(
+            f"[{ts}][graph.add][patient={req.patient_id}][doc={req.source_doc_id}] "
+            f"add_episode FAILED: {e}",
+            exc_info=True,
+        )
+        # Report failure back to Supabase so the UI badge flips to 'failed'.
+        await _supabase_update_document(req.source_doc_id, {
+            "status": "failed",
+            "error_message": f"[graphiti] {str(e)[:500]}",
+        })
 
 
 @app.post("/add-facts")
@@ -650,6 +766,69 @@ async def add_facts(req: AddFactsRequest):
         "episode_id": f"doc_{req.source_doc_id}",
         "patient_id": req.patient_id,
     }
+
+
+@app.delete("/patient/{patient_id}")
+async def delete_patient_graph(patient_id: str):
+    """
+    Cascade-delete ALL graph nodes/edges belonging to a patient.
+    Called by the Next.js deletePatient server action after the Supabase row is
+    deleted, so FalkorDB stays in sync and no orphaned nodes are left behind.
+
+    Cypher: MATCH (n {group_id: $patient_id}) DETACH DELETE n
+    """
+    if graphiti is None:
+        raise HTTPException(status_code=503, detail="Graphiti not initialised")
+    ts = datetime.now(timezone.utc).isoformat()
+    try:
+        await _run_cypher(
+            "MATCH (n {group_id: $group_id}) DETACH DELETE n",
+            {"group_id": patient_id},
+        )
+        logger.info(
+            f"[{ts}][graph.delete_patient][patient={patient_id}] "
+            "All nodes and edges purged from FalkorDB."
+        )
+        return {"status": "ok", "deleted_group_id": patient_id}
+    except Exception as e:
+        logger.error(
+            f"[{ts}][graph.delete_patient][patient={patient_id}] FAILED: {e}",
+            exc_info=True,
+        )
+        raise HTTPException(status_code=500, detail=f"Graph cleanup failed: {e}")
+
+
+@app.delete("/document/{patient_id}/{document_id}")
+async def delete_document_graph(patient_id: str, document_id: str):
+    """
+    Delete the episode nodes for a single document while preserving the rest of
+    the patient's graph history. Used when a user deletes or re-uploads a document.
+
+    Entity nodes shared across multiple documents are NOT deleted — only the
+    episodic node itself and its edges are removed.
+
+    Cypher: MATCH (n {group_id: $patient_id, name: $episode_name}) DETACH DELETE n
+    """
+    if graphiti is None:
+        raise HTTPException(status_code=503, detail="Graphiti not initialised")
+    episode_name = f"doc_{document_id}"
+    ts = datetime.now(timezone.utc).isoformat()
+    try:
+        await _run_cypher(
+            "MATCH (n {group_id: $group_id, name: $name}) DETACH DELETE n",
+            {"group_id": patient_id, "name": episode_name},
+        )
+        logger.info(
+            f"[{ts}][graph.delete_document][patient={patient_id}][doc={document_id}] "
+            f"Episode '{episode_name}' purged from FalkorDB."
+        )
+        return {"status": "ok", "deleted_episode": episode_name, "patient_id": patient_id}
+    except Exception as e:
+        logger.error(
+            f"[{ts}][graph.delete_document][patient={patient_id}][doc={document_id}] FAILED: {e}",
+            exc_info=True,
+        )
+        raise HTTPException(status_code=500, detail=f"Document graph cleanup failed: {e}")
 
 
 

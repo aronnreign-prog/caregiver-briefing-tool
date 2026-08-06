@@ -58,6 +58,56 @@ export async function deletePatient(patientId: string): Promise<{ error?: string
 
   if (error) return { error: error.message }
 
+  // Purge FalkorDB graph nodes for this patient
+  const GRAPHITI_WRAPPER_URL = process.env.GRAPHITI_WRAPPER_URL || 'https://caregiver-briefing-tool.onrender.com'
+  try {
+    await fetch(`${GRAPHITI_WRAPPER_URL}/patient/${patientId}`, { method: 'DELETE' })
+  } catch (err) {
+    console.warn('[Sync] Failed to purge patient graph in FalkorDB:', err)
+  }
+
   revalidatePath('/dashboard')
   return {}
 }
+
+export async function deleteDocument(patientId: string, documentId: string): Promise<{ error?: string }> {
+  const supabase = await createClient()
+
+  const { data: { user }, error: authError } = await supabase.auth.getUser()
+  if (authError || !user) return { error: 'Unauthorized' }
+
+  // Fetch document to get storage path and verify ownership
+  const { data: doc } = await supabase
+    .from('documents')
+    .select('id, storage_path, patient_id')
+    .eq('id', documentId)
+    .eq('patient_id', patientId)
+    .single()
+
+  if (!doc) return { error: 'Document not found' }
+
+  // Delete document row from Supabase Postgres
+  const { error: dbErr } = await supabase
+    .from('documents')
+    .delete()
+    .eq('id', documentId)
+
+  if (dbErr) return { error: dbErr.message }
+
+  // Delete file from Supabase Storage if present
+  if (doc.storage_path) {
+    await supabase.storage.from('medical_records').remove([doc.storage_path]).catch(() => {})
+  }
+
+  // Purge FalkorDB graph episode nodes for this document
+  const GRAPHITI_WRAPPER_URL = process.env.GRAPHITI_WRAPPER_URL || 'https://caregiver-briefing-tool.onrender.com'
+  try {
+    await fetch(`${GRAPHITI_WRAPPER_URL}/document/${patientId}/${documentId}`, { method: 'DELETE' })
+  } catch (err) {
+    console.warn('[Sync] Failed to purge document graph in FalkorDB:', err)
+  }
+
+  revalidatePath(`/dashboard/patients/${patientId}`)
+  return {}
+}
+
