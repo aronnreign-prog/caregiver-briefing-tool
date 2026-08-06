@@ -64,7 +64,7 @@ export async function deletePatient(patientId: string): Promise<{ error?: string
   try {
     await fetch(`${GRAPHITI_WRAPPER_URL}/patient/${patientId}`, { method: 'DELETE' })
   } catch (err) {
-    console.warn('[Sync] Failed to purge patient graph in FalkorDB:', err)
+    console.error('[Sync] FalkorDB purge failed for patient — graph may contain orphaned nodes. Manual cleanup required:', err)
   }
 
   revalidatePath('/dashboard')

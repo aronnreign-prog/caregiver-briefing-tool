@@ -27,10 +27,12 @@ export default async function DashboardPage() {
   const isGuest = !user
 
   if (user && supabase) {
-    const { data } = await supabase.from('caregivers').select('id, name').eq('auth_user_id', user.id).single()
-    caregiver = data
+    const { data: cgData, error: cgError } = await supabase.from('caregivers').select('id, name').eq('auth_user_id', user.id).single()
+    if (cgError) { console.error('Dashboard: caregiver fetch failed:', cgError); throw new Error('Failed to load your profile') }
+    caregiver = cgData
     if (caregiver?.id) {
-      const { data: patientData } = await supabase.from('patients').select('id, name, relationship, date_of_birth').eq('caregiver_id', caregiver.id).order('created_at', { ascending: false })
+      const { data: patientData, error: patientError } = await supabase.from('patients').select('id, name, relationship, date_of_birth').eq('caregiver_id', caregiver.id).order('created_at', { ascending: false })
+      if (patientError) { console.error('Dashboard: patient fetch failed:', patientError); throw new Error('Failed to load patients') }
       patients = patientData || []
     }
   } else {

@@ -75,8 +75,9 @@ export default function DocumentList({
                     onClick={async (e) => {
                       e.stopPropagation()
                       if (confirm(`Delete document ${doc.filename}? This will remove its graph data.`)) {
+                        const result = await deleteDocument(patientId, doc.id)
+                        if (result?.error) { alert(`Failed to delete: ${result.error}`); return }
                         onDocumentRemoved(doc.id)
-                        await deleteDocument(patientId, doc.id)
                       }
                     }}
                     title="Delete document and purge graph data"

@@ -52,7 +52,8 @@ export async function signup(formData: FormData) {
     })
 
     if (dbError) {
-      console.error('Failed to create caregiver profile:', dbError)
+      console.error('CRITICAL: caregiver insert failed after signup:', dbError)
+      return { error: 'Failed to create your profile. Please try again or contact support.' }
     }
   }
 

@@ -29,7 +29,11 @@ export default function PatientRealtime({ patientId, isDemo, onDocumentChange, o
         else if (payload.eventType === 'UPDATE') onBriefingChange((prev: Briefing[]) => prev.map(b => b.id === payload.new.id ? payload.new as Briefing : b))
         else if (payload.eventType === 'DELETE') onBriefingChange((prev: Briefing[]) => prev.filter(b => b.id !== payload.old.id))
       })
-      .subscribe()
+      .subscribe((status: string, err?: Error) => {
+        if (status === 'CLOSED' || status === 'CHANNEL_ERROR') {
+          console.error('[Realtime] Subscription failed:', status, err?.message)
+        }
+      })
 
     return () => { supabase.removeChannel(channel) }
   }, [patientId, isDemo, onDocumentChange, onBriefingChange, onNewBriefing])

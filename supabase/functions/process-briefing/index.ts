@@ -167,27 +167,36 @@ async function completeJob(client: SupaClient, jobId: string): Promise<Result<vo
   return ok(undefined);
 }
 
-async function sendEmail(client: SupaClient, caregiverId: string): Promise<void> {
-  if (!RESEND_API_KEY) return;
+async function sendEmail(client: SupaClient, caregiverId: string): Promise<Result<void>> {
+  if (!RESEND_API_KEY) return errStr("RESEND_API_KEY not configured")
+
   try {
-    const { data: caregiver } = await client.from('caregivers').select('auth_user_id').eq('id', caregiverId).single();
-    if (caregiver?.auth_user_id) {
-      const { data: authUser } = await client.auth.admin.getUserById(caregiver.auth_user_id);
-      const email = authUser?.user?.email;
-      if (email) {
-        const t0 = Date.now();
-        const { response } = await fetchWithRetry('https://api.resend.com/emails', {
-          method: 'POST', timeoutMs: 30000, maxRetries: 1,
-          headers: { 'Authorization': `Bearer ${RESEND_API_KEY}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            from: 'Acme Care <onboarding@resend.dev>', to: [email],
-            subject: `Briefing ready — CareNote`,
-            html: `<p>Your requested medical briefing is now ready to view in the dashboard.</p>`
-          })
-        });
-        logTiming("resend email", t0);
-        if (!response.ok) console.warn(`Email failed: ${response.status}`);
-      }
+    const { data: caregiver } = await client.from('caregivers').select('auth_user_id').eq('id', caregiverId).single()
+    if (!caregiver?.auth_user_id) return errStr("Caregiver not found")
+
+    const { data: authUser } = await client.auth.admin.getUserById(caregiver.auth_user_id)
+    const email = authUser?.user?.email
+    if (!email) return errStr("No email for caregiver")
+
+    const t0 = Date.now()
+    const { response } = await fetchWithRetry('https://api.resend.com/emails', {
+      method: 'POST', timeoutMs: 30000, maxRetries: 1,
+      headers: { 'Authorization': `Bearer ${RESEND_API_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        from: 'Acme Care <onboarding@resend.dev>', to: [email],
+        subject: 'Briefing ready — CareNote',
+        html: '<p>Your requested medical briefing is now ready to view in the dashboard.</p>'
+      })
+    })
+    logTiming("resend email", t0)
+    if (!response.ok) return err(new Error(`Resend returned ${response.status}: ${await response.text().catch(() => '')}`))
+
+    return ok(undefined)
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    return err(new Error(`Email send failed: ${msg}`))
+  }
+}
     }
   } catch (e) { console.error("Email error:", e); }
 }
@@ -249,18 +258,21 @@ serve(async (req: Request) => {
     let rejectedClaims: any[] = [];
 
     if (verified.ok) {
-      finalText = verified.value.final_briefing_text || briefingText;
-      finalClaims = verified.value.verified_claims || finalClaims;
-      rejectedClaims = verified.value.rejected_claims || [];
+      finalText = verified.value.final_briefing_text || briefingText
+      finalClaims = verified.value.verified_claims || finalClaims
+      rejectedClaims = verified.value.rejected_claims || []
     } else {
-      console.warn("PaperTrail failed, using unverified claims:", verified.error.message);
+      console.warn("PaperTrail verification FAILED — marking all claims UNVERIFIED:", verified.error.message)
+      finalClaims = claims.map((c: any) => ({ ...c, flag: "UNVERIFIED", evidence: null }))
+      finalText = briefingText + "\n\n---\n⚠ **Source verification was unavailable for this briefing.** Claims below have not been verified against source documents."
     }
 
     console.log(`PaperTrail: ${finalClaims.length} supported, ${rejectedClaims.length} rejected.`);
 
     await saveBriefing(client, briefingId, finalText, finalClaims, concerns);
     await completeJob(client, job.id);
-    sendEmail(client, briefing.value.caregiver_id).catch(() => {});
+    const emailResult = await sendEmail(client, briefing.value.caregiver_id);
+    if (!emailResult.ok) console.error("[briefing] Email notification failed:", emailResult.error.message);
 
     return new Response(JSON.stringify({ message: 'Success', briefingId }), { status: 200 });
 
