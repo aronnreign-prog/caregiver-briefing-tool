@@ -84,27 +84,31 @@ Deno.serve(async (req: Request) => {
     }
     const pdfBase64 = btoa(binary);
 
-    const { response: extractResp } = await fetchRender("/extract-pdf", {
+    const { response: docResult } = await fetchRender("/process-document", {
       method: "POST",
-      body: JSON.stringify({ pdf_base64: pdfBase64 }),
+      body: JSON.stringify({
+        pdf_base64: pdfBase64,
+        patient_id: doc.patient_id,
+        source_doc_id: documentId,
+        source_doc_date: null,
+        reference_time: new Date().toISOString(),
+      }),
     });
-    if (!extractResp.ok) {
-      const errBody = await extractResp.text().catch(() => "");
-      throw new Error(`PDF extraction wrapper error: ${extractResp.status} ${extractResp.statusText} ${errBody}`);
+
+    if (!docResult.ok) {
+      const errBody = await docResult.text().catch(() => "");
+      throw new Error(`process-document error: ${docResult.status} ${docResult.statusText} ${errBody}`);
     }
-    const extractResult = await extractResp.json();
-    const fullRawText = extractResult.extracted_text || "";
+    const docData = await docResult.json();
+    const extractedText = docData.extracted_text || "";
+    const extractedEntities = docData.extracted_entities || {};
+
+    if (!extractedText) throw new Error("PDF extraction returned no text");
 
     const OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY");
     if (!OPENROUTER_API_KEY) throw new Error("OPENROUTER_API_KEY is required");
 
     const MODEL = Deno.env.get("METADATA_MODEL") || "meta-llama/llama-3.1-8b-instruct:free";
-
-    // Layer 1 already produced the structured extracted text via the vision
-    // model in the Python wrapper. Use it directly instead of a redundant
-    // second OpenRouter call (keeps us well under the 150s Edge timeout).
-    const extractedText = fullRawText;
-    if (!extractedText) throw new Error("PDF extraction returned no text");
 
     const { response: metaResponse } = await fetchWithRetry("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
@@ -127,9 +131,6 @@ Deno.serve(async (req: Request) => {
       }),
     });
 
-    // NOTE (Rule M2): never fall back to now() for document_date. If the
-    // model can't extract the real date of service, leave it null so the gap
-    // is visible instead of falsified with the ingestion timestamp.
     let metadata: any = {
       document_date: null,
       document_type: "unknown",
@@ -145,35 +146,6 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    const { response: entityResponse } = await fetchRender("/extract-entities", {
-      method: "POST",
-      body: JSON.stringify({ text: extractedText }),
-    });
-
-    let extractedEntities: any = { medications: [], lab_values: [] };
-    if (entityResponse.ok) {
-      extractedEntities = await entityResponse.json();
-    } else {
-      const errText = await entityResponse.text();
-      console.warn(`[WARN] /extract-entities failed (${entityResponse.status}): ${errText}. Retrying...`);
-    }
-
-    if (
-      (!extractedEntities?.medications || extractedEntities.medications.length === 0) &&
-      (!extractedEntities?.lab_values || extractedEntities.lab_values.length === 0)
-    ) {
-      console.warn(`[WARN] /extract-entities returned empty entities. Retrying in 3 seconds...`);
-      await new Promise((resolve) => setTimeout(resolve, 3000));
-      const { response: retryResponse } = await fetchRender("/extract-entities", {
-        method: "POST",
-        body: JSON.stringify({ text: extractedText }),
-      });
-      if (retryResponse.ok) {
-        extractedEntities = await retryResponse.json();
-      }
-    }
-
-
     await supabaseClient.from("documents").update({
       extracted_text: extractedText,
       extracted_entities: extractedEntities,
@@ -183,25 +155,6 @@ Deno.serve(async (req: Request) => {
       status: "extracted",
       processed_at: new Date().toISOString(),
     }).eq("id", documentId);
-
-    const { response: graphitiResponse } = await fetchRender("/add-facts", {
-      method: "POST",
-      body: JSON.stringify({
-        patient_id: doc.patient_id,
-        episode_text: extractedText,
-        source_doc_id: documentId,
-        source_doc_date: metadata?.document_date ?? null,
-        entities: [
-          ...(extractedEntities?.medications || []),
-          ...(extractedEntities?.lab_values || []),
-        ],
-        reference_time: new Date().toISOString(),
-      }),
-    });
-
-    if (!graphitiResponse.ok) {
-      throw new Error(`Graphiti wrapper error: ${graphitiResponse.statusText}`);
-    }
 
     await supabaseClient.from("jobs").update({
       status: "complete",

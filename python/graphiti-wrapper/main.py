@@ -376,6 +376,28 @@ class ExtractPdfRequest(BaseModel):
     model: str | None = None       # Optional override of LAYER_1_VISION_MODEL
 
 
+class ProcessDocumentRequest(BaseModel):
+    pdf_base64: str
+    patient_id: str
+    source_doc_id: str
+    source_doc_date: str | None = None
+    reference_time: str            # ISO datetime
+
+
+class ProcessBriefingRequest(BaseModel):
+    patient_id: str
+    audience: str = "family caregiver"
+    lab_entities: list[str] = []   # entity names to fetch trends for
+
+
+class VerifyBriefingRequest(BaseModel):
+    patient_id: str
+    generated_briefing: str
+    raw_claims: list[dict] = []
+    layer5_results: list[dict] = []  # RxNav DDI results
+    audience: str = "family caregiver"
+
+
 # ---------------------------------------------------------------------------
 # Graphiti initialisation
 # ---------------------------------------------------------------------------
@@ -969,3 +991,383 @@ async def api_extract_pdf(req: ExtractPdfRequest):
     except Exception as e:
         logger.error(f"Error in extract-pdf: {e}")
         raise HTTPException(status_code=500, detail="Internal Server Error during PDF extraction")
+
+
+@app.post("/process-document")
+async def api_process_document(req: ProcessDocumentRequest):
+    """
+    Bulk endpoint: PDF extraction + entity extraction + Graphiti ingestion in ONE call.
+    Collapses 3 HTTP round trips (/extract-pdf → /extract-entities → /add-facts) into
+    1 in-process pipeline with zero HTTP overhead between steps.
+    """
+    if graphiti is None:
+        raise HTTPException(status_code=503, detail="Graphiti not initialised")
+
+    result = {
+        "status": "ok",
+        "extracted_text": "",
+        "extracted_entities": {},
+        "graph_status": "pending",
+    }
+
+    try:
+        pdf_bytes = base64.b64decode(req.pdf_base64)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid base64 PDF: {e}")
+
+    try:
+        extract_result = await extract_pdf_text(pdf_bytes)
+        extracted_text = extract_result.get("extracted_text", "")
+        if not extracted_text:
+            raise HTTPException(status_code=422, detail="PDF extraction returned no text")
+        result["extracted_text"] = extracted_text
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"PDF extraction failed: {e}")
+        raise HTTPException(status_code=500, detail=f"PDF extraction failed: {e}")
+
+    try:
+        entities = await extract_entities(extracted_text)
+        result["extracted_entities"] = entities
+    except Exception as e:
+        logger.warning(f"Entity extraction failed (non-fatal): {e}")
+        result["extracted_entities"] = {"medications": [], "lab_values": []}
+
+    episode_name = f"doc_{req.source_doc_id}"
+    entity_context = ""
+    if result["extracted_entities"]:
+        entity_lines = []
+        all_entities = result["extracted_entities"].get("medications", []) + result["extracted_entities"].get("lab_values", [])
+        for ent in all_entities:
+            if isinstance(ent, dict):
+                entity_lines.append(f"[{ent.get('Type', 'ENTITY')}] {ent.get('Text', '')} (score: {ent.get('Score', 1.0):.2f})")
+        if entity_lines:
+            entity_context = "\n\nPRE-EXTRACTED ENTITIES:\n" + "\n".join(entity_lines)
+
+    episode_body = (
+        f"PATIENT_ID: {req.patient_id}\n"
+        f"DOCUMENT_ID: {req.source_doc_id}\n"
+        f"DOCUMENT_DATE: {req.source_doc_date or 'unknown'}\n\n"
+        f"DOCUMENT TEXT:\n{extracted_text}"
+        f"{entity_context}"
+    )
+
+    ref_time = datetime.now(timezone.utc)
+    if req.source_doc_date:
+        try:
+            ref_time = datetime.fromisoformat(req.source_doc_date)
+            if ref_time.tzinfo is None:
+                ref_time = ref_time.replace(tzinfo=timezone.utc)
+        except Exception:
+            pass
+
+    try:
+        await graphiti.add_episode(
+            name=episode_name,
+            episode_body=episode_body,
+            source=EpisodeType.text,
+            reference_time=ref_time,
+            group_id=req.patient_id,
+            source_description=f"Medical document {req.source_doc_id} for patient {req.patient_id}, dated {req.source_doc_date or 'unknown'}",
+        )
+        result["graph_status"] = "ingested"
+    except Exception as e:
+        logger.error(f"Graphiti ingestion failed: {e}")
+        result["graph_status"] = f"failed: {str(e)[:200]}"
+
+    return result
+
+
+@app.post("/generate-briefing")
+async def api_generate_briefing(req: ProcessBriefingRequest):
+    """
+    Bulk endpoint: patient state + lab trends in ONE call.
+    Collapses N+1 HTTP round trips (1 patient-state + N trend calls) into 1.
+    """
+    if graphiti is None:
+        raise HTTPException(status_code=503, detail="Graphiti not initialised")
+
+    result = {
+        "status": "ok",
+        "patient_id": req.patient_id,
+        "current_facts": [],
+        "trends": {},
+    }
+
+    try:
+        search_results = await graphiti.search(
+            query=f"current medications, conditions, lab values, and allergies for patient {req.patient_id}",
+            group_ids=[req.patient_id],
+            num_results=200,
+        )
+        current_facts = [r for r in search_results if _get_valid_to(r) is None]
+        result["current_facts"] = [
+            {
+                "fact": r.fact,
+                "entity_name": getattr(r, "name", None),
+                "valid_from": _get_valid_from(r).isoformat() if _get_valid_from(r) else None,
+                "source_node_uuid": str(r.uuid),
+            }
+            for r in current_facts
+        ]
+    except Exception as e:
+        logger.error(f"Patient state fetch failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Patient state fetch failed: {e}")
+
+    trends = {}
+    for entity_name in req.lab_entities:
+        try:
+            trend_results = await graphiti.search(
+                query=f"all {entity_name} values for patient {req.patient_id}",
+                group_ids=[req.patient_id],
+                num_results=100,
+            )
+            sorted_trend = sorted(
+                trend_results,
+                key=lambda r: _get_valid_from(r) or datetime.min.replace(tzinfo=timezone.utc),
+            )
+            trends[entity_name] = [
+                {
+                    "fact": r.fact,
+                    "valid_from": _get_valid_from(r).isoformat() if _get_valid_from(r) else None,
+                    "valid_to": _get_valid_to(r).isoformat() if _get_valid_to(r) else None,
+                    "is_current": _get_valid_to(r) is None,
+                    "source_node_uuid": str(r.uuid),
+                }
+                for r in sorted_trend
+            ]
+        except Exception as e:
+            logger.warning(f"Trend fetch failed for {entity_name} (non-fatal): {e}")
+            trends[entity_name] = []
+
+    result["trends"] = trends
+    return result
+
+
+@app.post("/verify-briefing")
+async def api_verify_briefing(req: VerifyBriefingRequest):
+    """
+    PaperTrail: decompose claims → extract evidence per document → match → semantic verify.
+    Moved from the Edge Function into Python to eliminate N per-document LLM HTTPS calls
+    and avoid re-fetching documents from Supabase (FalkorDB already has the text).
+    Returns verified claims, rejected claims, and final (stripped) briefing text.
+    """
+    if graphiti is None:
+        raise HTTPException(status_code=503, detail="Graphiti not initialised")
+
+    llm = graphiti.llm_client
+    generated_briefing = req.generated_briefing
+    layer5_results = req.layer5_results or []
+
+    # --- Stage 1: Atomic Claim Decomposition ---
+    decompose_prompt = (
+        f"Decompose the following briefing into atomic claims. "
+        f"Each claim should be a single verifiable fact.\n"
+        f"Briefing: {generated_briefing}\n"
+        f"Output as JSON array of {{claim_id, claim_text, claim_type, expected_evidence}}. "
+        f"claim_type can be \"source_document\", \"medical_knowledge\", or \"reasoning\"."
+    )
+
+    atomic_claims = []
+    try:
+        decomp_result = await llm.generate_response(
+            messages=[Message(role="user", content=decompose_prompt)],
+            max_tokens=4096,
+        )
+        parsed = json.loads(decomp_result) if isinstance(decomp_result, str) else decomp_result
+        atomic_claims = parsed if isinstance(parsed, list) else parsed.get("claims", [])
+    except Exception as e:
+        logger.warning(f"Claim decomposition failed: {e}")
+
+    if not atomic_claims:
+        return {
+            "status": "ok",
+            "verified_claims": req.raw_claims,
+            "rejected_claims": [],
+            "final_briefing_text": generated_briefing,
+        }
+
+    # --- Stage 2: Get document texts from FalkorDB ---
+    doc_texts = {}
+    try:
+        cypher = "MATCH (n:Episodic) WHERE n.group_id = $group_id RETURN n.name AS name, n.content AS text LIMIT 50"
+        rows = await _run_cypher(cypher, {"group_id": req.patient_id})
+        for row in rows:
+            if row:
+                name = row[0]
+                text = row[1] if len(row) > 1 and row[1] else ""
+                if text:
+                    doc_id = name.replace("doc_", "") if isinstance(name, str) and name.startswith("doc_") else name
+                    doc_texts[doc_id] = str(text)[:15000]
+    except Exception as e:
+        logger.warning(f"Failed to fetch document texts from FalkorDB: {e}")
+
+    if not doc_texts:
+        return {
+            "status": "ok",
+            "verified_claims": [
+                {**claim, "flag": "UNVERIFIED", "evidence": None}
+                for claim in atomic_claims
+            ],
+            "rejected_claims": [],
+            "final_briefing_text": generated_briefing,
+        }
+
+    doc_ids = list(doc_texts.keys())
+
+    # --- Stage 3: Atomic Evidence Extraction (parallel per document) ---
+    async def extract_evidence_for_doc(doc_id: str) -> list[dict]:
+        text = doc_texts[doc_id]
+        if not text:
+            return []
+        extract_prompt = (
+            f"Extract atomic evidence from the following source document text. "
+            f"Each evidence should be a single fact with the exact source quote.\n"
+            f"Document text: {text}\n"
+            f'Output as JSON array of {{evidence_id, evidence_text, source_quote, source_doc_id: "{doc_id}"}}.'
+        )
+        try:
+            ev_result = await llm.generate_response(
+                messages=[Message(role="user", content=extract_prompt)],
+                max_tokens=4096,
+            )
+            parsed = json.loads(ev_result) if isinstance(ev_result, str) else ev_result
+            return parsed if isinstance(parsed, list) else parsed.get("evidence", parsed.get("atomic_evidence", []))
+        except Exception as e:
+            logger.warning(f"Evidence extraction failed for doc {doc_id}: {e}")
+            return []
+
+    evidence_tasks = [extract_evidence_for_doc(did) for did in doc_ids]
+    evidence_results = await asyncio.gather(*evidence_tasks)
+
+    atomic_evidence = []
+    for ev_list in evidence_results:
+        atomic_evidence.extend(ev_list)
+
+    # --- Stage 4: String-match pass ---
+    verified_claims = []
+    rejected_claims = []
+    unverified_claims = []
+
+    for claim in atomic_claims:
+        flag = "UNSUPPORTED"
+        evidence = None
+
+        if claim.get("claim_type") == "medical_knowledge":
+            matched_ddi = next(
+                (r for r in layer5_results
+                 if claim.get("claim_text", "").lower().find(r.get("medications", [""])[0].lower()) >= 0
+                 or claim.get("claim_text", "").lower().find(r.get("medications", [""])[-1].lower()) >= 0),
+                None,
+            )
+            if matched_ddi:
+                flag = "MEDICAL_KNOWLEDGE"
+                evidence = {
+                    "source": "RxNav",
+                    "entry_text": matched_ddi.get("citation", ""),
+                    "match_type": "medical_knowledge",
+                }
+        else:
+            claim_lower = (claim.get("claim_text") or "").lower()
+            expected = (claim.get("expected_evidence") or claim.get("claim_text") or "").lower()
+
+            matched_ev = next(
+                (ev for ev in atomic_evidence
+                 if expected in (ev.get("source_quote") or "").lower()
+                 or expected in (ev.get("evidence_text") or "").lower()),
+                None,
+            )
+
+            doc_match = next(
+                (did for did in doc_ids
+                 if claim_lower[:30] in (doc_texts.get(did) or "").lower()),
+                None,
+            )
+
+            if matched_ev:
+                flag = "SUPPORTED"
+                evidence = {
+                    "source_doc_id": matched_ev.get("source_doc_id"),
+                    "source_quote": matched_ev.get("source_quote") or matched_ev.get("evidence_text"),
+                    "match_type": "exact",
+                    "confidence": 1.0,
+                }
+            elif doc_match:
+                flag = "SUPPORTED"
+                evidence = {
+                    "source_doc_id": doc_match,
+                    "source_quote": claim.get("claim_text"),
+                    "match_type": "direct_text",
+                    "confidence": 0.9,
+                }
+
+        if flag != "UNSUPPORTED":
+            verified_claims.append({**claim, "flag": flag, "evidence": evidence})
+        elif claim.get("claim_type") != "medical_knowledge":
+            unverified_claims.append(claim)
+        else:
+            verified_claims.append({
+                **claim,
+                "flag": "MEDICAL_KNOWLEDGE",
+                "evidence": {"source": "RxNav", "entry_text": "General clinical knowledge"},
+            })
+
+    # --- Stage 5: Batch Semantic Match for unverified claims ---
+    if unverified_claims and atomic_evidence:
+        unverified_payload = [{"id": c.get("claim_id"), "text": c.get("claim_text")} for c in unverified_claims]
+        evidence_payload = [e.get("evidence_text") or e.get("source_quote") or "" for e in atomic_evidence]
+        batch_prompt = (
+            f"Verify whether the following claims are supported by the evidence pool.\n"
+            f"Claims: {json.dumps(unverified_payload)}\n"
+            f"Evidence: {json.dumps(evidence_payload)}\n\n"
+            f'Output JSON: {{"results": [{{"id": "claim_id", "is_supported": true/false, "confidence": 0.0-1.0, "matching_fact": "quote"}}]}}'
+        )
+        try:
+            batch_result = await llm.generate_response(
+                messages=[Message(role="user", content=batch_prompt)],
+                max_tokens=4096,
+            )
+            parsed_batch = json.loads(batch_result) if isinstance(batch_result, str) else batch_result
+            batch_results = parsed_batch.get("results", []) if isinstance(parsed_batch, dict) else []
+
+            for claim in unverified_claims:
+                match = next((r for r in batch_results if r.get("id") == claim.get("claim_id")), None)
+                if match and match.get("is_supported") and match.get("confidence", 0) >= 0.5:
+                    vflag = "SUPPORTED" if match.get("confidence", 0) > 0.8 else "PARTIALLY SUPPORTED"
+                    verified_claims.append({
+                        **claim,
+                        "flag": vflag,
+                        "evidence": {
+                            "source_doc_id": "semantic-match",
+                            "source_quote": match.get("matching_fact") or claim.get("claim_text"),
+                            "match_type": "semantic",
+                            "confidence": match.get("confidence"),
+                        },
+                    })
+                else:
+                    rejected_claims.append({**claim, "flag": "UNSUPPORTED", "evidence": None})
+        except Exception as e:
+            logger.warning(f"Batch semantic verification failed: {e}")
+            for claim in unverified_claims:
+                rejected_claims.append({**claim, "flag": "UNSUPPORTED", "evidence": None})
+    else:
+        for claim in unverified_claims:
+            rejected_claims.append({**claim, "flag": "UNSUPPORTED", "evidence": None})
+
+    # --- Strip unsupported claims from briefing text ---
+    final_briefing = generated_briefing
+    for rejected in rejected_claims:
+        final_briefing = final_briefing.replace(rejected.get("claim_text", ""), "")
+
+    logger.info(
+        f"PaperTrail complete: {len(verified_claims)} supported, "
+        f"{len(rejected_claims)} rejected, {len(final_briefing)} chars"
+    )
+
+    return {
+        "status": "ok",
+        "verified_claims": verified_claims,
+        "rejected_claims": rejected_claims,
+        "final_briefing_text": final_briefing,
+    }

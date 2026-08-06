@@ -60,36 +60,25 @@ serve(async (req: Request) => {
     // --- TASK 8: Query Graphiti for Patient State & Trends ---
     console.log(`Fetching current state for patient ${briefing.patient_id} from Graphiti...`)
     
-    // Get current facts
-    const { response: stateResponse } = await fetchRender(`/patient-state/${briefing.patient_id}`);
-    if (!stateResponse.ok) throw new Error(`Graphiti wrapper error: ${stateResponse.statusText}`)
-    const patientState = await stateResponse.json()
-    const currentFacts = patientState.current_facts || []
-    
-    // Get temporal trends for key labs
     const labsToTrack = ["GFR", "Creatinine", "HbA1c", "LDL", "Hemoglobin"];
-    const trends: Record<string, any> = {};
-    
-    const trendPromises = labsToTrack.map(async (lab) => {
-      try {
-        const { response: trendResponse } = await fetchRender(
-          `/trend/${briefing.patient_id}/${lab}`,
-          { timeoutMs: 30000, maxRetries: 1 }
-        );
-        if (trendResponse.ok) {
-          const trendData = await trendResponse.json();
-          if (trendData.trend && trendData.trend.length > 0) {
-            trends[lab] = trendData.trend;
-          }
-        } else {
-          console.warn(`[WARN] /trend/${lab} returned ${trendResponse.status}`);
-        }
-      } catch (e) {
-        console.warn(`[WARN] Failed to fetch trend for ${lab}:`, e);
-      }
+
+    const { response: briefingResult } = await fetchRender("/generate-briefing", {
+      method: "POST",
+      body: JSON.stringify({
+        patient_id: briefing.patient_id,
+        audience: briefing.audience || "family caregiver",
+        lab_entities: labsToTrack,
+      }),
     });
+
+    if (!briefingResult.ok) {
+      const errBody = await briefingResult.text().catch(() => "");
+      throw new Error(`generate-briefing error: ${briefingResult.status} ${briefingResult.statusText} ${errBody}`);
+    }
+    const briefingData = await briefingResult.json();
+    const currentFacts = briefingData.current_facts || [];
+    const trends: Record<string, any> = briefingData.trends || {};
     
-    await Promise.allSettled(trendPromises);
     console.log(`Successfully retrieved facts and ${Object.keys(trends).length} temporal trends.`)
 
     // --- TASK 9: LLM Reasoning (Layer 3) + Drug Database Verification (Layer 5) ---
@@ -242,202 +231,36 @@ Rules:
     let claims = parsedContent.claims || []
     const flaggedConcerns = parsedContent.flagged_concerns || []
     
-    // --- TASK 10: PaperTrail Verification (Layer 4) ---
-    console.log(`Running PaperTrail Verification...`)
+    // --- PaperTrail Verification (Layer 4) — delegated to Python wrapper ---
+    console.log(`Running PaperTrail Verification via /verify-briefing...`)
     
-    // Stage 1: Atomic Claim Decomposition
-    const decomposeClaimsPrompt = `Decompose the following briefing into atomic claims. Each claim should be a single verifiable fact. 
-    Briefing: ${generatedBriefing}
-    Output as JSON array of {claim_id, claim_text, claim_type, expected_evidence}. 
-    claim_type can be "source_document", "medical_knowledge", or "reasoning".`
+    let verifiedClaims: any[] = claims.map((c: any) => ({ ...c, flag: "UNVERIFIED", evidence: null }))
+    let rejectedClaims: any[] = []
+    let finalBriefingText = generatedBriefing
 
-    let atomicClaims: any[] = []
     try {
-const { response: decompRes } = await fetchWithRetry("https://openrouter.ai/api/v1/chat/completions", {
-      method: "POST",
-      timeoutMs: 60000,
-      maxRetries: 1,
-      headers: { "Authorization": `Bearer ${OPENROUTER_API_KEY}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: LLM_MODEL,
-        response_format: { type: "json_object" },
-        messages: [{ role: "user", content: decomposeClaimsPrompt }]
-      })
-    });
-      if (decompRes.ok) {
-        const decompData = await decompRes.json()
-        const parsed = JSON.parse(decompData.choices[0].message.content)
-        atomicClaims = Array.isArray(parsed) ? parsed : (parsed.claims || [])
+      const { response: verifyResult } = await fetchRender("/verify-briefing", {
+        method: "POST",
+        body: JSON.stringify({
+          patient_id: briefing.patient_id,
+          generated_briefing: generatedBriefing,
+          raw_claims: claims,
+          layer5_results: layer5Results,
+          audience: briefing.audience || "family caregiver",
+        }),
+      });
+
+      if (verifyResult.ok) {
+        const verifyData = await verifyResult.json();
+        verifiedClaims = verifyData.verified_claims || verifiedClaims;
+        rejectedClaims = verifyData.rejected_claims || [];
+        finalBriefingText = verifyData.final_briefing_text || generatedBriefing;
+      } else {
+        const errText = await verifyResult.text().catch(() => "");
+        console.warn(`[WARN] /verify-briefing failed (${verifyResult.status}): ${errText}`);
       }
     } catch (e) {
-      console.warn("Failed to decompose claims:", e)
-    }
-
-    // Stage 2: Atomic Evidence Extraction
-    // First, fetch the raw text of all documents for this patient
-    const { data: sourceDocs } = await supabaseClient
-      .from('documents')
-      .select('id, extracted_text')
-      .eq('patient_id', briefing.patient_id)
-      
-    let atomicEvidence: any[] = []
-    
-    if (sourceDocs && sourceDocs.length > 0) {
-      for (const doc of sourceDocs) {
-        if (!doc.extracted_text) continue;
-        
-        const extractEvidencePrompt = `Extract atomic evidence from the following source document text. Each evidence should be a single fact with the exact source quote. 
-        Document text: ${doc.extracted_text}
-        Output as JSON array of {evidence_id, evidence_text, source_quote, source_doc_id: "${doc.id}"}.`
-        
-        try {
-          const { response: evRes } = await fetchWithRetry("https://openrouter.ai/api/v1/chat/completions", {
-        method: "POST",
-        timeoutMs: 60000,
-        maxRetries: 1,
-        headers: { "Authorization": `Bearer ${OPENROUTER_API_KEY}`, "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: LLM_MODEL,
-          response_format: { type: "json_object" },
-          messages: [{ role: "user", content: extractEvidencePrompt }]
-        })
-      });
-          if (evRes.ok) {
-            const evData = await evRes.json()
-            const parsedEv = JSON.parse(evData.choices[0].message.content)
-            const extracted = Array.isArray(parsedEv) ? parsedEv : (parsedEv.evidence || parsedEv.atomic_evidence || [])
-            atomicEvidence = atomicEvidence.concat(extracted)
-          }
-        } catch (e) {
-          console.warn(`Failed to extract evidence for doc ${doc.id}:`, e)
-        }
-      }
-    }
-
-    // Stage 3 & 4: Claim-Evidence Matching & Flagging
-    const verifiedClaims = []
-    const rejectedClaims = []
-    
-    // Fast string-match pass across atomic evidence and raw source texts
-    const unverifiedClaims: any[] = []
-    
-    for (const claim of atomicClaims) {
-      let flag = "UNSUPPORTED"
-      let evidence = null
-      
-      if (claim.claim_type === "medical_knowledge") {
-        const isContraindication = layer5Results.find(res => 
-          claim.claim_text.toLowerCase().includes(res.medications[0]?.toLowerCase()) || 
-          claim.claim_text.toLowerCase().includes(res.medications[1]?.toLowerCase())
-        )
-        if (isContraindication) {
-          flag = "MEDICAL_KNOWLEDGE"
-          evidence = { source: "RxNav", entry_text: isContraindication.citation, match_type: "medical_knowledge" }
-        }
-      } else {
-        const claimLower = (claim.claim_text || "").toLowerCase()
-        const expectedQuote = (claim.expected_evidence || claim.claim_text || "").toLowerCase()
-        
-        // Check atomic evidence items
-        const matchedEv = atomicEvidence.find(ev => 
-          (ev.source_quote && ev.source_quote.toLowerCase().includes(expectedQuote)) || 
-          (ev.evidence_text && ev.evidence_text.toLowerCase().includes(expectedQuote))
-        )
-        
-        // Also check raw source document texts directly (fast 0.001s fallback)
-        const matchedDoc = sourceDocs?.find(doc => 
-          doc.extracted_text && doc.extracted_text.toLowerCase().includes(claimLower.slice(0, 30))
-        )
-        
-        if (matchedEv) {
-          flag = "SUPPORTED"
-          evidence = {
-            source_doc_id: matchedEv.source_doc_id,
-            source_quote: matchedEv.source_quote || matchedEv.evidence_text,
-            match_type: "exact",
-            confidence: 1.0
-          }
-        } else if (matchedDoc) {
-          flag = "SUPPORTED"
-          evidence = {
-            source_doc_id: matchedDoc.id,
-            source_quote: claim.claim_text,
-            match_type: "direct_text",
-            confidence: 0.9
-          }
-        }
-      }
-
-      if (flag !== "UNSUPPORTED") {
-        verifiedClaims.push({ ...claim, flag, evidence })
-      } else if (claim.claim_type !== "medical_knowledge") {
-        unverifiedClaims.push(claim)
-      } else {
-        verifiedClaims.push({ ...claim, flag: "MEDICAL_KNOWLEDGE", evidence: { source: "RxNav", entry_text: "General clinical knowledge" } })
-      }
-    }
-
-    // Batch Semantic Match pass for unverified claims (ONE single LLM call instead of N calls in a loop!)
-    if (unverifiedClaims.length > 0 && atomicEvidence.length > 0) {
-      console.log(`Running single batch semantic verification for ${unverifiedClaims.length} claims...`)
-      const batchSemanticPrompt = `Verify whether the following claims are supported by the evidence pool.
-      Claims: ${JSON.stringify(unverifiedClaims.map(c => ({ id: c.claim_id, text: c.claim_text })))}
-      Evidence: ${JSON.stringify(atomicEvidence.map(e => e.evidence_text || e.source_quote))}
-
-      Output JSON: {"results": [{"id": "claim_id", "is_supported": true/false, "confidence": 0.0-1.0, "matching_fact": "quote"}]}`
-
-      try {
-        const { response: batchRes } = await fetchWithRetry("https://openrouter.ai/api/v1/chat/completions", {
-          method: "POST",
-          timeoutMs: 30000,
-          maxRetries: 1,
-          headers: { "Authorization": `Bearer ${OPENROUTER_API_KEY}`, "Content-Type": "application/json" },
-          body: JSON.stringify({
-            model: LLM_MODEL,
-            response_format: { type: "json_object" },
-            messages: [{ role: "user", content: batchSemanticPrompt }]
-          })
-        });
-
-        if (batchRes.ok) {
-          const batchData = await batchRes.json()
-          const parsedBatch = JSON.parse(batchData.choices[0].message.content)
-          const results = parsedBatch.results || []
-          
-          for (const claim of unverifiedClaims) {
-            const match = results.find((r: any) => r.id === claim.claim_id)
-            if (match && match.is_supported && match.confidence >= 0.5) {
-              const flag = match.confidence > 0.8 ? "SUPPORTED" : "PARTIALLY SUPPORTED"
-              verifiedClaims.push({
-                ...claim,
-                flag,
-                evidence: { source_doc_id: "semantic-match", source_quote: match.matching_fact || claim.claim_text, match_type: "semantic", confidence: match.confidence }
-              })
-            } else {
-              rejectedClaims.push({ ...claim, flag: "UNSUPPORTED", evidence: null })
-            }
-          }
-        } else {
-          for (const claim of unverifiedClaims) {
-            rejectedClaims.push({ ...claim, flag: "UNSUPPORTED", evidence: null })
-          }
-        }
-      } catch (e) {
-        console.warn("Batch semantic verification failed (marking claims unsupported):", e)
-        for (const claim of unverifiedClaims) {
-          rejectedClaims.push({ ...claim, flag: "UNSUPPORTED", evidence: null })
-        }
-      }
-    } else {
-      for (const claim of unverifiedClaims) {
-        rejectedClaims.push({ ...claim, flag: "UNSUPPORTED", evidence: null })
-      }
-    }
-    
-    // Strip UNSUPPORTED claims from the briefing text
-    let finalBriefingText = generatedBriefing
-    for (const rejected of rejectedClaims) {
-      finalBriefingText = finalBriefingText.replace(rejected.claim_text, "")
+      console.warn("PaperTrail verification failed, using unverified claims:", e);
     }
 
     console.log(`PaperTrail complete: ${verifiedClaims.length} supported, ${rejectedClaims.length} rejected.`)
@@ -479,7 +302,7 @@ const { response: decompRes } = await fetchWithRetry("https://openrouter.ai/api/
           body: JSON.stringify({
             from: 'Acme Care <onboarding@resend.dev>',
             to: [email],
-            subject: `Briefing ready for ${patientState.patient?.name || 'your patient'}`,
+            subject: `Briefing ready for Patient ${briefing.patient_id.slice(0, 8)}`,
             html: `<p>Your requested medical briefing is now ready to view in the dashboard.</p>`
           })
         });
