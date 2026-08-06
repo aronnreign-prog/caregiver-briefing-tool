@@ -597,6 +597,7 @@ async def _process_add_episode_bg(req: AddFactsRequest, episode_body: str):
             episode_body=episode_body,
             source=EpisodeType.text,
             reference_time=_parse_iso(req.reference_time),
+            group_id=req.patient_id,          # ← partition by patient in FalkorDB
             source_description=(
                 f"Medical document {req.source_doc_id} "
                 f"for patient {req.patient_id}, "
@@ -663,6 +664,7 @@ async def get_patient_state(patient_id: str):
 
     results = await graphiti.search(
         query=f"current medications, conditions, lab values, and allergies for patient {patient_id}",
+        group_ids=[patient_id],               # ← scope search to this patient's subgraph
         num_results=200,
     )
 
@@ -695,6 +697,7 @@ async def get_trend(patient_id: str, entity_name: str):
 
     results = await graphiti.search(
         query=f"all {entity_name} values for patient {patient_id}",
+        group_ids=[patient_id],               # ← scope search to this patient's subgraph
         num_results=100,
     )
 
@@ -731,6 +734,7 @@ async def temporal_query(req: TemporalQueryRequest):
 
     results = await graphiti.search(
         query=f"{req.entity_name} for patient {req.patient_id}",
+        group_ids=[req.patient_id],           # ← scope search to this patient's subgraph
         num_results=100,
     )
 
