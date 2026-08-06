@@ -1,5 +1,6 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { fetchWithRetry, fetchRender } from "../_shared/fetch.ts";
+import { encodeBase64 } from "jsr:@std/encoding@^1/base64";
 
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -76,13 +77,7 @@ Deno.serve(async (req: Request) => {
 
     const arrayBuffer = await fileData.arrayBuffer();
     const uint8 = new Uint8Array(arrayBuffer);
-
-    let binary = "";
-    const chunkSize = 0x8000;
-    for (let i = 0; i < uint8.length; i += chunkSize) {
-      binary += String.fromCharCode.apply(null, Array.from(uint8.subarray(i, i + chunkSize)));
-    }
-    const pdfBase64 = btoa(binary);
+    const pdfBase64 = encodeBase64(uint8);
 
     const { response: docResult } = await fetchRender("/process-document", {
       method: "POST",
