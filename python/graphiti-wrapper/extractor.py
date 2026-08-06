@@ -224,8 +224,9 @@ EXTRACT_MODEL_CHAIN = get_extractor_model_chain()
 SYSTEM_PROMPT = """You are a clinical entity extraction engine. From the given medical text, extract:
 1. medications — each with a "name" (the drug name) and optional "dosage", "frequency", "route", "form", "strength", "duration".
 2. lab_values — each with "test" (the lab/test name, lowercase), "value" (numeric value as a string), and "unit" (optional).
+3. conditions — each with "name" (the condition, diagnosis, or problem name) and optional "status" (active, historical, resolved).
 
-Return ONLY a JSON object with exactly two keys: "medications" (array) and "lab_values" (array).
+Return ONLY a JSON object with exactly three keys: "medications" (array), "lab_values" (array), and "conditions" (array).
 If nothing is found, return empty arrays. Do not include any explanatory text outside the JSON."""
 
 HEADERS = {
@@ -236,10 +237,10 @@ HEADERS = {
 }
 
 
-async def _llm_extract_fallback(text: str) -> tuple[list[dict], list[dict]]:
+async def _llm_extract_fallback(text: str) -> tuple[list[dict], list[dict], list[dict]]:
     if not OPENROUTER_API_KEY:
         logger.warning("OPENROUTER_API_KEY not set — no LLM fallback available.")
-        return [], []
+        return [], [], []
 
     for model_name in EXTRACT_MODEL_CHAIN:
         payload = {
@@ -264,8 +265,9 @@ async def _llm_extract_fallback(text: str) -> tuple[list[dict], list[dict]]:
                     parsed = json.loads(resp.json()["choices"][0]["message"]["content"])
                     meds = parsed.get("medications", [])
                     labs = parsed.get("lab_values", [])
-                    logger.info(f"LLM fallback ({model_name}) found {len(meds)} meds, {len(labs)} labs.")
-                    return meds, labs
+                    conds = parsed.get("conditions", [])
+                    logger.info(f"LLM fallback ({model_name}) found {len(meds)} meds, {len(labs)} labs, {len(conds)} conditions.")
+                    return meds, labs, conds
             except Exception as e:
                 logger.warning(f"Model {model_name} attempt {attempt+1}/2 failed ({e}).")
                 if attempt == 0:
@@ -273,7 +275,7 @@ async def _llm_extract_fallback(text: str) -> tuple[list[dict], list[dict]]:
                 continue
 
     logger.warning("All LLM fallback models failed.")
-    return [], []
+    return [], [], []
 
 
 # ── NIH API enrichment (deterministic code lookup) ───────────────────────────
@@ -316,10 +318,10 @@ async def extract_entities(text: str) -> dict:
     Strategy (as decided in architecture session):
       1. Med7 ML model → medications (local, zero API, handles messy drug text)
       2. spaCy Matcher rules → lab values (deterministic, rules beat ML for structured data)
-      3. LLM fallback → run if Med7 is unavailable or returns insufficient entities (< 4)
-      4. NIH RxNav API → enrich medications with RxNorm codes (deterministic)
+      3. LLM fallback → run to enrich medications, labs, and extract conditions/diagnoses
+      4. NIH RxNav & ClinicalTables APIs → enrich medications with RxNorm codes & conditions with ICD-10
 
-    Returns: {"medications": [...], "lab_values": [...]}
+    Returns: {"medications": [...], "lab_values": [...], "conditions": [...]}
     """
     clean_text = re.sub(r'[*_`#]', ' ', text)
 
@@ -329,8 +331,8 @@ async def extract_entities(text: str) -> dict:
     # --- Step 2: Medication extraction (Med7 via Hugging Face Inference API) ---
     meds = await _extract_meds_with_med7_api(clean_text)
 
-    # --- Step 3: LLM fallback to enrich medication and lab extraction ---
-    llm_meds, llm_labs = await _llm_extract_fallback(clean_text)
+    # --- Step 3: LLM fallback to enrich medication, lab, and condition extraction ---
+    llm_meds, llm_labs, llm_conds = await _llm_extract_fallback(clean_text)
 
     # Merge LLM meds avoiding duplicates
     seen_meds = {m.get("name", "").lower() for m in meds if "name" in m}
@@ -348,17 +350,31 @@ async def extract_entities(text: str) -> dict:
             labs.append(l)
             seen_tests.add(test_name)
 
+    conditions = [c for c in llm_conds if c.get("name") and len(c["name"]) > 2]
+
     # Filter out junk NER artifacts (like single character meds or "medications" header)
     meds = [m for m in meds if m.get("name") and len(m["name"]) > 2 and m["name"].lower() not in ("medications", "hcl")]
 
-    # --- Step 4: Enrich medications with RxNorm codes (NIH API, deterministic) ---
+    # --- Step 4: Enrich medications with RxNorm codes & conditions with ICD-10 (NIH API, deterministic) ---
     rxnorm_tasks = [
         fetch_rxnorm_code(m["name"])
         for m in meds if "name" in m and "rxcui" not in m
     ]
+    icd10_tasks = [
+        fetch_icd10_code(c["name"])
+        for c in conditions if "name" in c and "icd10" not in c
+    ]
+
     rxcuis = await asyncio.gather(*rxnorm_tasks, return_exceptions=True)
+    icd10s = await asyncio.gather(*icd10_tasks, return_exceptions=True)
+
     for med, rxcui in zip(meds, rxcuis):
         if isinstance(rxcui, str):
             med["rxcui"] = rxcui
 
-    return {"medications": meds, "lab_values": labs}
+    for cond, icd10 in zip(conditions, icd10s):
+        if isinstance(icd10, str):
+            cond["icd10"] = icd10
+
+    return {"medications": meds, "lab_values": labs, "conditions": conditions}
+

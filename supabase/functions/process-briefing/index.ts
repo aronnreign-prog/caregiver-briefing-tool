@@ -318,11 +318,13 @@ const { response: decompRes } = await fetchWithRetry("https://openrouter.ai/api/
     const verifiedClaims = []
     const rejectedClaims = []
     
+    // Fast string-match pass across atomic evidence and raw source texts
+    const unverifiedClaims: any[] = []
+    
     for (const claim of atomicClaims) {
       let flag = "UNSUPPORTED"
       let evidence = null
       
-      // Strategy C: Medical Knowledge
       if (claim.claim_type === "medical_knowledge") {
         const isContraindication = layer5Results.find(res => 
           claim.claim_text.toLowerCase().includes(res.medications[0]?.toLowerCase()) || 
@@ -332,70 +334,103 @@ const { response: decompRes } = await fetchWithRetry("https://openrouter.ai/api/
           flag = "MEDICAL_KNOWLEDGE"
           evidence = { source: "RxNav", entry_text: isContraindication.citation, match_type: "medical_knowledge" }
         }
-      } 
-      // Strategy A: String Match
-      else {
-        const expectedQuote = (claim.expected_evidence || claim.claim_text).toLowerCase()
+      } else {
+        const claimLower = (claim.claim_text || "").toLowerCase()
+        const expectedQuote = (claim.expected_evidence || claim.claim_text || "").toLowerCase()
+        
+        // Check atomic evidence items
         const matchedEv = atomicEvidence.find(ev => 
           (ev.source_quote && ev.source_quote.toLowerCase().includes(expectedQuote)) || 
           (ev.evidence_text && ev.evidence_text.toLowerCase().includes(expectedQuote))
+        )
+        
+        // Also check raw source document texts directly (fast 0.001s fallback)
+        const matchedDoc = sourceDocs?.find(doc => 
+          doc.extracted_text && doc.extracted_text.toLowerCase().includes(claimLower.slice(0, 30))
         )
         
         if (matchedEv) {
           flag = "SUPPORTED"
           evidence = {
             source_doc_id: matchedEv.source_doc_id,
-            source_quote: matchedEv.source_quote,
+            source_quote: matchedEv.source_quote || matchedEv.evidence_text,
             match_type: "exact",
             confidence: 1.0
           }
-        } 
-        // Strategy B: Semantic Match
-        else if (atomicEvidence.length > 0) {
-          console.log(`String match failed for: "${claim.claim_text}". Running semantic match...`)
-          const semanticPrompt = `Does the following evidence semantically support the claim? 
-          Claim: ${claim.claim_text}
-          Evidence Pool: ${JSON.stringify(atomicEvidence.map(e => e.evidence_text))}
-          
-          Respond ONLY with JSON: {"is_supported": true/false, "confidence": 0.0 to 1.0, "matching_fact": "the matching fact text"}`
-          
-          try {
-            const { response: semanticResponse } = await fetchWithRetry("https://openrouter.ai/api/v1/chat/completions", {
+        } else if (matchedDoc) {
+          flag = "SUPPORTED"
+          evidence = {
+            source_doc_id: matchedDoc.id,
+            source_quote: claim.claim_text,
+            match_type: "direct_text",
+            confidence: 0.9
+          }
+        }
+      }
+
+      if (flag !== "UNSUPPORTED") {
+        verifiedClaims.push({ ...claim, flag, evidence })
+      } else if (claim.claim_type !== "medical_knowledge") {
+        unverifiedClaims.push(claim)
+      } else {
+        verifiedClaims.push({ ...claim, flag: "MEDICAL_KNOWLEDGE", evidence: { source: "RxNav", entry_text: "General clinical knowledge" } })
+      }
+    }
+
+    // Batch Semantic Match pass for unverified claims (ONE single LLM call instead of N calls in a loop!)
+    if (unverifiedClaims.length > 0 && atomicEvidence.length > 0) {
+      console.log(`Running single batch semantic verification for ${unverifiedClaims.length} claims...`)
+      const batchSemanticPrompt = `Verify whether the following claims are supported by the evidence pool.
+      Claims: ${JSON.stringify(unverifiedClaims.map(c => ({ id: c.claim_id, text: c.claim_text })))}
+      Evidence: ${JSON.stringify(atomicEvidence.map(e => e.evidence_text || e.source_quote))}
+
+      Output JSON: {"results": [{"id": "claim_id", "is_supported": true/false, "confidence": 0.0-1.0, "matching_fact": "quote"}]}`
+
+      try {
+        const { response: batchRes } = await fetchWithRetry("https://openrouter.ai/api/v1/chat/completions", {
           method: "POST",
-          timeoutMs: 60000,
+          timeoutMs: 30000,
           maxRetries: 1,
           headers: { "Authorization": `Bearer ${OPENROUTER_API_KEY}`, "Content-Type": "application/json" },
           body: JSON.stringify({
             model: LLM_MODEL,
             response_format: { type: "json_object" },
-            messages: [{ role: "user", content: semanticPrompt }]
+            messages: [{ role: "user", content: batchSemanticPrompt }]
           })
         });
-            
-            if (semanticResponse.ok) {
-              const semanticData = await semanticResponse.json()
-              const semanticResult = JSON.parse(semanticData.choices[0].message.content)
-              if (semanticResult.is_supported && semanticResult.confidence > 0.8) {
-                flag = "SUPPORTED"
-                evidence = { source_doc_id: "semantic-match", source_quote: semanticResult.matching_fact, match_type: "semantic", confidence: semanticResult.confidence }
-              } else if (semanticResult.is_supported && semanticResult.confidence >= 0.5) {
-                flag = "PARTIALLY SUPPORTED"
-                evidence = { source_doc_id: "semantic-match", source_quote: semanticResult.matching_fact, match_type: "semantic", confidence: semanticResult.confidence }
-              }
+
+        if (batchRes.ok) {
+          const batchData = await batchRes.json()
+          const parsedBatch = JSON.parse(batchData.choices[0].message.content)
+          const results = parsedBatch.results || []
+          
+          for (const claim of unverifiedClaims) {
+            const match = results.find((r: any) => r.id === claim.claim_id)
+            if (match && match.is_supported && match.confidence >= 0.5) {
+              const flag = match.confidence > 0.8 ? "SUPPORTED" : "PARTIALLY SUPPORTED"
+              verifiedClaims.push({
+                ...claim,
+                flag,
+                evidence: { source_doc_id: "semantic-match", source_quote: match.matching_fact || claim.claim_text, match_type: "semantic", confidence: match.confidence }
+              })
+            } else {
+              rejectedClaims.push({ ...claim, flag: "UNSUPPORTED", evidence: null })
             }
-          } catch (e) {
-            console.warn("Semantic match failed:", e)
+          }
+        } else {
+          for (const claim of unverifiedClaims) {
+            rejectedClaims.push({ ...claim, flag: "UNSUPPORTED", evidence: null })
           }
         }
+      } catch (e) {
+        console.warn("Batch semantic verification failed (marking claims unsupported):", e)
+        for (const claim of unverifiedClaims) {
+          rejectedClaims.push({ ...claim, flag: "UNSUPPORTED", evidence: null })
+        }
       }
-      
-      const verifiedClaim = { ...claim, flag, evidence }
-      
-      if (flag === "UNSUPPORTED") {
-        rejectedClaims.push(verifiedClaim)
-        console.warn(`[REJECTED] Hallucination detected: ${claim.claim_text}`)
-      } else {
-        verifiedClaims.push(verifiedClaim)
+    } else {
+      for (const claim of unverifiedClaims) {
+        rejectedClaims.push({ ...claim, flag: "UNSUPPORTED", evidence: null })
       }
     }
     

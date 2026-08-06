@@ -94,6 +94,19 @@ async def extract_pdf_text(pdf_bytes: bytes, model_override: str | None = None) 
     async with httpx.AsyncClient() as client:
         for i in range(pages):
             page = doc[i]
+            
+            # --- Primary: Try PyMuPDF native text extraction first ---
+            # Digital PDFs (lab reports, EHR summaries) have embedded text.
+            # Native extraction takes 0.001s, is 100% accurate, and avoids AI vision costs/errors.
+            native_text = page.get_text("text").strip()
+            
+            # If native text is substantial (e.g. > 40 chars), use it directly
+            if len(native_text) > 40 and "user safety:" not in native_text.lower():
+                logger.info(f"Page {i + 1}/{pages}: Extracted {len(native_text)} chars via native PDF text parser.")
+                page_texts.append(native_text)
+                continue
+
+            # --- Fallback: Call Vision AI model for scanned/image pages ---
             pix = page.get_pixmap(dpi=150)
             png = pix.tobytes("png")
             b64 = base64.b64encode(png).decode("utf-8")
@@ -121,7 +134,16 @@ async def extract_pdf_text(pdf_bytes: bytes, model_override: str | None = None) 
                 }
                 try:
                     data = await _post_with_retry(client, f"{OPENROUTER_BASE_URL}/chat/completions", payload)
-                    content = data["choices"][0]["message"]["content"]
+                    content = data["choices"][0]["message"]["content"].strip()
+                    
+                    # Reject safety preamble responses (e.g. "User Safety: safe")
+                    if "user safety:" in content.lower() or len(content) < 15:
+                        logger.warning(f"Vision model {model_name} returned safety preamble or trivial output: '{content}'. Trying native/next...")
+                        if native_text:
+                            content = native_text
+                        else:
+                            continue
+
                     page_texts.append(content)
                     page_succeeded = True
                     break
@@ -130,12 +152,16 @@ async def extract_pdf_text(pdf_bytes: bytes, model_override: str | None = None) 
                     continue
 
             if not page_succeeded:
-                logger.error(f"Failed to extract page {i + 1} with all available models.")
-                page_texts.append("")
-                failures += 1
+                if native_text:
+                    logger.info(f"Page {i + 1}/{pages}: Falling back to native text ({len(native_text)} chars).")
+                    page_texts.append(native_text)
+                else:
+                    logger.error(f"Failed to extract page {i + 1} with all available models.")
+                    page_texts.append("")
+                    failures += 1
 
             if i < pages - 1 and page_succeeded:
-                await asyncio.sleep(1.0)
+                await asyncio.sleep(0.5)
 
     doc.close()
 
