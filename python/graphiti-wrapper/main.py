@@ -23,6 +23,9 @@ from datetime import datetime, timezone
 from typing import Optional, Any
 import httpx
 
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 # Enforce SEMAPHORE_LIMIT=10 for 10x parallel deduplication/concurrency (Requirement R2)
 os.environ["SEMAPHORE_LIMIT"] = os.getenv("SEMAPHORE_LIMIT", "10")
 import graphiti_core.helpers
