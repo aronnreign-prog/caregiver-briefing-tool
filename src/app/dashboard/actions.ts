@@ -3,6 +3,8 @@
 import { createClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 
+const GRAPHITI_WRAPPER_URL = process.env.GRAPHITI_WRAPPER_URL || 'https://caregiver-briefing-tool.onrender.com'
+
 export async function addPatient(formData: FormData) {
   const supabase = await createClient()
   
@@ -59,7 +61,6 @@ export async function deletePatient(patientId: string): Promise<{ error?: string
   if (error) return { error: error.message }
 
   // Purge FalkorDB graph nodes for this patient
-  const GRAPHITI_WRAPPER_URL = process.env.GRAPHITI_WRAPPER_URL || 'https://caregiver-briefing-tool.onrender.com'
   try {
     await fetch(`${GRAPHITI_WRAPPER_URL}/patient/${patientId}`, { method: 'DELETE' })
   } catch (err) {
@@ -100,7 +101,6 @@ export async function deleteDocument(patientId: string, documentId: string): Pro
   }
 
   // Purge FalkorDB graph episode nodes for this document
-  const GRAPHITI_WRAPPER_URL = process.env.GRAPHITI_WRAPPER_URL || 'https://caregiver-briefing-tool.onrender.com'
   try {
     await fetch(`${GRAPHITI_WRAPPER_URL}/document/${patientId}/${documentId}`, { method: 'DELETE' })
   } catch (err) {

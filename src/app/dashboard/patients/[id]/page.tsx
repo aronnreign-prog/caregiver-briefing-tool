@@ -56,20 +56,21 @@ export default async function PatientPage({ params }: { params: Promise<{ id: st
     }
     patient = result.data as Patient
 
-    const { data: docData } = await supabase!
-      .from('documents')
-      .select('id, filename, status, uploaded_at, storage_path')
-      .eq('patient_id', patientId)
-      .order('uploaded_at', { ascending: false })
+    const [docResult, briefingResult] = await Promise.all([
+      supabase!
+        .from('documents')
+        .select('id, filename, status, uploaded_at, storage_path')
+        .eq('patient_id', patientId)
+        .order('uploaded_at', { ascending: false }),
+      supabase!
+        .from('briefings')
+        .select('id, audience, status, created_at, completed_at, briefing_text, claims, flagged_concerns')
+        .eq('patient_id', patientId)
+        .order('created_at', { ascending: false }),
+    ])
 
-    const { data: briefingData } = await supabase!
-      .from('briefings')
-      .select('id, audience, status, created_at, completed_at, briefing_text, claims, flagged_concerns')
-      .eq('patient_id', patientId)
-      .order('created_at', { ascending: false })
-
-    documents = (docData || []) as Document[]
-    briefings = (briefingData || []) as Briefing[]
+    documents = (docResult.data || []) as Document[]
+    briefings = (briefingResult.data || []) as Briefing[]
   }
 
   return (

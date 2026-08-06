@@ -4,9 +4,12 @@ import { useState } from 'react'
 import { signup } from '@/app/auth/actions'
 import Link from 'next/link'
 
+import { useRouter } from 'next/navigation'
+
 export default function SignupPage() {
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+  const router = useRouter()
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
@@ -21,7 +24,7 @@ export default function SignupPage() {
         setError(result.error)
         setLoading(false)
       } else if (result?.success) {
-        window.location.href = '/dashboard'
+        router.push('/dashboard')
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Signup failed'

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useTransition } from 'react'
+import { useState, useEffect, useRef, useTransition } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import type { Patient, Document, Briefing } from '@/types/database'
 import Link from 'next/link'
@@ -149,7 +149,8 @@ interface Props {
 
 export default function PatientDetailClient({ patient, initialDocuments, initialBriefings }: Props) {
   const isDemo = patient.id.startsWith('demo-')
-  const supabase = createClient()
+  const supabaseRef = useRef(createClient())
+  const supabase = supabaseRef.current
   const router = useRouter()
   const isGuest = !supabase || isDemo
 
@@ -190,24 +191,26 @@ export default function PatientDetailClient({ patient, initialDocuments, initial
 
     if (!hasPendingBriefing && !hasPendingDoc) return
 
-    const interval = setInterval(async () => {
-      const { data: updatedDocs } = await supabase
-        .from('documents')
-        .select('id, filename, status, uploaded_at, storage_path')
-        .eq('patient_id', patient.id)
-        .order('uploaded_at', { ascending: false })
+    let interval = 3000
+    let timer: ReturnType<typeof setTimeout>
+    const poll = async () => {
+      if (document.visibilityState === 'hidden') { timer = setTimeout(poll, interval * 2); return }
 
-      const { data: updatedBriefings } = await supabase
-        .from('briefings')
-        .select('id, audience, status, created_at, completed_at, briefing_text, claims, flagged_concerns')
-        .eq('patient_id', patient.id)
-        .order('created_at', { ascending: false })
+      const [{ data: updatedDocs }, { data: updatedBriefings }] = await Promise.all([
+        supabase.from('documents').select('id, filename, status, uploaded_at, storage_path').eq('patient_id', patient.id).order('uploaded_at', { ascending: false }),
+        supabase.from('briefings').select('id, audience, status, created_at, completed_at, briefing_text, claims, flagged_concerns').eq('patient_id', patient.id).order('created_at', { ascending: false }),
+      ])
 
       if (updatedDocs) setDocuments(updatedDocs as Document[])
       if (updatedBriefings) setBriefings(updatedBriefings as Briefing[])
-    }, 3000)
 
-    return () => clearInterval(interval)
+      const stillPending = (updatedDocs || []).some((d: any) => ['uploaded', 'processing', 'extracting'].includes(d.status)) ||
+                           (updatedBriefings || []).some((b: any) => b.status === 'queued' || b.status === 'processing')
+      interval = stillPending ? Math.min(interval * 1.5, 30000) : 3000
+      timer = setTimeout(poll, interval)
+    }
+    timer = setTimeout(poll, interval)
+    return () => clearTimeout(timer)
   }, [patient.id, supabase, isDemo, briefings, documents])
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {

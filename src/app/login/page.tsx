@@ -4,9 +4,12 @@ import { useState } from 'react'
 import Link from 'next/link'
 import { login } from '@/app/auth/actions'
 
+import { useRouter } from 'next/navigation'
+
 export default function LoginPage() {
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+  const router = useRouter()
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
@@ -21,7 +24,7 @@ export default function LoginPage() {
         setError(result.error)
         setLoading(false)
       } else if (result?.success) {
-        window.location.href = '/dashboard'
+        router.push('/dashboard')
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Login failed'
