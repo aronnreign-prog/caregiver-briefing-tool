@@ -349,16 +349,18 @@ from extractor import extract_entities
 from pdf_extract import extract_pdf_text
 
 import time
+import functools, inspect
 
 def timing(func):
-    """Decorator: log duration of any async route."""
+    """Decorator: log duration of any async route. Preserves function signature for FastAPI."""
+    @functools.wraps(func)
     async def wrapper(*args, **kwargs):
         t0 = time.monotonic()
         result = await func(*args, **kwargs)
         dur = (time.monotonic() - t0) * 1000
         logger.info(f"[timing] {func.__name__}: {dur:.0f}ms")
         return result
-    wrapper.__name__ = func.__name__
+    wrapper.__signature__ = inspect.signature(func)
     return wrapper
 
 # ---------------------------------------------------------------------------
