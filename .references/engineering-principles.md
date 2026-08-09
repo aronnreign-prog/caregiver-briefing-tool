@@ -2,7 +2,24 @@
 
 > Extracted from Jeff Dean's Abseil performance philosophy, mapped to the CareNote codebase.
 > Source: https://abseil.io/fast/hints.html (Jeff Dean & Sanjay Ghemawat, Google)
-> Generated: 2026-08-06
+> Generated: 2026-08-06 | Updated: 2026-08-09
+
+---
+
+## Current Deployed State
+
+| Component | Location | Version | Status |
+|---|---|---|---|
+| Edge: process-document | Supabase | v13 | ACTIVE |
+| Edge: process-briefing | Supabase | v20 | ACTIVE |
+| Python Wrapper | Render | live (dep-d9q89rd) | ACTIVE |
+| Next.js App | local dev | — | Builds clean |
+
+## MCP Tools Available
+
+- **Render MCP** (`kilo.json`): deploy, logs, env vars, metrics for Python service
+- **Supabase MCP**: DB queries, Edge Function deploy, secrets management
+- **Tunnel Keeper**: ngrok tunnel for local Graphiti wrapper
 
 ---
 

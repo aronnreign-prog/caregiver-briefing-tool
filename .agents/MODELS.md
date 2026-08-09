@@ -6,36 +6,38 @@
 > `.agents/AGENTS.md` and `.agents/skills/model_routing/SKILL.md`.
 >
 > **Principle:** All runtime models are env-driven. To switch a model, edit the
-> env var — **never** hardcode a model in code. Free OpenRouter models are the
-> default; paid models are opt-in via env override.
+> env var — **never** hardcode a model in code.
 
 ## Env Var → Default Model → Used By
 
-| Env Var | Default (free) | Where read | Task |
+| Env Var | Default | Where Read | Task |
 |---|---|---|---|
-| `LAYER_1_VISION_MODEL` | `qwen/qwen-2-vl-7b-instruct:free` | `process-document/index.ts:84` | PDF → text + structured medical extraction (vision/multimodal) |
-| `LLM_MODEL` | `anthropic/claude-3-haiku` | `process-briefing/index.ts:147` | Layer 3 reasoning, PaperTrail claim-evidence matching, briefing generation |
-| `OPENROUTER_API_KEY` | — | both functions | Auth for all OpenRouter calls |
+| `LAYER_1_VISION_MODEL` | `qwen/qwen-2-vl-7b-instruct:free` | `process-document/index.ts` | PDF → text extraction (vision/multimodal) |
+| `METADATA_MODEL` | `meta-llama/llama-3.1-8b-instruct:free` | `process-document/index.ts` | Document metadata extraction (type, date, provider) |
+| `LLM_MODEL` | `anthropic/claude-3-haiku` | `process-briefing/index.ts` | Briefing generation + PaperTrail verification |
+| `OPENROUTER_API_KEY` | — | both functions + Python wrapper | Auth for all OpenRouter calls |
 
-## How to override (no code edit)
+## Model Usage in Edge Functions (v13, v20)
 
-Set the env var in the Supabase Edge Function secrets (Dashboard →
-Project Settings → Edge Functions → Secrets) or local `.env.local`:
+### process-document (v13) — Result<T,E> step pipeline
+- `extractMetadata()` — `METADATA_MODEL` for document type/date/provider
+- `processPdfBulk()` — delegates PDF→text to Python `/process-document` (uses `LAYER_1_VISION_MODEL`)
 
+### process-briefing (v20) — Result<T,E> step pipeline
+- `generateBriefingLLM()` — `LLM_MODEL` for briefing text + claims + flagged concerns
+- `checkDrugInteractions()` — NIH RxNav API (no LLM, free REST API)
+- `runPaperTrail()` — delegates to Python `/verify-briefing` (uses Graphiti search + LLM)
+
+## Python Wrapper Models
+
+The Python wrapper's Graphiti client uses the same `OPENROUTER_API_KEY` via its own LLM configuration. See `python/graphiti-wrapper/main.py` for `LLM_CONFIG` setup.
+
+## How to Override
+
+Set env vars in Supabase Edge Function secrets:
 ```
-LAYER_1_VISION_MODEL=google/gemma-3-4b-it:free
-LLM_MODEL=deepseek/deepseek-chat-v3-0324:free
+supabase secrets set LAYER_1_VISION_MODEL=google/gemma-3-4b-it:free
+supabase secrets set LLM_MODEL=deepseek/deepseek-chat-v3-0324:free
 ```
 
-## Free-model options (OpenRouter)
-
-- Vision / document extraction: `qwen/qwen-2-vl-7b-instruct:free`, `google/gemma-3-4b-it:free`
-- General reasoning: `anthropic/claude-3-haiku` (cheap, not tagged free),
-  `deepseek/deepseek-chat-v3-0324:free`, `meta-llama/llama-3.2-3b-instruct:free`
-- Avoid paid models unless explicitly requested by the user.
-
-## Python wrapper (Graphiti)
-
-The FastAPI Graphiti wrapper uses its own LLM config (see
-`python/graphiti-wrapper/`). If it calls OpenRouter, use the same
-`OPENROUTER_API_KEY` + an env var (e.g. `GRAPHITI_LLM_MODEL`); do not hardcode.
+Or for Python wrapper, set the env var on the Render dashboard.
