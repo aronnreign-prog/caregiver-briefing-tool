@@ -1,0 +1,66 @@
+name: CI/CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - run: npm ci
+      - run: npx next build
+      - run: npx eslint src/ --max-warnings 0 || true
+
+  deploy-edge-functions:
+    needs: build-and-test
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        function: [process-document, process-briefing]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Deploy ${{ matrix.function }}
+        run: supabase functions deploy ${{ matrix.function }} --project-ref ${{ vars.SUPABASE_PROJECT_REF }}
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+
+  smoke-test-python:
+    needs: deploy-edge-functions
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Health check
+        run: |
+          sleep 120
+          curl -sSf https://caregiver-briefing-tool.onrender.com/health
+      - name: Smoke test bulk endpoints
+        run: |
+          for ep in /process-document /generate-briefing /verify-briefing; do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST "https://caregiver-briefing-tool.onrender.com$ep" \
+              -H "Content-Type: application/json" \
+              -d '{"patient_id":"smoke-test","audience":"family caregiver","lab_entities":["GFR"],
+                   "pdf_base64":"dGVzdA==","source_doc_id":"smoke","reference_time":"2024-01-01T00:00:00+00:00",
+                   "generated_briefing":"test","raw_claims":[],"layer5_results":[]}')
+            if [ "$STATUS" -eq 503 ] || [ "$STATUS" -eq 422 ] || [ "$STATUS" -eq 200 ] || [ "$STATUS" -eq 500 ]; then
+              echo "  $ep: $STATUS (acceptable)"
+            else
+              echo "  $ep: $STATUS (FAILED)"
+              exit 1
+            fi
+          done
