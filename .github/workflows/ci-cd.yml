@@ -19,6 +19,9 @@ jobs:
 
       - run: npm ci
       - run: npx next build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ vars.NEXT_PUBLIC_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ vars.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
       - run: npx eslint src/ --max-warnings 0 || true
 
   deploy-edge-functions:
