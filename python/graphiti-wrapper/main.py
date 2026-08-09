@@ -644,7 +644,10 @@ async def _run_cypher(query: str, params: dict | None = None) -> list:
     """
     if graphiti is None or graphiti.driver is None:
         raise RuntimeError("Graphiti driver not initialised")
-    return await graphiti.driver.execute_query(query, params or {})
+    if params:
+        for key, value in params.items():
+            query = query.replace(f"${key}", f"'{str(value).replace(chr(39), chr(39)+chr(39))}'")
+    return await graphiti.driver.execute_query(query)
 
 
 # ---------------------------------------------------------------------------
