@@ -69,11 +69,16 @@ export default function DocumentUploader({ patientId, isDemo, isGuest, uploading
   if (isDemo || isGuest) return null
 
   return (
-    <label className="cursor-pointer">
-      <input type="file" accept=".pdf" className="hidden" onChange={handleUpload} disabled={uploading} />
-      <span className="font-mono text-[10px] text-accent hover:text-foreground transition-colors">
-        {uploading ? 'Uploading…' : '+ Upload'}
-      </span>
-    </label>
+    <div>
+      <label className="cursor-pointer">
+        <input type="file" accept=".pdf" className="hidden" onChange={handleUpload} disabled={uploading} />
+        <span className="font-mono text-[10px] text-accent hover:text-foreground transition-colors">
+          {uploading ? 'Uploading…' : '+ Upload'}
+        </span>
+      </label>
+      <p className="font-mono text-[8px] text-muted-foreground mt-0.5 leading-tight">
+        Upload one document per visit.<br />Combined PDFs lose per-visit dates.
+      </p>
+    </div>
   )
 }
