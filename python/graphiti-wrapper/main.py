@@ -32,6 +32,7 @@ import graphiti_core.helpers
 graphiti_core.helpers.SEMAPHORE_LIMIT = 10
 
 from google.genai import types
+import google.genai as genai
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
@@ -325,18 +326,38 @@ async def _patched_gemini_create_batch(self, input_data_list: list[str]) -> list
 
     async def _embed_single(text: str) -> list[float]:
         async with _embed_semaphore:
-            result = await self.client.aio.models.embed_content(
-                model=self.config.embedding_model or 'gemini-embedding-001',
-                contents=[text],
-                config=types.EmbedContentConfig(
-                    output_dimensionality=self.config.embedding_dim
-                ),
-            )
-            if not result.embeddings or len(result.embeddings) == 0:
-                raise ValueError('No embeddings returned from Gemini API')
-            if not result.embeddings[0].values:
-                raise ValueError('Empty embedding values returned')
-            return result.embeddings[0].values
+            keys = [self.config.api_key]
+            if GEMINI_API_KEY_FALLBACK:
+                keys.append(GEMINI_API_KEY_FALLBACK)
+
+            last_error = None
+            for attempt, api_key in enumerate(keys):
+                try:
+                    client = self.client if attempt == 0 else genai.Client(api_key=api_key)
+                    result = await client.aio.models.embed_content(
+                        model=self.config.embedding_model or 'gemini-embedding-001',
+                        contents=[text],
+                        config=types.EmbedContentConfig(
+                            output_dimensionality=self.config.embedding_dim
+                        ),
+                    )
+                    if not result.embeddings or len(result.embeddings) == 0:
+                        raise ValueError('No embeddings returned from Gemini API')
+                    if not result.embeddings[0].values:
+                        raise ValueError('Empty embedding values returned')
+                    if attempt > 0:
+                        logger.info(f"[embed] Switched to fallback key, attempt {attempt+1}/{len(keys)}")
+                    return result.embeddings[0].values
+                except Exception as e:
+                    last_error = e
+                    is_429 = hasattr(e, 'code') and getattr(e, 'code', None) == 429
+                    if not is_429 and not any(s in str(e).lower() for s in ['429', 'resource_exhausted', 'quota']):
+                        raise
+                    wait = 2 ** (attempt + 1)
+                    logger.warning(f"[embed] 429 quota on key {attempt+1}/{len(keys)}, retrying in {wait}s")
+                    await asyncio.sleep(wait)
+
+            raise last_error or RuntimeError("Embedding failed on all keys")
 
     return list(await asyncio.gather(*[_embed_single(t) for t in input_data_list]))
 
@@ -435,6 +456,7 @@ RERANK_MODEL = resolve_model(get_rerank_model_chain())
 # EMBED_DIM is env-driven: 768 for local (light on RAM); set to the model default
 # (3072 for gemini-embedding-001) when hosting separately.
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+GEMINI_API_KEY_FALLBACK = os.getenv("GEMINI_API_KEY_FALLBACK", "")
 EMBED_MODEL = os.getenv("EMBED_MODEL", "gemini-embedding-001")
 EMBED_DIM = int(os.getenv("EMBED_DIM", "768"))
 
