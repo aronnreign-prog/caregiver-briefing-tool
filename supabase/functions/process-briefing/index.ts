@@ -117,7 +117,7 @@ async function checkDrugInteractions(meds: Set<string>): Promise<Result<{ result
 async function generateBriefingLLM(currentFacts: any, trends: any, drugResults: any[], audience: string): Promise<Result<any>> {
   if (!OPENROUTER_API_KEY) return errStr("OPENROUTER_API_KEY is required");
 
-  const systemPrompt = `You are generating a medical briefing for a caregiver to bring to a doctor.\n\nPatient state: ${JSON.stringify(currentFacts, null, 2)}\nTemporal trends: ${JSON.stringify(trends, null, 2)}\nDrug contraindication checks: ${JSON.stringify(drugResults, null, 2)}\n\nGenerate a briefing for this audience: ${audience}\n\nRules:\n1. For each claim, note which source document it comes from.\n2. Flag any trends (e.g., "GFR declining over 18 months").\n3. Flag any conflicts between providers.\n4. Flag any contraindications.\n5. Be honest about uncertainty.\n6. Output strictly valid JSON: { "briefing_text": "Markdown...", "claims": [{ "claim_text": "...", "expected_source": "...", "claim_type": "..." }], "flagged_concerns": [{ "concern": "...", "severity": "high/medium/low", "related_claims": ["..."] }] }`;
+  const systemPrompt = `You are generating a medical briefing for a caregiver to bring to a doctor.\n\nPatient state: ${JSON.stringify(currentFacts, null, 2)}\nTemporal trends: ${JSON.stringify(trends, null, 2)}\nDrug interactions: ${JSON.stringify(drugResults, null, 2)}\n\nFor audience "${audience}", generate a concise, factual briefing with key points, trends, and concerns. Include claims (specific factual statements) and any flagged_concerns (high-priority items). Return as JSON with fields: briefing_text, claims (array of strings), flagged_concerns (array of strings).`;
 
   const t0 = Date.now();
   const { response } = await fetchWithRetry("https://openrouter.ai/api/v1/chat/completions", {
@@ -196,9 +196,6 @@ async function sendEmail(client: SupaClient, caregiverId: string): Promise<Resul
     const msg = e instanceof Error ? e.message : String(e)
     return err(new Error(`Email send failed: ${msg}`))
   }
-}
-    }
-  } catch (e) { console.error("Email error:", e); }
 }
 
 async function failJob(client: SupaClient, job: any, briefingId: string, message: string): Promise<void> {
