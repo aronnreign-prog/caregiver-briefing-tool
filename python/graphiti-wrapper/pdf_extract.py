@@ -6,6 +6,7 @@ import httpx
 import fitz
 
 from model_resolver import get_vision_model_chain, resolve_model
+from gemini_ocr import extract_page, has_gemini_keys
 
 logger = logging.getLogger(__name__)
 
@@ -111,45 +112,56 @@ async def extract_pdf_text(pdf_bytes: bytes, model_override: str | None = None) 
             png = pix.tobytes("png")
             b64 = base64.b64encode(png).decode("utf-8")
 
-            chain = [model_override] if model_override else VISION_MODEL_CHAIN
             page_succeeded = False
 
-            for model_name in chain:
-                payload = {
-                    "model": model_name,
-                    "messages": [
-                        {"role": "system", "content": SYSTEM_PROMPT},
-                        {
-                            "role": "user",
-                            "content": [
-                                {"type": "text", "text": "Extract text from this page."},
-                                {
-                                    "type": "image_url",
-                                    "image_url": {"url": f"data:image/png;base64,{b64}"},
-                                },
-                            ],
-                        },
-                    ],
-                    "temperature": 0.0,
-                }
+            # --- Try Gemini first (3-key pool, free tier) ---
+            if has_gemini_keys():
                 try:
-                    data = await _post_with_retry(client, f"{OPENROUTER_BASE_URL}/chat/completions", payload)
-                    content = data["choices"][0]["message"]["content"].strip()
-                    
-                    # Reject safety preamble responses (e.g. "User Safety: safe")
-                    if "user safety:" in content.lower() or len(content) < 15:
-                        logger.warning(f"Vision model {model_name} returned safety preamble or trivial output: '{content}'. Trying native/next...")
-                        if native_text:
-                            content = native_text
-                        else:
-                            continue
-
-                    page_texts.append(content)
+                    text = await extract_page(b64, user_prompt="Extract text from this page.", page_label=f"pg{i+1}")
+                    page_texts.append(text)
                     page_succeeded = True
-                    break
                 except Exception as e:
-                    logger.warning(f"Vision model {model_name} failed for page {i + 1} ({e}). Trying next model...")
-                    continue
+                    logger.warning(f"Gemini OCR failed for page {i + 1}/{pages}: {e}. Falling back to OpenRouter.")
+
+            if not page_succeeded:
+                chain = [model_override] if model_override else VISION_MODEL_CHAIN
+
+                for model_name in chain:
+                    payload = {
+                        "model": model_name,
+                        "messages": [
+                            {"role": "system", "content": SYSTEM_PROMPT},
+                            {
+                                "role": "user",
+                                "content": [
+                                    {"type": "text", "text": "Extract text from this page."},
+                                    {
+                                        "type": "image_url",
+                                        "image_url": {"url": f"data:image/png;base64,{b64}"},
+                                    },
+                                ],
+                            },
+                        ],
+                        "temperature": 0.0,
+                    }
+                    try:
+                        data = await _post_with_retry(client, f"{OPENROUTER_BASE_URL}/chat/completions", payload)
+                        content = data["choices"][0]["message"]["content"].strip()
+                    
+                        # Reject safety preamble responses (e.g. "User Safety: safe")
+                        if "user safety:" in content.lower() or len(content) < 15:
+                            logger.warning(f"Vision model {model_name} returned safety preamble or trivial output: '{content}'. Trying native/next...")
+                            if native_text:
+                                content = native_text
+                            else:
+                                continue
+
+                        page_texts.append(content)
+                        page_succeeded = True
+                        break
+                    except Exception as e:
+                        logger.warning(f"Vision model {model_name} failed for page {i + 1} ({e}). Trying next model...")
+                        continue
 
             if not page_succeeded:
                 if native_text:
@@ -166,7 +178,15 @@ async def extract_pdf_text(pdf_bytes: bytes, model_override: str | None = None) 
     doc.close()
 
     if failures == pages and pages > 0:
-        raise RuntimeError(f"All {pages} pages failed to extract. Check OpenRouter API key and rate limits.")
+        if has_gemini_keys():
+            raise RuntimeError(
+                f"All {pages} pages failed to extract. Check GEMINI_API_KEYS and rate limits "
+                f"(Gemini and OpenRouter chains both exhausted, or native text unavailable)."
+            )
+        raise RuntimeError(
+            f"All {pages} pages failed to extract. Check OPENROUTER_API_KEY and rate limits "
+            f"(no native text available)."
+        )
 
     parts = []
     for i, text in enumerate(page_texts):
