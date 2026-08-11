@@ -315,53 +315,170 @@ async def _patched_generic_generate(self, messages, response_model=None, max_tok
 
 OpenAIGenericClient._generate_response = _patched_generic_generate
 
-from graphiti_core.embedder.gemini import GeminiEmbedder, GeminiEmbedderConfig
+from graphiti_core.embedder.client import EmbedderClient, EmbedderConfig
 
-# Patch GeminiEmbedder.create_batch with asyncio.Semaphore(10) + asyncio.gather() (Requirement R2)
-_embed_semaphore = asyncio.Semaphore(10)
+# ---------------------------------------------------------------------------
+# NvidiaEmbedder — Deep module
+# ---------------------------------------------------------------------------
+# One export. Calls NVIDIA NIM (integrate.api.nvidia.com/v1/embeddings) which
+# is OpenAI-compatible. Sends all texts as a single batch request (fast path).
+# Error handling philosophy:
+#   - 429 → explicit rate-limit warning + exponential backoff
+#   - 401 → hard fail immediately (bad key — retry won't help)
+#   - 400 → hard fail immediately (bad input — retry won't help)
+#   - Empty payload → ValueError at point of detection, never reaches API
+#   - API returns fewer vectors than input → RuntimeError with exact counts
+#   - All failures logged with [timing] + [embed] structured prefix
+# ---------------------------------------------------------------------------
 
-async def _patched_gemini_create_batch(self, input_data_list: list[str]) -> list[list[float]]:
-    if not input_data_list:
-        return []
+class NvidiaEmbedderConfig(EmbedderConfig):
+    api_key: str = ""
+    model: str = "nvidia/nemotron-3-embed-1b"
+    base_url: str = "https://integrate.api.nvidia.com/v1"
+    embedding_dim: int = 2048  # nemotron-3-embed-1b native output dimension
 
-    async def _embed_single(text: str) -> list[float]:
-        async with _embed_semaphore:
-            keys = [self.config.api_key]
-            if GEMINI_API_KEY_FALLBACK:
-                keys.append(GEMINI_API_KEY_FALLBACK)
 
-            last_error = None
-            for attempt, api_key in enumerate(keys):
+class NvidiaEmbedder(EmbedderClient):
+    """
+    Deep module: wraps NVIDIA NIM /v1/embeddings into Graphiti's EmbedderClient
+    interface. One HTTP call per create_batch invocation regardless of batch size.
+    """
+
+    def __init__(self, config: NvidiaEmbedderConfig) -> None:
+        self.config = config
+        self._semaphore = asyncio.Semaphore(5)  # cap concurrent batch calls
+        if not config.api_key:
+            # Fail loud at startup — not silently at first embed call
+            raise RuntimeError(
+                "[embed] NVIDIA_API_KEY is not set. "
+                "Set it in Render env vars or .env. "
+                "Get a key at https://build.nvidia.com/nvidia/nemotron-3-embed-1b"
+            )
+
+    async def create(self, input_data: str | list[str]) -> list[float]:
+        """Single-text embed. Delegates to create_batch for code reuse."""
+        texts = [input_data] if isinstance(input_data, str) else input_data
+        results = await self.create_batch(texts)
+        return results[0]
+
+    async def create_batch(self, input_data_list: list[str]) -> list[list[float]]:
+        """
+        Fast path: empty list returns immediately without touching the network.
+        Slow path: one HTTP POST to NVIDIA NIM for all texts simultaneously.
+        """
+        if not input_data_list:
+            return []
+
+        # Validate before network call — surfaces bad input at point of detection
+        if any(not isinstance(t, str) or len(t) == 0 for t in input_data_list):
+            raise ValueError(
+                f"[embed] create_batch received {len(input_data_list)} texts "
+                "but one or more are empty or non-string. Refusing to call API."
+            )
+
+        max_retries = 3
+        last_error: Exception | None = None
+
+        for attempt in range(max_retries):
+            async with self._semaphore:
+                t0 = time.monotonic()
                 try:
-                    client = self.client if attempt == 0 else genai.Client(api_key=api_key)
-                    result = await client.aio.models.embed_content(
-                        model=self.config.embedding_model or 'gemini-embedding-001',
-                        contents=[text],
-                        config=types.EmbedContentConfig(
-                            output_dimensionality=self.config.embedding_dim
-                        ),
+                    async with httpx.AsyncClient(timeout=60.0) as client:
+                        response = await client.post(
+                            f"{self.config.base_url}/embeddings",
+                            headers={
+                                "Authorization": f"Bearer {self.config.api_key}",
+                                "Content-Type": "application/json",
+                            },
+                            json={
+                                "model": self.config.model,
+                                "input": input_data_list,
+                            },
+                        )
+
+                    elapsed_ms = int((time.monotonic() - t0) * 1000)
+
+                    # --- Error visibility: distinguish failure categories ---
+                    if response.status_code == 401:
+                        # Hard fail — retrying with same key is pointless
+                        raise RuntimeError(
+                            f"[embed] NVIDIA API returned 401 Unauthorized. "
+                            f"Check NVIDIA_API_KEY is valid. "
+                            f"model={self.config.model}"
+                        )
+
+                    if response.status_code == 400:
+                        # Hard fail — bad input, retrying won't help
+                        body = response.text[:300]
+                        raise ValueError(
+                            f"[embed] NVIDIA API returned 400 Bad Request. "
+                            f"Input texts={len(input_data_list)}, body={body}"
+                        )
+
+                    if response.status_code == 429:
+                        wait = 2 ** (attempt + 1)  # 2s, 4s, 8s
+                        logger.warning(
+                            f"[embed] NVIDIA API 429 rate limit "
+                            f"(attempt {attempt+1}/{max_retries}). "
+                            f"Retrying in {wait}s. model={self.config.model}"
+                        )
+                        last_error = RuntimeError(
+                            f"[embed] NVIDIA API 429 after {max_retries} attempts"
+                        )
+                        await asyncio.sleep(wait)
+                        continue
+
+                    if not response.is_success:
+                        body = response.text[:300]
+                        raise RuntimeError(
+                            f"[embed] NVIDIA API returned {response.status_code}. "
+                            f"model={self.config.model}, body={body}"
+                        )
+
+                    data = response.json()
+                    items = data.get("data")
+                    if not items:
+                        raise RuntimeError(
+                            f"[embed] NVIDIA API returned success but 'data' field "
+                            f"is empty or missing. Full response keys: {list(data.keys())}"
+                        )
+
+                    if len(items) != len(input_data_list):
+                        raise RuntimeError(
+                            f"[embed] NVIDIA API returned {len(items)} vectors "
+                            f"but expected {len(input_data_list)}. "
+                            f"Mismatch would silently corrupt graph node embeddings."
+                        )
+
+                    # Sort by index to guarantee order matches input order
+                    items_sorted = sorted(items, key=lambda x: x["index"])
+                    vectors = [item["embedding"] for item in items_sorted]
+
+                    logger.info(
+                        f"[timing] nvidia_embed batch {len(input_data_list)} texts: {elapsed_ms}ms "
+                        f"dim={len(vectors[0]) if vectors else 0}"
                     )
-                    if not result.embeddings or len(result.embeddings) == 0:
-                        raise ValueError('No embeddings returned from Gemini API')
-                    if not result.embeddings[0].values:
-                        raise ValueError('Empty embedding values returned')
-                    if attempt > 0:
-                        logger.info(f"[embed] Switched to fallback key, attempt {attempt+1}/{len(keys)}")
-                    return result.embeddings[0].values
+                    return vectors
+
+                except (RuntimeError, ValueError):
+                    # These are already descriptive — re-raise immediately
+                    raise
                 except Exception as e:
+                    elapsed_ms = int((time.monotonic() - t0) * 1000)
                     last_error = e
-                    is_429 = hasattr(e, 'code') and getattr(e, 'code', None) == 429
-                    if not is_429 and not any(s in str(e).lower() for s in ['429', 'resource_exhausted', 'quota']):
-                        raise
-                    wait = 2 ** (attempt + 1)
-                    logger.warning(f"[embed] 429 quota on key {attempt+1}/{len(keys)}, retrying in {wait}s")
-                    await asyncio.sleep(wait)
+                    logger.warning(
+                        f"[embed] NVIDIA API unexpected error on attempt "
+                        f"{attempt+1}/{max_retries} after {elapsed_ms}ms: "
+                        f"{type(e).__name__}: {e}"
+                    )
+                    if attempt < max_retries - 1:
+                        await asyncio.sleep(2 ** attempt)
+                    continue
 
-            raise last_error or RuntimeError("Embedding failed on all keys")
-
-    return list(await asyncio.gather(*[_embed_single(t) for t in input_data_list]))
-
-GeminiEmbedder.create_batch = _patched_gemini_create_batch
+        raise last_error or RuntimeError(
+            f"[embed] NVIDIA embedding failed after {max_retries} attempts. "
+            f"model={self.config.model}"
+        )
 
 from graphiti_core.cross_encoder.openai_reranker_client import OpenAIRerankerClient
 from graphiti_core.driver.falkordb_driver import FalkorDriver
@@ -451,14 +568,12 @@ OPENROUTER_BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/ap
 ENTITY_EXTRACT_MODEL = resolve_model(get_model_fallback_chain())
 RERANK_MODEL = resolve_model(get_rerank_model_chain())
 
-# Embeddings: OpenRouter serves NO embedding models, so Graphiti's embedder uses
-# Google Gemini (free tier) instead. Keep chat/LLM on OpenRouter.
-# EMBED_DIM is env-driven: 768 for local (light on RAM); set to the model default
-# (3072 for gemini-embedding-001) when hosting separately.
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-GEMINI_API_KEY_FALLBACK = os.getenv("GEMINI_API_KEY_FALLBACK", "")
-EMBED_MODEL = os.getenv("EMBED_MODEL", "gemini-embedding-001")
-EMBED_DIM = int(os.getenv("EMBED_DIM", "768"))
+# Embeddings: NVIDIA NIM (integrate.api.nvidia.com/v1/embeddings).
+# nemotron-3-embed-1b natively outputs 2048-dim vectors — no truncation needed.
+# EMBED_DIM is env-driven to allow override if model changes.
+NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY", "")
+NVIDIA_EMBED_MODEL = os.getenv("NVIDIA_EMBED_MODEL", "nvidia/nemotron-3-embed-1b")
+EMBED_DIM = int(os.getenv("EMBED_DIM", "2048"))
 
 FALKORDB_HOST = os.getenv("FALKORDB_HOST", "localhost")
 FALKORDB_PORT = int(os.getenv("FALKORDB_PORT", "49277"))
@@ -535,10 +650,10 @@ async def lifespan(app: FastAPI):
 
     OpenAIGenericClient.generate_response = _patched_gen_resp
 
-    embedder = GeminiEmbedder(
-        config=GeminiEmbedderConfig(
-            api_key=GEMINI_API_KEY,
-            embedding_model=EMBED_MODEL,
+    embedder = NvidiaEmbedder(
+        config=NvidiaEmbedderConfig(
+            api_key=NVIDIA_API_KEY,
+            model=NVIDIA_EMBED_MODEL,
             embedding_dim=EMBED_DIM,
         )
     )
