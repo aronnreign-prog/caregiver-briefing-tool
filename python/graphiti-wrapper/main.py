@@ -563,8 +563,8 @@ from model_resolver import (
     resolve_model,
 )
 
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
-OPENROUTER_BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+GROQ_BASE_URL = os.getenv("GROQ_BASE_URL", "https://api.groq.com/openai/v1")
 ENTITY_EXTRACT_MODEL = resolve_model(get_model_fallback_chain())
 RERANK_MODEL = resolve_model(get_rerank_model_chain())
 
@@ -593,9 +593,9 @@ async def lifespan(app: FastAPI):
 
     llm_client = OpenAIGenericClient(
         config=LLMConfig(
-            api_key=OPENROUTER_API_KEY,
+            api_key=GROQ_API_KEY,
             model=ENTITY_EXTRACT_MODEL,
-            base_url=OPENROUTER_BASE_URL,
+            base_url=GROQ_BASE_URL,
         ),
         max_tokens=16384,
         structured_output_mode="json_object",
@@ -663,9 +663,9 @@ async def lifespan(app: FastAPI):
     # Point it at OpenRouter (used only during search(), not add-facts).
     cross_encoder = OpenAIRerankerClient(
         config=LLMConfig(
-            api_key=OPENROUTER_API_KEY,
+            api_key=GROQ_API_KEY,
             model=RERANK_MODEL,
-            base_url=OPENROUTER_BASE_URL,
+            base_url=GROQ_BASE_URL,
         )
     )
 
