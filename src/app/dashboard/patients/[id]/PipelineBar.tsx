@@ -1,9 +1,5 @@
 'use client'
 
-import type { Document, Briefing } from '@/types/database'
-import Link from 'next/link'
-import ReactMarkdown from 'react-markdown'
-
 const PIPELINE_STEPS = ['Uploaded', 'Extracting', 'Ready']
 
 function pipelineStep(status: string): number {

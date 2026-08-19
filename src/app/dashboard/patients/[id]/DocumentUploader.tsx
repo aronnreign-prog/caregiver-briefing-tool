@@ -3,6 +3,7 @@
 import { createClient } from '@/lib/supabase/client'
 import type { Document } from '@/types/database'
 import { useRouter } from 'next/navigation'
+import { ingestDocument } from './pipeline-actions'
 
 interface Props {
   patientId: string
@@ -13,7 +14,7 @@ interface Props {
   onDocumentAdded: (doc: Document) => void
 }
 
-/** Deep module: one export, handles PDF upload to Supabase Storage + DB + job queue. */
+/** Deep module: handles PDF upload to Supabase Storage, then triggers Gemini extraction + Zep ingestion. */
 export default function DocumentUploader({ patientId, isDemo, isGuest, uploading, onUploadStart, onDocumentAdded }: Props) {
   const router = useRouter()
 
@@ -37,7 +38,8 @@ export default function DocumentUploader({ patientId, isDemo, isGuest, uploading
     const { data: caregiver } = await supabase.from('caregivers').select('id').eq('auth_user_id', user.id).single()
     if (!caregiver?.id) { alert('Caregiver profile not found.'); onUploadStart(false); return }
 
-    let ok = 0, err = 0
+    let ok = 0
+    let err = 0
     for (const file of pdfs) {
       try {
         const path = `${patientId}/${Date.now()}_${ok}.${file.name.split('.').pop()}`
@@ -45,8 +47,13 @@ export default function DocumentUploader({ patientId, isDemo, isGuest, uploading
         if (uploadError) throw uploadError
 
         const { data: docData, error: dbError } = await supabase.from('documents').insert({
-          patient_id: patientId, caregiver_id: caregiver.id, filename: file.name,
-          storage_path: path, file_size: file.size, mime_type: file.type, status: 'uploaded',
+          patient_id: patientId,
+          caregiver_id: caregiver.id,
+          filename: file.name,
+          storage_path: path,
+          file_size: file.size,
+          mime_type: file.type,
+          status: 'uploaded',
         }).select().single()
 
         if (dbError || !docData?.id) throw dbError || new Error('No document ID')
@@ -54,10 +61,14 @@ export default function DocumentUploader({ patientId, isDemo, isGuest, uploading
         onDocumentAdded(docData as Document)
         ok++
 
-        await supabase.from('jobs').insert({
-          job_type: 'process_document', payload: { document_id: docData.id, caregiver_id: caregiver.id }, status: 'queued'
+        // Trigger extraction + Zep ingestion asynchronously (fire-and-forget from client perspective)
+        ingestDocument(docData.id).catch(err => {
+          console.error('[Upload] Ingest failed for', docData.id, err)
         })
-      } catch (e: unknown) { err++; console.error(file.name, e) }
+      } catch (e: unknown) {
+        err++
+        console.error(file.name, e)
+      }
     }
 
     if (err > 0) alert(`Uploaded ${ok} of ${pdfs.length}. ${err} failed.`)
@@ -73,7 +84,7 @@ export default function DocumentUploader({ patientId, isDemo, isGuest, uploading
       <label className="cursor-pointer">
         <input type="file" accept=".pdf" multiple className="hidden" onChange={handleUpload} disabled={uploading} />
         <span className="font-mono text-[10px] text-accent hover:text-foreground transition-colors">
-          {uploading ? 'Uploading…' : '+ Upload'}
+          {uploading ? 'Uploading...' : '+ Upload'}
         </span>
       </label>
       <p className="font-mono text-[8px] text-muted-foreground mt-0.5 leading-tight">

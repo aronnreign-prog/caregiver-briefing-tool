@@ -1,5 +1,4 @@
-// Auto-generated Supabase database types
-// Replace `any` usage across the codebase with these typed interfaces
+// CareNote — database types (Supabase Postgres)
 
 export type Json =
   | string
@@ -34,27 +33,27 @@ export interface Document {
   storage_path?: string
   file_size?: number
   mime_type?: string
-  status: 'uploaded' | 'processing' | 'extracted' | 'complete' | 'failed'
+  /** uploaded -> processing -> extracted | failed */
+  status: 'uploaded' | 'processing' | 'extracting' | 'extracted' | 'complete' | 'failed'
   uploaded_at: string
-  extracted_text?: string
-  extracted_entities?: ExtractedEntities
+  extracted_entities?: ExtractedEntities | null
   document_date?: string | null
-  document_type?: string
-  provider_name?: string
-  processed_at?: string
-  error_message?: string
+  document_type?: string | null
+  error_message?: string | null
+  processed_at?: string | null
 }
 
 export interface ExtractedEntities {
   medications: Medication[]
   lab_values: LabValue[]
+  conditions: Condition[]
 }
 
 export interface Medication {
   name: string
   dose?: string
   frequency?: string
-  [key: string]: unknown
+  prescribedDate?: string
 }
 
 export interface LabValue {
@@ -62,14 +61,18 @@ export interface LabValue {
   value: string
   unit?: string
   date?: string
-  [key: string]: unknown
+}
+
+export interface Condition {
+  name: string
+  status?: string
 }
 
 export interface Briefing {
   id: string
   patient_id: string
   caregiver_id: string
-  audience: 'general' | 'er_visit' | 'specialist' | 'second_opinion'
+  audience: 'general' | 'er_visit' | 'specialist' | 'second_opinion' | 'gp' | 'family'
   status: 'queued' | 'processing' | 'complete' | 'failed'
   created_at: string
   completed_at: string | null
@@ -77,25 +80,21 @@ export interface Briefing {
   briefing_text: string | null
   claims: Claim[] | null
   flagged_concerns: FlaggedConcern[] | null
-  total_cost_cents?: number
-  error_message?: string
+  error_message?: string | null
 }
 
 export interface Claim {
+  claim_id?: string
   claim_text: string
   claim_type: 'source_document' | 'medical_knowledge' | 'reasoning'
-  expected_source?: string
-  expected_evidence?: string
-  flag?: 'SUPPORTED' | 'PARTIALLY SUPPORTED' | 'UNSUPPORTED' | 'MEDICAL_KNOWLEDGE'
+  flag?: 'SUPPORTED' | 'PARTIALLY SUPPORTED' | 'UNSUPPORTED' | 'MEDICAL_KNOWLEDGE' | 'UNVERIFIED'
   evidence?: ClaimEvidence | null
-  claim_id?: string
 }
 
 export interface ClaimEvidence {
   source_doc_id?: string
   source_page?: number
   source_quote?: string
-  source?: string
   entry_text?: string
   match_type?: 'exact' | 'semantic' | 'medical_knowledge'
   confidence?: number
@@ -103,51 +102,7 @@ export interface ClaimEvidence {
 
 export interface FlaggedConcern {
   concern: string
+  description?: string
   severity: 'high' | 'medium' | 'low'
   related_claims: string[]
 }
-
-export interface Job {
-  id: string
-  job_type: 'process_document' | 'generate_briefing'
-  payload: JobPayload
-  status: 'queued' | 'processing' | 'complete' | 'failed'
-  created_at: string
-  started_at: string | null
-  completed_at: string | null
-  worker_id: string | null
-  attempts: number
-  max_attempts: number
-  error_message?: string
-  result?: Json
-  updated_at: string
-}
-
-export interface JobPayload {
-  document_id?: string
-  briefing_id?: string
-  caregiver_id?: string
-  [key: string]: string | undefined
-}
-
-export interface AuditLogEntry {
-  id: string
-  caregiver_id: string
-  patient_id: string
-  action: string
-  entity_type: string
-  entity_id: string
-  details: Json
-  ip_address: string
-  user_agent: string
-  created_at: string
-}
-
-export const TABLES = {
-  PATIENTS: 'patients',
-  CAREGIVERS: 'caregivers',
-  DOCUMENTS: 'documents',
-  BRIEFINGS: 'briefings',
-  JOBS: 'jobs',
-  AUDIT_LOG: 'audit_log',
-} as const

@@ -9,9 +9,9 @@ import ReactMarkdown from 'react-markdown'
 import PatientRealtime from './PatientRealtime'
 import DocumentList from './DocumentList'
 import { PipelineBar } from './PipelineBar'
+import { generateBriefing } from './pipeline-actions'
 
-// ─── Demo data ────────────────────────────────────────────────────────────────
-
+// Demo data
 const DEMO_DOCUMENTS: Document[] = [
   { id: 'd1', patient_id: 'demo-1', caregiver_id: 'demo', filename: 'Lab Result Mar 2024.pdf', status: 'extracted', uploaded_at: '2024-03-14T10:00:00Z' },
   { id: 'd2', patient_id: 'demo-1', caregiver_id: 'demo', filename: 'Cardiology Visit Notes.pdf', status: 'extracted', uploaded_at: '2024-03-11T14:30:00Z' },
@@ -21,25 +21,20 @@ const DEMO_DOCUMENTS: Document[] = [
 const DEMO_BRIEFING: Briefing = {
   id: 'b1', patient_id: 'demo-1', caregiver_id: 'demo', audience: 'specialist', status: 'complete',
   source_doc_ids: ['d1', 'd2', 'd3'], created_at: new Date().toISOString(), completed_at: new Date().toISOString(),
-  briefing_text: `## Patient Summary\n\nMargaret Thompson (DOB 1945-03-12) presents with a documented 18-month decline in renal function across 6 lab draws sourced from 3 different providers. GFR has fallen from 65 to 47 over this period.\n\nHer new cardiologist prescribed Lisinopril (10 mg daily) on 2024-03-14 — an ACE inhibitor that is contraindicated in the context of declining kidney function per DDInter interaction #4521.\n\n## Current Medications\n\n- Lisinopril 10 mg daily — NEW, prescribed 2024-03-14\n- Atorvastatin 40 mg nightly — ongoing since 2022-06\n- Metoprolol succinate 25 mg daily — ongoing since 2021-11\n\n## Lab Trends\n\nGFR: \`65\` (Jun 2022) → \`58\` (Dec 2022) → \`51\` (Jun 2023) → \`47\` (Dec 2023) — consistent decline across 18 months.\n\nCreatinine: \`0.9\` (Jun 2022) → \`1.1\` (Dec 2022) → \`1.3\` (Jun 2023) → \`1.5\` (Dec 2023)\n\n## Recommendation\n\nFlag the Lisinopril prescription for review before the next appointment. Request a nephrology consult to assess trajectory. The rate of GFR decline (-18 points / 18 months) warrants specialist involvement.`,
+  briefing_text: `## Patient Summary\n\nMargaret Thompson (DOB 1945-03-12) presents with a documented 18-month decline in renal function across 6 lab draws sourced from 3 different providers. GFR has fallen from 65 to 47 over this period.\n\nHer new cardiologist prescribed Lisinopril (10 mg daily) on 2024-03-14 — an ACE inhibitor that is contraindicated in the context of declining kidney function.\n\n## Current Medications\n\n- Lisinopril 10 mg daily — NEW, prescribed 2024-03-14\n- Atorvastatin 40 mg nightly — ongoing since 2022-06\n- Metoprolol succinate 25 mg daily — ongoing since 2021-11\n\n## Lab Trends\n\nGFR: \`65\` (Jun 2022) → \`58\` (Dec 2022) → \`51\` (Jun 2023) → \`47\` (Dec 2023) — consistent decline.\n\n## Recommendation\n\nFlag the Lisinopril prescription for review. Request nephrology consult.`,
   claims: [
-    { claim_text: 'GFR has fallen from 65 to 47', claim_type: 'source_document', flag: 'SUPPORTED', evidence: { source_doc_id: 'd1', source_quote: 'eGFR 47 mL/min/1.73m²', source_page: 1 } },
-    { claim_text: 'Lisinopril 10 mg daily', claim_type: 'source_document', flag: 'SUPPORTED', evidence: { source_doc_id: 'd2', source_quote: 'Lisinopril 10mg QD — new prescription', source_page: 2 } },
-    { claim_text: 'contraindicated in the context of declining kidney function', claim_type: 'medical_knowledge', flag: 'MEDICAL_KNOWLEDGE', evidence: { entry_text: 'ACE inhibitors contraindicated in eGFR < 30, caution below 60' } },
+    { claim_id: 'c1', claim_text: 'GFR has fallen from 65 to 47', claim_type: 'source_document', flag: 'SUPPORTED', evidence: { source_doc_id: 'd1', source_quote: 'eGFR 47 mL/min/1.73m2', source_page: 1 } },
+    { claim_id: 'c2', claim_text: 'Lisinopril 10 mg daily', claim_type: 'source_document', flag: 'SUPPORTED', evidence: { source_doc_id: 'd2', source_quote: 'Lisinopril 10mg QD', source_page: 2 } },
   ],
-  flagged_concerns: [{ concern: 'ACE inhibitor (Lisinopril) prescribed despite 18-month declining GFR trend — contraindicated in declining kidney function.', severity: 'high', related_claims: ['c1'] }],
+  flagged_concerns: [{ concern: 'ACE inhibitor prescribed despite declining GFR trend.', severity: 'high', related_claims: ['c1'] }],
 }
-
-// ─── Types ────────────────────────────────────────────────────────────────────
 
 type Claim = {
   claim_id?: string; claim_text: string; claim_type?: string; flag?: string;
-  evidence?: { source_doc_id?: string; source_page?: number; source_quote?: string; entry_text?: string; match_type?: string } | null;
+  evidence?: { source_doc_id?: string; source_page?: number; source_quote?: string; entry_text?: string } | null;
 }
 
 type FlaggedConcern = { severity: 'high' | 'medium' | 'low'; description?: string; concern?: string }
-
-// ─── Citation chip ────────────────────────────────────────────────────────────
 
 function CitationChip({ claim, onDocClick }: { claim: Claim; onDocClick: (e: React.MouseEvent, id: string, page?: number) => void }) {
   const isDrug = claim.flag === 'MEDICAL_KNOWLEDGE'
@@ -53,8 +48,6 @@ function CitationChip({ claim, onDocClick }: { claim: Claim; onDocClick: (e: Rea
       title={title}>{isDrug ? '⚠' : '↗'} {label}</button>
   )
 }
-
-// ─── Main ─────────────────────────────────────────────────────────────────────
 
 interface Props { patient: Patient; initialDocuments: Document[]; initialBriefings: Briefing[] }
 
@@ -74,14 +67,13 @@ export default function PatientDetailClient({ patient, initialDocuments, initial
 
   const activeBriefing = briefings.find(b => b.id === activeBriefingId) ?? briefings[0] ?? null
 
-  // Realtime hook — extracted deep module
   PatientRealtime({ patientId: patient.id, isDemo, onDocumentChange: setDocuments, onBriefingChange: setBriefings, onNewBriefing: setActiveBriefingId })
 
-  // Adaptive polling
+  // Adaptive polling for in-progress documents
   useEffect(() => {
     if (!supabase || isDemo) return
-    const hasPendingBriefing = briefings.some(b => b.status === 'queued' || b.status === 'processing')
     const hasPendingDoc = documents.some(d => ['uploaded', 'processing', 'extracting'].includes(d.status))
+    const hasPendingBriefing = briefings.some(b => b.status === 'queued' || b.status === 'processing')
     if (!hasPendingBriefing && !hasPendingDoc) return
 
     let interval = 3000
@@ -89,13 +81,15 @@ export default function PatientDetailClient({ patient, initialDocuments, initial
     const poll = async () => {
       if (document.visibilityState === 'hidden') { timer = setTimeout(poll, interval * 2); return }
       const [{ data: updatedDocs }, { data: updatedBriefings }] = await Promise.all([
-        supabase.from('documents').select('id, filename, status, uploaded_at, storage_path').eq('patient_id', patient.id).order('uploaded_at', { ascending: false }),
-        supabase.from('briefings').select('id, audience, status, created_at, completed_at, briefing_text, claims, flagged_concerns').eq('patient_id', patient.id).order('created_at', { ascending: false }),
+        supabase.from('documents').select('id, filename, status, uploaded_at, storage_path, document_date, document_type, extracted_entities').eq('patient_id', patient.id).order('uploaded_at', { ascending: false }),
+        supabase.from('briefings').select('id, audience, status, created_at, completed_at, briefing_text, claims, flagged_concerns, error_message').eq('patient_id', patient.id).order('created_at', { ascending: false }),
       ])
       if (updatedDocs) setDocuments(updatedDocs as Document[])
       if (updatedBriefings) setBriefings(updatedBriefings as Briefing[])
-      const stillPending = (updatedDocs || []).some((d: any) => ['uploaded', 'processing', 'extracting'].includes(d.status)) ||
-                           (updatedBriefings || []).some((b: any) => b.status === 'queued' || b.status === 'processing')
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const stillPending = ((updatedDocs || []) as any[]).some((d: any) => ['uploaded', 'processing', 'extracting'].includes(d.status)) ||
+                           // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                           ((updatedBriefings || []) as any[]).some((b: any) => b.status === 'queued' || b.status === 'processing')
       interval = stillPending ? Math.min(interval * 1.5, 30000) : 3000
       timer = setTimeout(poll, interval)
     }
@@ -103,41 +97,42 @@ export default function PatientDetailClient({ patient, initialDocuments, initial
     return () => clearTimeout(timer)
   }, [patient.id, supabase, isDemo, briefings, documents])
 
-  const generateBriefing = async () => {
+  const handleGenerateBriefing = async () => {
     if (!supabase || isGuest) { alert('Sign in to generate briefings.'); return }
     setGenerating(true)
     try {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) return
+
       const { data: caregiver } = await supabase.from('caregivers').select('id').eq('auth_user_id', user.id).single()
       if (!caregiver?.id) { alert('Caregiver profile not found.'); return }
+
+      // Create a briefing record with status 'queued'
       const { data: briefingData, error: briefingError } = await supabase.from('briefings').insert({
-        patient_id: patient.id, caregiver_id: caregiver.id, audience, status: 'queued', source_doc_ids: documents.map(d => d.id)
+        patient_id: patient.id,
+        caregiver_id: caregiver.id,
+        audience,
+        status: 'queued',
+        source_doc_ids: documents.map(d => d.id),
       }).select().single()
+
       if (briefingError || !briefingData?.id) throw briefingError || new Error('No briefing ID')
+
       setBriefings(prev => [briefingData as Briefing, ...prev])
       setActiveBriefingId(briefingData.id)
-      router.refresh()
-      await supabase.from('jobs').insert({ job_type: 'generate_briefing', payload: { briefing_id: briefingData.id, caregiver_id: caregiver.id }, status: 'queued' })
-    } catch (err: unknown) {
-      alert('Failed to generate briefing: ' + (err instanceof Error ? err.message : 'Unknown error'))
-    } finally { setGenerating(false) }
-  }
 
-  const retryBriefing = async (briefingId: string) => {
-    if (!supabase || isGuest) return
-    setGenerating(true)
-    try {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) return
-      const { data: caregiver } = await supabase.from('caregivers').select('id').eq('auth_user_id', user.id).single()
-      if (!caregiver?.id) return
-      setBriefings(prev => prev.map(b => b.id === briefingId ? { ...b, status: 'queued' } : b))
-      router.refresh()
-      await supabase.from('briefings').update({ status: 'queued', error_message: null }).eq('id', briefingId)
-      await supabase.from('jobs').insert({ job_type: 'generate_briefing', payload: { briefing_id: briefingId, caregiver_id: caregiver.id }, status: 'queued' })
-    } catch (err) { console.error('Retry failed:', err) }
-    finally { setGenerating(false) }
+      // Call server action directly — no job queue
+      generateBriefing(patient.id, briefingData.id, audience, caregiver.id)
+        .then(result => {
+          if (result?.error) console.error('[Briefing] Failed:', result.error)
+          router.refresh()
+        })
+        .catch(err => console.error('[Briefing] Unexpected error:', err))
+    } catch (err: unknown) {
+      alert('Failed to start briefing: ' + (err instanceof Error ? err.message : 'Unknown error'))
+    } finally {
+      setGenerating(false)
+    }
   }
 
   const handleDocClick = async (e: React.MouseEvent, docId: string, page?: number) => {
@@ -152,7 +147,6 @@ export default function PatientDetailClient({ patient, initialDocuments, initial
   }
 
   const handleRemoveDocument = (id: string) => setDocuments(prev => prev.filter(d => d.id !== id))
-
   const handleAddDocument = (doc: Document) => setDocuments(prev => [doc, ...prev])
 
   const concerns: FlaggedConcern[] = (activeBriefing?.flagged_concerns as FlaggedConcern[] | null) ?? []
@@ -232,9 +226,9 @@ export default function PatientDetailClient({ patient, initialDocuments, initial
                   <option value="specialist">Specialist</option><option value="gp">GP</option><option value="family">Family</option>
                   <option value="general">General</option><option value="er_visit">ER Visit</option><option value="second_opinion">2nd Opinion</option>
                 </select>
-                <button onClick={generateBriefing} disabled={generating || documents.length === 0}
+                <button onClick={handleGenerateBriefing} disabled={generating || documents.length === 0}
                   className="flex-1 bg-accent text-background font-mono text-[11px] font-semibold py-1.5 px-3 rounded hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed">
-                  {generating ? 'Generating…' : 'Generate briefing'}
+                  {generating ? 'Starting...' : 'Generate briefing'}
                 </button>
               </div>
             </div>
@@ -262,18 +256,12 @@ export default function PatientDetailClient({ patient, initialDocuments, initial
                   </h2>
                   <p className="font-mono text-[10px] text-muted-foreground mt-1">Generated {new Date(activeBriefing.created_at).toLocaleString()}</p>
                 </div>
-                <div className="flex items-center gap-2">
-                  {activeBriefing.status === 'failed' && (
-                    <button onClick={() => retryBriefing(activeBriefing.id)} disabled={generating}
-                      className="font-mono text-[10px] border border-alert/40 text-alert px-3 py-1.5 rounded hover:bg-alert-dim transition-colors disabled:opacity-50">Retry</button>
-                  )}
-                  <span className={`font-mono text-[9px] px-2 py-1 rounded border ${
-                    activeBriefing.status === 'complete' ? 'text-success border-success/30 bg-success-dim' :
-                    activeBriefing.status === 'processing' || activeBriefing.status === 'queued' ? 'text-accent border-accent/30 bg-accent-dim' :
-                    activeBriefing.status === 'failed' ? 'text-alert border-alert/30 bg-alert-dim' : 'text-muted-foreground border-border'}`}>
-                    {activeBriefing.status?.toUpperCase()}
-                  </span>
-                </div>
+                <span className={`font-mono text-[9px] px-2 py-1 rounded border ${
+                  activeBriefing.status === 'complete' ? 'text-success border-success/30 bg-success-dim' :
+                  activeBriefing.status === 'processing' || activeBriefing.status === 'queued' ? 'text-accent border-accent/30 bg-accent-dim' :
+                  activeBriefing.status === 'failed' ? 'text-alert border-alert/30 bg-alert-dim' : 'text-muted-foreground border-border'}`}>
+                  {activeBriefing.status?.toUpperCase()}
+                </span>
               </div>
 
               {claimsArray.length > 0 && (
@@ -297,8 +285,15 @@ export default function PatientDetailClient({ patient, initialDocuments, initial
                     <div className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" style={{animationDelay: '0.2s'}} />
                     <div className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" style={{animationDelay: '0.4s'}} />
                   </div>
-                  <p className="font-mono text-[11px] text-accent">Analysing documents and building briefing…</p>
+                  <p className="font-mono text-[11px] text-accent">Analysing documents and building briefing...</p>
                   <p className="text-[11px] text-muted-foreground mt-1">This takes 30–90 seconds. Results appear automatically.</p>
+                </div>
+              )}
+
+              {activeBriefing.status === 'failed' && activeBriefing.error_message && (
+                <div className="border border-alert/30 bg-alert-dim rounded-md px-4 py-3 mb-6">
+                  <p className="font-mono text-[10px] text-alert mb-1">BRIEFING FAILED</p>
+                  <p className="text-[12px] text-foreground">{activeBriefing.error_message}</p>
                 </div>
               )}
 
@@ -337,8 +332,8 @@ export default function PatientDetailClient({ patient, initialDocuments, initial
                 <p className="font-mono text-[9px] tracking-widest text-muted-foreground uppercase mb-3">No briefing yet</p>
                 <p className="text-[13px] text-muted-foreground leading-relaxed mb-4">Upload at least one document, then generate a briefing.</p>
                 {!isGuest && documents.length > 0 && (
-                  <button onClick={generateBriefing} disabled={generating} className="bg-accent text-background font-mono text-[11px] font-semibold px-4 py-2 rounded hover:opacity-90 transition-opacity disabled:opacity-50">
-                    {generating ? 'Generating…' : 'Generate briefing'}
+                  <button onClick={handleGenerateBriefing} disabled={generating} className="bg-accent text-background font-mono text-[11px] font-semibold px-4 py-2 rounded hover:opacity-90 transition-opacity disabled:opacity-50">
+                    {generating ? 'Starting...' : 'Generate briefing'}
                   </button>
                 )}
               </div>
