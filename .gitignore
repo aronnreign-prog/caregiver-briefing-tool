@@ -1,5 +1,3 @@
-# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
-
 # dependencies
 /node_modules
 /.pnp
@@ -25,22 +23,22 @@
 *.pem
 *.key
 *.cert
+Thumbs.db
 
-# debug
+# debug & logs
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
+*.log
 
-# env files — NEVER commit these (contain real API keys, service role keys)
+# env files — NEVER commit secrets
 .env
 .env.local
 .env.development
 .env.production
 .env.staging
 .env*.local
-supabase/functions/.env.local
-supabase/functions/.env
 
 # vercel
 .vercel
@@ -54,32 +52,10 @@ supabase/.temp/
 supabase/.branches/
 .supabase/
 
-# python
-__pycache__/
-*.py[cod]
-*$py.class
-*.egg-info/
-dist/
-.venv/
-venv/
-env/
+# kilo & scratch
+.kilo/
 
-# synthea / test medical PDFs — synthetic but realistic patient data
-# must not be in a public repo
+# synthea / test medical PDFs
 synthea-test-data/
 pipeline_pdfs/
 *.pdf
-
-# docker build artifacts
-.dockerignore
-
-# log files (may contain URLs, tokens, stack traces)
-*.log
-tunnel_output.log
-
-# OS
-Thumbs.db
-
-.vercel
-.env*
-.references/

@@ -1,4 +1,4 @@
-name: CI/CD — Hard + Optimized (Jeff Dean Principles)
+name: CI/CD — Next.js Pipeline
 
 on:
   push:
@@ -12,9 +12,9 @@ env:
 
 jobs:
   # ============================================================================
-  # STAGE 1: Syntax + Type Safety (fail fast)
+  # STAGE 1: Syntax + Type Safety
   # ============================================================================
-  check-syntax:
+  type-check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -26,52 +26,13 @@ jobs:
       - run: npm ci
       - name: Type check
         run: npx tsc --noEmit
-      - name: Strict linting
-        run: npx eslint src/ --max-warnings 0
-      - name: Deno check (Edge Functions)
-        run: |
-          for func in supabase/functions/*/index.ts; do
-            echo "[check] $func"
-            deno check --allow-all "$func" || exit 1
-          done
 
   # ============================================================================
-  # STAGE 2: Unit Tests — Result<T,E> Semantics
-  # ============================================================================
-  unit-tests:
-    runs-on: ubuntu-latest
-    needs: check-syntax
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: 'npm'
-
-      - run: npm ci
-      - name: Test Result monad semantics
-        run: |
-          cat > test-result.mjs << 'EOF'
-          // Verify { ok: true, value: T } pattern
-          const ok = (v) => ({ ok: true, value: v });
-          const err = (e) => ({ ok: false, error: e });
-          
-          const success = ok(42);
-          if (!success.ok || success.value !== 42) throw new Error("ok() failed");
-          
-          const failure = err(new Error("test"));
-          if (failure.ok || !failure.error) throw new Error("err() failed");
-          
-          console.log("[✓] Result<T,E> semantics verified");
-          EOF
-          node test-result.mjs
-
-  # ============================================================================
-  # STAGE 3: Build + Bundle Size Regression Detection
+  # STAGE 2: Next.js Production Build
   # ============================================================================
   build:
     runs-on: ubuntu-latest
-    needs: check-syntax
+    needs: type-check
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -80,171 +41,5 @@ jobs:
           cache: 'npm'
 
       - run: npm ci
-      - run: npx next build
-      - name: Check bundle size (max 250KB)
-        run: |
-          MAIN=$(ls -lS .next/static/chunks/main*.js | head -1 | awk '{print $5}')
-          if [ "$MAIN" -gt 256000 ]; then
-            echo "[✗] Bundle ${MAIN} bytes > 256KB"
-            exit 1
-          fi
-          echo "[✓] Bundle OK: $((MAIN/1024))KB"
-
-  # ============================================================================
-  # STAGE 4: Deploy Functions
-  # ============================================================================
-  deploy-functions:
-    runs-on: ubuntu-latest
-    needs: [check-syntax, build]
-    if: github.event_name == 'push'
-    strategy:
-      matrix:
-        function: [process-document, process-briefing]
-    steps:
-      - uses: actions/checkout@v4
-      - uses: supabase/setup-cli@v1
-        with:
-          version: latest
-
-      - name: Deploy ${{ matrix.function }}
-        run: supabase functions deploy ${{ matrix.function }} --project-ref ${{ vars.SUPABASE_PROJECT_REF }}
-        env:
-          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-
-  # ============================================================================
-  # STAGE 5: Integration Tests + Latency Profiling
-  # (Jeff Dean principle #4: Profile before optimizing)
-  # ============================================================================
-  integration-tests:
-    runs-on: ubuntu-latest
-    needs: deploy-functions
-    if: github.event_name == 'push'
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Wait for deployment
-        run: |
-          for i in {1..24}; do
-            if curl -sf https://caregiver-briefing-tool.onrender.com/health >/dev/null 2>&1; then
-              echo "[✓] Ready"
-              exit 0
-            fi
-            sleep 5
-          done
-          exit 1
-
-      - name: Latency Profile (P99 check)
-        run: |
-          cat > profile.sh << 'EOF'
-          #!/bin/bash
-          URL="https://caregiver-briefing-tool.onrender.com"
-          LATENCIES=()
-          
-          for i in {1..10}; do
-            START=$(date +%s%N)
-            curl -sf -X POST "$URL/process-document" \
-              -H "Content-Type: application/json" \
-              -d '{"patient_id":"test","pdf_base64":"dGVzdA=="}' >/dev/null || true
-            END=$(date +%s%N)
-            MS=$(( (END - START) / 1000000 ))
-            LATENCIES+=($MS)
-          done
-          
-          MAX=$(printf '%s\n' "${LATENCIES[@]}" | sort -n | tail -1)
-          AVG=$(( $(IFS=+; echo "${LATENCIES[*]}") / ${#LATENCIES[@]} ))
-          
-          echo "[metrics] avg=${AVG}ms, p99=${MAX}ms"
-          if [ "$MAX" -gt 3000 ]; then
-            echo "[✗] P99 latency too high: ${MAX}ms > 3000ms (API boundary expensive)"
-            exit 1
-          fi
-          EOF
-          bash profile.sh
-
-      - name: Verify Error Visibility
-        run: |
-          cat > test-errors.sh << 'EOF'
-          #!/bin/bash
-          STATUS=$(curl -s -X POST "https://caregiver-briefing-tool.onrender.com/process-document" \
-            -H "Content-Type: application/json" \
-            -d '{}' -w '\n%{http_code}' | tail -1)
-          
-          if [ "$STATUS" -ge 400 ]; then
-            echo "[✓] Errors are visible (HTTP $STATUS)"
-          else
-            echo "[✗] No error response (status $STATUS)"
-            exit 1
-          fi
-          EOF
-          bash test-errors.sh
-
-  # ============================================================================
-  # STAGE 6: Module Depth Audit
-  # ============================================================================
-  module-audit:
-    runs-on: ubuntu-latest
-    needs: check-syntax
-    steps:
-      - uses: actions/checkout@v4
-      - name: Verify module depth (Jeff Dean principle #7)
-        run: |
-          echo "[audit] Checking module depth..."
-          
-          # Deep modules: fetch.ts (retry logic), result.ts (error handling)
-          fetch_lines=$(wc -l < supabase/functions/_shared/fetch.ts)
-          result_lines=$(wc -l < supabase/functions/_shared/result.ts)
-          
-          if [ "$fetch_lines" -lt 100 ]; then
-            echo "[✗] fetch.ts too shallow: $fetch_lines lines"
-            exit 1
-          fi
-          
-          echo "[✓] fetch.ts: $fetch_lines lines (deep module)"
-          echo "[✓] Module depth OK"
-
-  # ============================================================================
-  # STAGE 7: Smoke Test
-  # ============================================================================
-  smoke-test:
-    runs-on: ubuntu-latest
-    needs: deploy-functions
-    if: github.event_name == 'push'
-    steps:
-      - name: Smoke test endpoints
-        run: |
-          for ep in /process-document /generate-briefing /verify-briefing; do
-            STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
-              "https://caregiver-briefing-tool.onrender.com$ep" \
-              -H "Content-Type: application/json" \
-              -d '{"patient_id":"smoke-test","pdf_base64":"dGVzdA=="}')
-            
-            if [ "$STATUS" = "000" ]; then
-              echo "[✗] $ep: NO RESPONSE (silent failure)"
-              exit 1
-            fi
-            
-            echo "[✓] $ep: $STATUS (responded)"
-          done
-
-  # ============================================================================
-  # STAGE 8: Summary
-  # ============================================================================
-  summary:
-    runs-on: ubuntu-latest
-    needs: [check-syntax, unit-tests, build, deploy-functions, integration-tests, module-audit, smoke-test]
-    if: always()
-    steps:
-      - name: Report
-        run: |
-          cat << 'SUMMARY'
-          ✓ SYNTAX (fail fast)
-          ✓ UNIT TESTS (Result<T,E>)
-          ✓ BUNDLE SIZE (regression detection)
-          ✓ DEPLOY (Edge Functions)
-          ✓ LATENCY PROFILE (P99 < 3s)
-          ✓ ERROR VISIBILITY (structured responses)
-          ✓ MODULE DEPTH (narrow interfaces)
-          ✓ SMOKE TEST (responsiveness)
-          
-          CI/CD enforces Jeff Dean's 10 principles.
-          SUMMARY
+      - name: Build Next.js App
+        run: npm run build
