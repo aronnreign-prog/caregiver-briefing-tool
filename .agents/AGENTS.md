@@ -4,40 +4,47 @@
 
 ---
 
-## Architecture State (Updated 2026-08-09)
+## Architecture State (Updated 2026-08-19)
 
-The codebase has been through a full Jeff Dean engineering optimization cycle. See `.references/engineering-principles.md` for the complete rationale and implementation log.
+The codebase was fully migrated from a distributed Python/Deno/Docker microservice into a clean, 100% TypeScript Next.js app. All legacy runtimes have been deleted.
 
-### What's New
+### What Changed (2026-08-19 migration)
 
-- **3 bulk Python endpoints**: `/process-document`, `/generate-briefing`, `/verify-briefing` (collapsed from 9 HTTP calls)
-- **Result<T,E> pattern**: `supabase/functions/_shared/result.ts` — used by both Edge Functions
-- **Module decomposition**: `PatientDetailClient` split into 4 deep modules (PatientRealtime, DocumentUploader, DocumentList, PipelineBar)
-- **PaperTrail in Python**: Evidence extraction now uses Graphiti's pre-built search index
-- **Error visibility**: 9/10 gaps closed; root `error.tsx` added; signup returns error on caregiver insert failure
-- **Render MCP**: configured in `kilo.json` for service deployment, logs, and monitoring
-- **Structured timing**: `[timing]` logs on every external call across Edge Functions and Python
+**Deleted:**
+- `python/graphiti-wrapper/` — replaced by Gemini 2.0 Flash in TypeScript
+- `docker-compose.yml` — no longer needed
+- `supabase/functions/` (process-document, process-briefing, _shared) — replaced by Server Actions
+- `supabase/migrations/` (all 13 SQL files) — jobs table, pg_cron, queue RPC all gone
+
+**Added:**
+- `src/lib/ai/extract.ts` — `extractClinicalFacts(buffer, filename)` using `@ai-sdk/google` + Zod
+- `src/lib/zep/ingest.ts` — `ingestDocumentFacts()` + `queryPatientMemory()` using `@getzep/zep-cloud` v2 graph API
+- `src/app/dashboard/patients/[id]/pipeline-actions.ts` — `'use server'` actions for `ingestDocument()` + `generateBriefing()`
+
+**Updated:**
+- `DocumentUploader.tsx` — calls `ingestDocument()` directly after upload (no job queue)
+- `PatientDetailClient.tsx` — calls `generateBriefing()` directly (no job insert)
+- `dashboard/actions.ts` — removed all FalkorDB/Render fetch calls
+- `types/database.ts` — removed Job type; added Condition; simplified Document status enum
 
 ### Debugging Guide
 
 When a document or briefing fails:
-1. Query `jobs` table — `error_message` field contains exact failure reason
-2. Check Edge Function logs for `[timing]` entries and Result errors
-3. Use Render MCP to fetch Python logs for Graphiti/LLM issues
-4. PaperTrail failure: claims are marked UNVERIFIED with ⚠ warning in briefing text
+1. Check `documents` table — `status` + `error_message` columns
+2. Check `briefings` table — `status` + `error_message` columns
+3. Next.js server logs: look for `[Pipeline]`, `[Briefing]`, `[Zep]` prefixes
+4. Zep Cloud dashboard for graph data issues
 
 ### Files to Not Touch Without Care
 
-- `python/graphiti-wrapper/main.py` — `logger` is module-scope, `graphiti` is initialized in lifespan. The `@timing` decorator depends on `logger`.
-- `supabase/functions/_shared/result.ts` — used by both Edge Functions. API: `ok()`, `err()`, `errStr()`, `logTiming()`, `Result<T,E>`.
+- `src/lib/zep/ingest.ts` — uses Zep Cloud v2 graph API (`client.graph.add` / `client.graph.search`). The userId is a composite `caregiver-{id}-patient-{id}` — changing this breaks memory lookup.
+- `src/lib/ai/extract.ts` — `ClinicalExtractionSchema` is the source of truth for extracted shape. Changes here cascade to `pipeline-actions.ts` and `database.ts`.
 - `src/lib/supabase/server.ts` — uses React `cache()`. Must return the same client per request.
+- `src/app/dashboard/patients/[id]/pipeline-actions.ts` — contains the full ingestion + briefing pipeline. Keep `'use server'` at top.
 
 ---
 
 ## Model Routing — When to Switch
-
-> **Runtime pipeline models** (OpenRouter, env-driven) live in `.agents/MODELS.md`.
-> This section is about *which coding agent* to use, not runtime LLM calls.
 
 The user runs THREE tools: **ZCode (DeepSeek V4 Pro)**, **Claude Sonnet (Antigravity CLI)**, and **Gemini (Antigravity CLI)**.
 Each has different strengths and costs. The agent MUST recommend a switch at the start of any task where a different model would be more efficient.
@@ -46,22 +53,20 @@ Each has different strengths and costs. The agent MUST recommend a switch at the
 
 | Task Type | Best Model | Why |
 |---|---|---|
-| Boilerplate scaffolding (Next.js pages, SQL migrations, Docker configs) | **ZCode** | Cheapest per token, strong at TypeScript boilerplate |
-| Edge Function wiring (Supabase client, job queue, env vars) | **ZCode** | Fast and cheap for known patterns |
-| Novel/complex logic (PaperTrail, Graphiti, claim-evidence matching) | **Claude Sonnet** | Best reasoning for novel code |
-| Debugging (stack traces, distributed system failures, cascading errors) | **Claude Sonnet** | Strong chain-of-thought for root cause |
-| Pipeline orchestration (multi-step async, retry logic, error handling) | **Claude Sonnet** | Complex state machines |
-| Performance optimization (indexes, query plans, N+1 analysis) | **Claude Sonnet** | Deep reasoning about cost models |
-| Research (API docs, Graphiti internals, external service shape) | **Gemini** | Web access, good at summarizing |
+| Boilerplate scaffolding (Next.js pages, SQL, Tailwind) | **ZCode** | Cheapest per token, strong at TypeScript boilerplate |
+| Supabase client wiring, env vars, RLS | **ZCode** | Fast and cheap for known patterns |
+| Novel/complex logic (Zep graph, Gemini schema, claim matching) | **Claude Sonnet** | Best reasoning for novel code |
+| Debugging (server action failures, Zep/Gemini API errors) | **Claude Sonnet** | Strong chain-of-thought for root cause |
+| Pipeline orchestration (ingest → extract → ingest flow) | **Claude Sonnet** | Complex async state |
+| Research (Zep Cloud API docs, AI SDK docs, Supabase internals) | **Gemini** | Web access, good at summarizing |
 | Planning / architecture review | **Gemini** | Structured analysis, cheap for long context |
 | UI components (shadcn/ui, Tailwind, React) | **ZCode** | Fast at component boilerplate |
 | Citation chip / PDF highlight UI | **Claude Sonnet** | Non-trivial interactivity |
 | Writing tests | **ZCode** | Pattern-matching task |
-| Error handling audits / visible error propagation | **Claude Sonnet** | Cross-layer analysis |
 
 ### Default Rule
 - **Default to ZCode** for boilerplate/known patterns
-- **Escalate to Claude Sonnet** for novel logic, debugging, distributed system work
+- **Escalate to Claude Sonnet** for novel logic, debugging, Zep/AI SDK work
 - **Escalate to Gemini** only for research/reading (not code generation)
 
 ---

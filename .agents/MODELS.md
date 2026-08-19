@@ -1,43 +1,36 @@
-# Runtime Model Assignment (OpenRouter)
+# Runtime Model Assignment
 
-> **Scope:** This file defines the OpenRouter models used by the *running pipeline*
-> (Supabase Edge Functions + Python wrapper), NOT which coding *agent* to use.
-> For coding-agent routing (ZCode / Claude Sonnet / Gemini), see
-> `.agents/AGENTS.md` and `.agents/skills/model_routing/SKILL.md`.
+> **Scope:** This file defines which AI models the *running pipeline* uses, NOT which coding *agent* to use.
+> For coding-agent routing (ZCode / Claude Sonnet / Gemini), see `.agents/AGENTS.md`.
 >
-> **Principle:** All runtime models are env-driven. To switch a model, edit the
-> env var — **never** hardcode a model in code.
+> **Principle:** All runtime models are env-driven. To switch a model, edit the env var — never hardcode a model in code.
 
-## Env Var → Default Model → Used By
+## Env Var → Model → Used By
 
 | Env Var | Default | Where Read | Task |
 |---|---|---|---|
-| `LAYER_1_VISION_MODEL` | `qwen/qwen-2-vl-7b-instruct:free` | `process-document/index.ts` | PDF → text extraction (vision/multimodal) |
-| `METADATA_MODEL` | `meta-llama/llama-3.1-8b-instruct:free` | `process-document/index.ts` | Document metadata extraction (type, date, provider) |
-| `LLM_MODEL` | `anthropic/claude-3-haiku` | `process-briefing/index.ts` | Briefing generation + PaperTrail verification |
-| `OPENROUTER_API_KEY` | — | both functions + Python wrapper | Auth for all OpenRouter calls |
+| `GOOGLE_GENERATIVE_AI_API_KEY` | — | `src/lib/ai/extract.ts`, `pipeline-actions.ts` | All Gemini calls (extraction + briefing). **Required.** |
+| `ZEP_API_KEY` | — | `src/lib/zep/ingest.ts` | Zep Cloud graph ingestion + search. **Required.** |
 
-## Model Usage in Edge Functions (v13, v20)
+## Model Used
 
-### process-document (v13) — Result<T,E> step pipeline
-- `extractMetadata()` — `METADATA_MODEL` for document type/date/provider
-- `processPdfBulk()` — delegates PDF→text to Python `/process-document` (uses `LAYER_1_VISION_MODEL`)
+All AI calls use **Google Gemini 2.0 Flash** via `@ai-sdk/google`:
+- `extractClinicalFacts()` — `google("gemini-2.0-flash")` + `generateObject()` + Zod schema
+- `generateBriefing()` — `google("gemini-2.0-flash")` + `generateObject()` + Zod schema
 
-### process-briefing (v20) — Result<T,E> step pipeline
-- `generateBriefingLLM()` — `LLM_MODEL` for briefing text + claims + flagged concerns
-- `checkDrugInteractions()` — NIH RxNav API (no LLM, free REST API)
-- `runPaperTrail()` — delegates to Python `/verify-briefing` (uses Graphiti search + LLM)
+## How to Override the Model
 
-## Python Wrapper Models
-
-The Python wrapper's Graphiti client uses the same `OPENROUTER_API_KEY` via its own LLM configuration. See `python/graphiti-wrapper/main.py` for `LLM_CONFIG` setup.
-
-## How to Override
-
-Set env vars in Supabase Edge Function secrets:
-```
-supabase secrets set LAYER_1_VISION_MODEL=google/gemma-3-4b-it:free
-supabase secrets set LLM_MODEL=deepseek/deepseek-chat-v3-0324:free
+Edit `src/lib/ai/extract.ts` and `src/app/dashboard/patients/[id]/pipeline-actions.ts`:
+```ts
+// Change model string — any model supported by @ai-sdk/google works
+const model = google("gemini-2.5-flash")  // or gemini-2.5-pro, etc.
 ```
 
-Or for Python wrapper, set the env var on the Render dashboard.
+No env var needed for model selection — the model is in code. The API key is env-driven.
+
+## Zep Cloud v2 API Reference
+
+- **Add data**: `client.graph.add({ data: string, type: "text", userId: string })`
+- **Search**: `client.graph.search({ query: string, userId: string, limit: number })`
+- **Create user**: `client.user.add({ userId: string })`
+- **userId convention**: `caregiver-{caregiverId}-patient-{patientId}`

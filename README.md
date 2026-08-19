@@ -1,37 +1,74 @@
+# CareNote — Caregiver Briefing Tool
 
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+AI-powered medical briefing tool for family caregivers. Upload documents from any provider; get a verified, cited clinical summary ready for doctor visits.
+
+## Stack
+
+- **Next.js 16.2** (App Router, Server Actions, TypeScript)
+- **React 19** with Supabase Realtime
+- **Google Gemini 2.0 Flash** via `@ai-sdk/google` — multimodal PDF extraction + structured briefing generation
+- **Zep Cloud** (`@getzep/zep-cloud`) — bi-temporal clinical memory graph
+- **Supabase** — Auth, Postgres, Storage (`medical_records` bucket)
+- **Zod** — runtime validation of all AI-extracted schemas
+- **Tailwind CSS v4**
 
 ## Getting Started
 
-First, run the development server:
-
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Environment Variables
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Copy `.env.example` to `.env.local` and fill in:
 
-## Learn More
+```
+NEXT_PUBLIC_SUPABASE_URL=
+NEXT_PUBLIC_SUPABASE_ANON_KEY=
+SUPABASE_SERVICE_ROLE_KEY=
+GOOGLE_GENERATIVE_AI_API_KEY=   # from https://aistudio.google.com
+ZEP_API_KEY=                    # from https://cloud.getzep.com
+```
 
-To learn more about Next.js, take a look at the following resources:
+## How It Works
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+1. **Upload** — Caregiver uploads PDF medical records (lab reports, discharge summaries, prescriptions)
+2. **Extract** — Gemini 2.0 Flash reads the PDF buffer and extracts medications, lab values, and conditions via a Zod schema
+3. **Remember** — Extracted facts are ingested into Zep Cloud as bi-temporal graph nodes (keyed by document date)
+4. **Brief** — On demand, Zep memory is queried and synthesised into a structured briefing (specialist / GP / family / ER / second opinion) with every claim verified against source context
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Project Structure
 
-## Deploy on Vercel
+```
+src/
+  app/
+    dashboard/
+      page.tsx                    # Patient list
+      actions.ts                  # addPatient, deletePatient, deleteDocument
+      patients/[id]/
+        page.tsx                  # Patient detail (server component)
+        PatientDetailClient.tsx   # Interactive UI shell
+        PatientRealtime.tsx       # Supabase Realtime subscription
+        DocumentList.tsx          # Document list + delete
+        DocumentUploader.tsx      # PDF upload → ingestDocument()
+        PipelineBar.tsx           # Extraction status indicator
+        pipeline-actions.ts       # ingestDocument() + generateBriefing()
+    auth/actions.ts               # login, signup, logout
+  lib/
+    ai/extract.ts                 # extractClinicalFacts() — Gemini + Zod
+    zep/ingest.ts                 # ingestDocumentFacts(), queryPatientMemory()
+    supabase/server.ts            # React cache() server client
+    supabase/client.ts            # Browser client
+  types/database.ts               # Patient, Document, Briefing, ExtractedEntities
+  proxy.ts                        # Auth middleware
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Build
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+```bash
+npm run build      # Production build
+npx tsc --noEmit   # Type-check only
+```

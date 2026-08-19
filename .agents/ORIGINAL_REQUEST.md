@@ -1,30 +1,22 @@
-# Original User Request
+# Original User Requests — Historical Log
 
 ## Initial Request — 2026-08-01T14:16:24+05:30
 
-Run an autonomous end-to-end validation and diagnostic audit across the LIVE deployed Caregiver Briefing Tool infrastructure (Vercel Frontend, Supabase Cloud Serverless & DB, and Render Python FastAPI Service).
+Run an autonomous end-to-end validation and diagnostic audit across the LIVE deployed Caregiver Briefing Tool infrastructure (Vercel Frontend, Supabase Cloud, Render Python FastAPI Service).
 
-Working directory: C:\Users\Dell\caregiver-briefing-tool
-Integrity mode: development
+**Status:** Completed. Audit revealed significant complexity in the distributed architecture.
 
-## Requirements
+---
 
-### R1. Live End-to-End Pipeline Verification
-Test the complete 4-layer medical briefing pipeline directly against production/cloud endpoints:
-- Layer 1: PDF Document Ingestion & Vision Text Extraction (/extract-pdf)
-- Layer 2: Medical Entity Extraction (/extract-entities) & FalkorDB Knowledge Graph Ingestion (/add-facts)
-- Layer 3: Patient State (/patient-state), Trend Retrieval (/trend), and Briefing Generation (process-briefing)
-- Layer 4: PaperTrail Citation Verification (Claim decompose, evidence match, status check)
+## Migration Request — 2026-08-19
 
-### R2. Non-Destructive Code & Deployment Discipline
-Do NOT modify production code unnecessarily. Focus on detecting configuration issues, endpoint contract mismatches, payload format errors, or timeout/retry boundaries.
+Refactor the repository to simplify the architecture from a distributed Python/Deno/Docker microservice into a clean, 100% TypeScript Next.js app.
 
-### R3. Comprehensive Audit Reporting
-Generate a detailed report detailing HTTP status codes, latency benchmarks, edge function reliability, and any remaining friction across all 3 deployment layers.
+**Architecture Constraints:**
+- Stack: Next.js (App Router), TypeScript, Vercel AI SDK (@ai-sdk/google), Zod, @getzep/zep-cloud
+- Remove all legacy multi-runtime bloat: delete python/, docker-compose.yml, supabase/functions/, queue/cron migrations
+- Ingestion: Multimodal extraction directly from raw PDF buffers using Google Gemini 2.0 Flash + Zod
+- Memory: Ingest extracted clinical facts into Zep Cloud with bi-temporal valid_from dates
+- Briefing: Server action that queries Zep memory and synthesises a verified clinical briefing using structured object generation
 
-## Acceptance Criteria
-
-### Live Integration Verification
-- [ ] All 4 pipeline layers execute successfully against live endpoints (Vercel / Supabase Cloud / Render)
-- [ ] Zero unhandled 500 exceptions or uncaught validation errors across all endpoints
-- [ ] Detailed markdown audit report generated at docs/reports/live_deployment_audit.md
+**Status:** Completed 2026-08-19. Build passes with 0 TypeScript errors. Commit: aa6acd3.
