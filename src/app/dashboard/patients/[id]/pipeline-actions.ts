@@ -1,48 +1,50 @@
 'use server'
 
-import { createClient } from '@/lib/supabase/server'
+import { db } from '@/lib/db'
+import { documents, briefings, patients } from '@/lib/db/schema'
+import { eq } from 'drizzle-orm'
 import { extractClinicalFacts } from '@/lib/ai/extract'
 import { ingestDocumentFacts, queryPatientMemory } from '@/lib/zep/ingest'
 import { google } from '@ai-sdk/google'
 import { generateObject } from 'ai'
 import { z } from 'zod'
 import { revalidatePath } from 'next/cache'
+import { getCaregiver } from '@/lib/auth-session'
+
+export async function createDocumentRecord(patientId: string, filename: string, blobUrl: string, fileSize: number, mimeType: string): Promise<{ id?: string; error?: string }> {
+  const caregiver = await getCaregiver()
+  if (!caregiver) return { error: 'Unauthorized' }
+  
+  try {
+    const [inserted] = await db.insert(documents).values({
+      patient_id: patientId,
+      caregiver_id: caregiver.id,
+      filename,
+      blob_url: blobUrl,
+      file_size: String(fileSize),
+      mime_type: mimeType,
+      status: 'uploaded',
+    }).returning({ id: documents.id })
+    return { id: inserted.id }
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : 'DB insert failed' }
+  }
+}
 
 export async function ingestDocument(documentId: string): Promise<{ error?: string }> {
-  const supabase = await createClient()
+  const caregiver = await getCaregiver()
+  if (!caregiver) return { error: 'Unauthorized' }
 
-  const { data: { user }, error: authError } = await supabase.auth.getUser()
-  if (authError || !user) return { error: 'Unauthorized' }
+  const [doc] = await db.select().from(documents).where(eq(documents.id, documentId)).limit(1)
+  if (!doc) return { error: 'Document not found' }
+  if (!doc.blob_url) return { error: 'Document has no blob URL' }
 
-  const { data: caregiver } = await supabase
-    .from('caregivers')
-    .select('id')
-    .eq('auth_user_id', user.id)
-    .single()
-
-  if (!caregiver) return { error: 'Caregiver not found' }
-
-  const { data: doc, error: docErr } = await supabase
-    .from('documents')
-    .select('id, patient_id, caregiver_id, filename, storage_path, status')
-    .eq('id', documentId)
-    .single()
-
-  if (docErr || !doc) return { error: docErr?.message ?? 'Document not found' }
-  if (!doc.storage_path) return { error: 'Document has no storage path' }
-
-  await supabase.from('documents').update({ status: 'extracting' }).eq('id', documentId)
+  await db.update(documents).set({ status: 'extracting' }).where(eq(documents.id, documentId))
 
   try {
-    const { data: fileData, error: downloadErr } = await supabase.storage
-      .from('medical_records')
-      .download(doc.storage_path)
-
-    if (downloadErr || !fileData) {
-      throw new Error(downloadErr?.message ?? 'Failed to download file')
-    }
-
-    const arrayBuffer = await fileData.arrayBuffer()
+    const response = await fetch(doc.blob_url)
+    if (!response.ok) throw new Error(`Failed to download blob: ${response.status}`)
+    const arrayBuffer = await response.arrayBuffer()
     const pdfBuffer = Buffer.from(arrayBuffer)
 
     const extraction = await extractClinicalFacts(pdfBuffer, doc.filename)
@@ -54,12 +56,9 @@ export async function ingestDocument(documentId: string): Promise<{ error?: stri
       doc.filename,
       extraction,
     )
+    if (!ingestResult.success) console.error('[Pipeline] Zep ingest failed:', ingestResult.error)
 
-    if (!ingestResult.success) {
-      console.error('[Pipeline] Zep ingest failed:', ingestResult.error)
-    }
-
-    await supabase.from('documents').update({
+    await db.update(documents).set({
       status: 'extracted',
       document_date: extraction.documentDate ?? null,
       document_type: extraction.documentType ?? null,
@@ -68,45 +67,38 @@ export async function ingestDocument(documentId: string): Promise<{ error?: stri
         lab_values: extraction.lab_values,
         conditions: extraction.conditions,
       },
-      processed_at: new Date().toISOString(),
-    }).eq('id', documentId)
+      processed_at: new Date(),
+    }).where(eq(documents.id, documentId))
 
     revalidatePath('/dashboard/patients/' + doc.patient_id)
     return {}
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     console.error('[Pipeline] Extraction failed:', message)
-    await supabase.from('documents').update({
-      status: 'failed',
-      error_message: message,
-    }).eq('id', documentId)
+    await db.update(documents).set({ status: 'failed', error_message: message }).where(eq(documents.id, documentId))
     return { error: message }
   }
 }
 
 const BriefingOutputSchema = z.object({
   briefing_text: z.string(),
-  claims: z.array(
-    z.object({
-      claim_id: z.string(),
-      claim_text: z.string(),
-      claim_type: z.enum(['source_document', 'medical_knowledge', 'reasoning']),
-      flag: z.enum(['SUPPORTED', 'PARTIALLY SUPPORTED', 'UNSUPPORTED', 'MEDICAL_KNOWLEDGE', 'UNVERIFIED']).optional(),
-      evidence: z.object({
-        source_doc_id: z.string().optional(),
-        source_page: z.number().optional(),
-        source_quote: z.string().optional(),
-        entry_text: z.string().optional(),
-      }).optional(),
-    }),
-  ),
-  flagged_concerns: z.array(
-    z.object({
-      concern: z.string(),
-      severity: z.enum(['high', 'medium', 'low']),
-      related_claims: z.array(z.string()),
-    }),
-  ),
+  claims: z.array(z.object({
+    claim_id: z.string(),
+    claim_text: z.string(),
+    claim_type: z.enum(['source_document', 'medical_knowledge', 'reasoning']),
+    flag: z.enum(['SUPPORTED', 'PARTIALLY SUPPORTED', 'UNSUPPORTED', 'MEDICAL_KNOWLEDGE', 'UNVERIFIED']).optional(),
+    evidence: z.object({
+      source_doc_id: z.string().optional(),
+      source_page: z.number().optional(),
+      source_quote: z.string().optional(),
+      entry_text: z.string().optional(),
+    }).optional(),
+  })),
+  flagged_concerns: z.array(z.object({
+    concern: z.string(),
+    severity: z.enum(['high', 'medium', 'low']),
+    related_claims: z.array(z.string()),
+  })),
 })
 
 type BriefingAudience = 'specialist' | 'gp' | 'family' | 'general' | 'er_visit' | 'second_opinion'
@@ -120,72 +112,77 @@ function audienceInstruction(audience: BriefingAudience): string {
   return 'Write a clear, well-structured clinical summary.'
 }
 
+export async function createBriefingRecord(
+  patientId: string,
+  audience: string,
+  sourceDocIds: string[],
+): Promise<{ id?: string; error?: string }> {
+  const caregiver = await getCaregiver()
+  if (!caregiver) return { error: 'Unauthorized' }
+
+  try {
+    const [inserted] = await db.insert(briefings).values({
+      patient_id: patientId,
+      caregiver_id: caregiver.id,
+      audience,
+      status: 'queued',
+      source_doc_ids: sourceDocIds,
+    }).returning({ id: briefings.id })
+    return { id: inserted.id }
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : 'Failed to create briefing' }
+  }
+}
+
 export async function generateBriefing(
   patientId: string,
   briefingId: string,
   audience: BriefingAudience,
   caregiverId: string,
 ): Promise<{ error?: string }> {
-  const supabase = await createClient()
-
-  await supabase.from('briefings').update({ status: 'processing' }).eq('id', briefingId)
+  await db.update(briefings).set({ status: 'processing' }).where(eq(briefings.id, briefingId))
 
   try {
-    const context = await queryPatientMemory(
-      caregiverId,
-      patientId,
-      'medications lab values conditions diagnoses vital signs allergies',
-    )
+    const context = await queryPatientMemory(caregiverId, patientId, 'medications lab values conditions diagnoses vital signs allergies')
 
     if (!context || context.trim().length === 0) {
-      await supabase.from('briefings').update({
+      await db.update(briefings).set({
         status: 'failed',
         error_message: 'No clinical memory found. Upload and ingest at least one document first.',
-      }).eq('id', briefingId)
+      }).where(eq(briefings.id, briefingId))
       return { error: 'No clinical context found in memory.' }
     }
 
-    const { data: patient } = await supabase
-      .from('patients')
-      .select('name, date_of_birth, relationship')
-      .eq('id', patientId)
-      .single()
-
+    const [patient] = await db.select().from(patients).where(eq(patients.id, patientId)).limit(1)
     const patientHeader = patient
-      ? 'Patient: ' + patient.name + ', DOB: ' + patient.date_of_birth + ', Relationship: ' + patient.relationship
-      : 'Patient ID: ' + patientId
+      ? `Patient: ${patient.name}, DOB: ${patient.date_of_birth}, Relationship: ${patient.relationship}`
+      : `Patient ID: ${patientId}`
 
-    const model = google('gemini-2.0-flash')
-
+    const model = google('gemini-2.5-flash')
     const { object } = await generateObject({
       model,
-      system: 'You are a clinical AI assistant generating a structured medical briefing.\n' + audienceInstruction(audience) + '\n\nUse only the clinical facts provided. Do not hallucinate.\nFor each claim, mark it SUPPORTED if backed by source context, or UNVERIFIED if uncertain.\nFlag drug-drug interactions, contraindications, or concerning trends as flagged_concerns.',
-      messages: [
-        {
-          role: 'user',
-          content: patientHeader + '\n\nExtracted clinical facts:\n\n' + context + '\n\nGenerate a comprehensive ' + audience + ' briefing.',
-        },
-      ],
+      system: `You are a clinical AI assistant generating a structured medical briefing.\n${audienceInstruction(audience)}\n\nUse only the clinical facts provided. Do not hallucinate.\nFor each claim, mark it SUPPORTED if backed by source context, or UNVERIFIED if uncertain.\nFlag drug-drug interactions, contraindications, or concerning trends as flagged_concerns.`,
+      messages: [{
+        role: 'user',
+        content: `${patientHeader}\n\nExtracted clinical facts:\n\n${context}\n\nGenerate a comprehensive ${audience} briefing.`,
+      }],
       schema: BriefingOutputSchema,
     })
 
-    await supabase.from('briefings').update({
+    await db.update(briefings).set({
       status: 'complete',
       briefing_text: object.briefing_text,
       claims: object.claims,
       flagged_concerns: object.flagged_concerns,
-      completed_at: new Date().toISOString(),
-    }).eq('id', briefingId)
+      completed_at: new Date(),
+    }).where(eq(briefings.id, briefingId))
 
     revalidatePath('/dashboard/patients/' + patientId)
     return {}
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     console.error('[Briefing] Generation failed:', message)
-    await supabase.from('briefings').update({
-      status: 'failed',
-      error_message: message,
-    }).eq('id', briefingId)
+    await db.update(briefings).set({ status: 'failed', error_message: message }).where(eq(briefings.id, briefingId))
     return { error: message }
   }
 }

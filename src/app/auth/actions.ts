@@ -1,68 +1,51 @@
 'use server'
 
-import { revalidatePath } from 'next/cache'
+import { auth } from '@/lib/auth'
+import { db } from '@/lib/db'
+import { caregivers } from '@/lib/db/schema'
+import { headers } from 'next/headers'
 import { redirect } from 'next/navigation'
-import { createClient } from '@/lib/supabase/server'
-import { createClient as createSupabaseClient } from '@supabase/supabase-js'
 
 export async function login(formData: FormData) {
-  const supabase = await createClient()
+  const email = formData.get('email') as string
+  const password = formData.get('password') as string
 
-  const data = {
-    email: formData.get('email') as string,
-    password: formData.get('password') as string,
+  try {
+    await auth.api.signInEmail({ body: { email, password }, headers: await headers() })
+    return { success: true }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Login failed'
+    return { error: msg }
   }
-
-  const { error } = await supabase.auth.signInWithPassword(data)
-
-  if (error) {
-    return { error: error.message }
-  }
-
-  revalidatePath('/', 'layout')
-  return { success: true }
 }
 
 export async function signup(formData: FormData) {
-  const supabase = await createClient()
-
   const email = formData.get('email') as string
   const password = formData.get('password') as string
   const name = formData.get('name') as string
 
-  const { data: authData, error: authError } = await supabase.auth.signUp({
-    email,
-    password,
-  })
+  try {
+    const result = await auth.api.signUpEmail({
+      body: { email, password, name },
+      headers: await headers(),
+    })
 
-  if (authError) {
-    return { error: authError.message }
-  }
+    if (!result?.user?.id) return { error: 'Signup failed: no user returned' }
 
-  if (authData.user) {
-    const adminSupabase = createSupabaseClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!
-    )
-
-    const { error: dbError } = await adminSupabase.from('caregivers').insert({
-      auth_user_id: authData.user.id,
-      email: authData.user.email,
+    await db.insert(caregivers).values({
+      user_id: result.user.id,
+      email: result.user.email,
       name: name,
     })
 
-    if (dbError) {
-      console.error('CRITICAL: caregiver insert failed after signup:', dbError)
-      return { error: 'Failed to create your profile. Please try again or contact support.' }
-    }
+    return { success: true }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Signup failed'
+    return { error: msg }
   }
-
-  revalidatePath('/', 'layout')
-  return { success: true }
 }
 
 export async function logout() {
-  const supabase = await createClient()
-  await supabase.auth.signOut()
+  await auth.api.signOut({ headers: await headers() })
   redirect('/login')
 }

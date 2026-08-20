@@ -1,10 +1,13 @@
-import { createClient } from '@/lib/supabase/server'
 import { getPatientSafely } from '@/lib/data/patient'
 import { isValidUUID } from '@/lib/validators'
 import PatientDetailClient from './PatientDetailClient'
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import type { Patient, Document, Briefing } from '@/types/database'
+import { db } from '@/lib/db'
+import { documents as documentsTable, briefings as briefingsTable } from '@/lib/db/schema'
+import { eq } from 'drizzle-orm'
+import { getSession } from '@/lib/auth-session'
 
 const DEMO_PATIENTS: Record<string, Patient> = {
   'demo-1': {
@@ -29,15 +32,14 @@ export default async function PatientPage({ params }: { params: Promise<{ id: st
   const { id } = await params
   const patientId = id
 
-  const supabase = await createClient()
-  const user = supabase ? (await supabase.auth.getUser()).data.user : null
+  const session = await getSession()
+  const user = session?.user
   const isGuest = !user
 
   let patient: Patient
   let documents: Document[] = []
   let briefings: Briefing[] = []
 
-  // Handle demo patients for guests (non-UUID ids)
   if (!isValidUUID(patientId)) {
     const demoPatient = DEMO_PATIENTS[patientId]
     if (!demoPatient) {
@@ -45,7 +47,6 @@ export default async function PatientPage({ params }: { params: Promise<{ id: st
     }
     patient = demoPatient
   } else {
-    // Real UUID — if guest, redirect to dashboard
     if (isGuest) {
       redirect('/dashboard')
     }
@@ -56,21 +57,36 @@ export default async function PatientPage({ params }: { params: Promise<{ id: st
     }
     patient = result.data as Patient
 
-    const [docResult, briefingResult] = await Promise.all([
-      supabase!
-        .from('documents')
-        .select('id, filename, status, uploaded_at, storage_path')
-        .eq('patient_id', patientId)
-        .order('uploaded_at', { ascending: false }),
-      supabase!
-        .from('briefings')
-        .select('id, audience, status, created_at, completed_at, briefing_text, claims, flagged_concerns')
-        .eq('patient_id', patientId)
-        .order('created_at', { ascending: false }),
-    ])
+    const docResult = await db.select({
+      id: documentsTable.id,
+      patient_id: documentsTable.patient_id,
+      caregiver_id: documentsTable.caregiver_id,
+      filename: documentsTable.filename,
+      blob_url: documentsTable.blob_url,
+      file_size: documentsTable.file_size,
+      mime_type: documentsTable.mime_type,
+      status: documentsTable.status,
+      uploaded_at: documentsTable.uploaded_at,
+      processed_at: documentsTable.processed_at,
+      document_date: documentsTable.document_date,
+      document_type: documentsTable.document_type,
+    }).from(documentsTable).where(eq(documentsTable.patient_id, patientId)).orderBy(documentsTable.uploaded_at)
 
-    documents = (docResult.data || []) as Document[]
-    briefings = (briefingResult.data || []) as Briefing[]
+    const briefingResult = await db.select({
+      id: briefingsTable.id,
+      patient_id: briefingsTable.patient_id,
+      caregiver_id: briefingsTable.caregiver_id,
+      audience: briefingsTable.audience,
+      status: briefingsTable.status,
+      created_at: briefingsTable.created_at,
+      completed_at: briefingsTable.completed_at,
+      briefing_text: briefingsTable.briefing_text,
+      claims: briefingsTable.claims,
+      flagged_concerns: briefingsTable.flagged_concerns,
+    }).from(briefingsTable).where(eq(briefingsTable.patient_id, patientId)).orderBy(briefingsTable.created_at)
+
+    documents = (docResult || []) as unknown as Document[]
+    briefings = (briefingResult || []) as unknown as Briefing[]
   }
 
   return (
@@ -79,7 +95,7 @@ export default async function PatientPage({ params }: { params: Promise<{ id: st
 
         {isGuest && (
           <div className="flex items-center justify-between rounded-lg border border-border bg-surface px-4 py-3 text-xs text-muted-foreground">
-            <span>Guest mode — this is a demo patient. Sign in to work with your own records.</span>
+            <span>Guest mode - this is a demo patient. Sign in to work with your own records.</span>
             <div className="flex gap-2 ml-4 shrink-0 font-mono text-[11px]">
               <Link href="/login" className="border border-border px-3 py-1 rounded hover:text-foreground transition-colors">
                 Sign in
@@ -93,7 +109,7 @@ export default async function PatientPage({ params }: { params: Promise<{ id: st
 
         <div className="flex items-center space-x-4 mb-6">
           <Link href="/dashboard" className="inline-flex items-center gap-1.5 font-mono text-xs text-muted-foreground border border-border px-3 py-1.5 rounded hover:text-foreground hover:border-foreground/30 transition-colors">
-            ← Back to Dashboard
+            Back to Dashboard
           </Link>
         </div>
 
@@ -102,7 +118,7 @@ export default async function PatientPage({ params }: { params: Promise<{ id: st
             {patient.name}
           </h1>
           <p className="text-sm text-muted-foreground mt-2 font-mono">
-            DOB: {new Date(patient.date_of_birth).toLocaleDateString()} • {patient.relationship}
+            DOB: {new Date(patient.date_of_birth).toLocaleDateString()}   {patient.relationship}
           </p>
         </header>
 

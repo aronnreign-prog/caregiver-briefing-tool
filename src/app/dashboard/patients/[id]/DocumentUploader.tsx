@@ -1,9 +1,9 @@
 'use client'
 
-import { createClient } from '@/lib/supabase/client'
 import type { Document } from '@/types/database'
 import { useRouter } from 'next/navigation'
-import { ingestDocument } from './pipeline-actions'
+import { upload } from '@vercel/blob/client'
+import { ingestDocument, createDocumentRecord } from './pipeline-actions'
 
 interface Props {
   patientId: string
@@ -14,13 +14,11 @@ interface Props {
   onDocumentAdded: (doc: Document) => void
 }
 
-/** Deep module: handles PDF upload to Supabase Storage, then triggers Gemini extraction + Zep ingestion. */
 export default function DocumentUploader({ patientId, isDemo, isGuest, uploading, onUploadStart, onDocumentAdded }: Props) {
   const router = useRouter()
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const supabase = createClient()
-    if (!supabase || isGuest) { alert('Sign in to upload documents.'); return }
+    if (isGuest) { alert('Sign in to upload documents.'); return }
     const files = Array.from(e.target.files || [])
     if (files.length === 0) return
 
@@ -32,38 +30,35 @@ export default function DocumentUploader({ patientId, isDemo, isGuest, uploading
     if (oversized.length > 0) { alert(`${oversized.length} file(s) exceed 10MB.`); return }
 
     onUploadStart(true)
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) { alert('Please sign in to upload.'); onUploadStart(false); return }
-
-    const { data: caregiver } = await supabase.from('caregivers').select('id').eq('auth_user_id', user.id).single()
-    if (!caregiver?.id) { alert('Caregiver profile not found.'); onUploadStart(false); return }
-
     let ok = 0
     let err = 0
+
     for (const file of pdfs) {
       try {
-        const path = `${patientId}/${Date.now()}_${ok}.${file.name.split('.').pop()}`
-        const { error: uploadError } = await supabase.storage.from('medical_records').upload(path, file)
-        if (uploadError) throw uploadError
+        const blob = await upload(`${patientId}/${Date.now()}_${file.name}`, file, {
+          access: 'public',
+          handleUploadUrl: '/api/upload',
+        })
 
-        const { data: docData, error: dbError } = await supabase.from('documents').insert({
+        const result = await createDocumentRecord(patientId, file.name, blob.url, file.size, file.type)
+        if (result.error || !result.id) throw new Error(result.error ?? 'No document ID')
+
+        const docRecord: Document = {
+          id: result.id,
           patient_id: patientId,
-          caregiver_id: caregiver.id,
+          caregiver_id: '',
           filename: file.name,
-          storage_path: path,
-          file_size: file.size,
+          blob_url: blob.url,
+          file_size: String(file.size),
           mime_type: file.type,
           status: 'uploaded',
-        }).select().single()
-
-        if (dbError || !docData?.id) throw dbError || new Error('No document ID')
-
-        onDocumentAdded(docData as Document)
+          uploaded_at: new Date().toISOString(),
+        }
+        onDocumentAdded(docRecord)
         ok++
 
-        // Trigger extraction + Zep ingestion asynchronously (fire-and-forget from client perspective)
-        ingestDocument(docData.id).catch(err => {
-          console.error('[Upload] Ingest failed for', docData.id, err)
+        ingestDocument(result.id).catch(err => {
+          console.error('[Upload] Ingest failed for', result.id, err)
         })
       } catch (e: unknown) {
         err++

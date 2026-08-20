@@ -54,8 +54,8 @@ export default function DocumentList({
         <div className="space-y-2">
           {documents.map((doc) => (
             <div key={doc.id}
-              className={`group relative border border-border rounded-md px-3 py-2.5 bg-surface-raised ${doc.storage_path && !isDemo ? 'hover:border-accent/40 cursor-pointer transition-colors' : ''}`}
-              onClick={(e) => doc.storage_path && !isDemo ? onDocClick(e, doc.id) : undefined}
+              className={`group relative border border-border rounded-md px-3 py-2.5 bg-surface-raised ${doc.blob_url && !isDemo ? 'hover:border-accent/40 cursor-pointer transition-colors' : ''}`}
+              onClick={(e) => doc.blob_url && !isDemo ? onDocClick(e, doc.id) : undefined}
             >
               <div className="flex items-start justify-between gap-2">
                 <div className="flex items-start gap-2 min-w-0 flex-1">

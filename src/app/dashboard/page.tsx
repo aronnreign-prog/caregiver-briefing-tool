@@ -1,8 +1,11 @@
-import { createClient } from '@/lib/supabase/server'
 import Link from 'next/link'
 import AddPatientForm from './AddPatientForm'
 import SignOutButton from './SignOutButton'
 import DeletePatientButton from './DeletePatientButton'
+import { db } from '@/lib/db'
+import { patients as patientsTable, caregivers } from '@/lib/db/schema'
+import { eq } from 'drizzle-orm'
+import { getSession, getCaregiver } from '@/lib/auth-session'
 
 const DEMO_PATIENTS = [
   { id: 'demo-1', name: 'Margaret Thompson', relationship: 'Mother', date_of_birth: '1945-03-12', flagCount: 1, docCount: 3, briefingStatus: 'complete' },
@@ -19,20 +22,24 @@ function initials(name: string) {
 }
 
 export default async function DashboardPage() {
-  const supabase = await createClient()
-  const user = supabase ? (await supabase.auth.getUser()).data.user : null
+  const session = await getSession()
+  const user = session?.user
 
   let caregiver: { id: string; name: string } | null = null
   let patients: { id: string; name: string; relationship: string; date_of_birth: string; flagCount?: number; docCount?: number; briefingStatus?: string }[] = []
   const isGuest = !user
 
-  if (user && supabase) {
-    const { data: cgData, error: cgError } = await supabase.from('caregivers').select('id, name').eq('auth_user_id', user.id).single()
-    if (cgError) { console.error('Dashboard: caregiver fetch failed:', cgError); throw new Error('Failed to load your profile') }
+  if (user) {
+    const cgData = await getCaregiver()
     caregiver = cgData
     if (caregiver?.id) {
-      const { data: patientData, error: patientError } = await supabase.from('patients').select('id, name, relationship, date_of_birth').eq('caregiver_id', caregiver.id).order('created_at', { ascending: false })
-      if (patientError) { console.error('Dashboard: patient fetch failed:', patientError); throw new Error('Failed to load patients') }
+      const patientData = await db.select({
+        id: patientsTable.id,
+        name: patientsTable.name,
+        relationship: patientsTable.relationship,
+        date_of_birth: patientsTable.date_of_birth
+      }).from(patientsTable).where(eq(patientsTable.caregiver_id, caregiver.id)).orderBy(patientsTable.created_at)
+      
       patients = patientData || []
     }
   } else {

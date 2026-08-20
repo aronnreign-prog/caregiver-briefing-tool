@@ -1,7 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
-import { createClient } from '@/lib/supabase/client'
+import { useState, useEffect } from 'react'
 import type { Patient, Document, Briefing } from '@/types/database'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
@@ -9,7 +8,7 @@ import ReactMarkdown from 'react-markdown'
 import PatientRealtime from './PatientRealtime'
 import DocumentList from './DocumentList'
 import { PipelineBar } from './PipelineBar'
-import { generateBriefing } from './pipeline-actions'
+import { generateBriefing, createBriefingRecord } from './pipeline-actions'
 
 // Demo data
 const DEMO_DOCUMENTS: Document[] = [
@@ -21,7 +20,7 @@ const DEMO_DOCUMENTS: Document[] = [
 const DEMO_BRIEFING: Briefing = {
   id: 'b1', patient_id: 'demo-1', caregiver_id: 'demo', audience: 'specialist', status: 'complete',
   source_doc_ids: ['d1', 'd2', 'd3'], created_at: new Date().toISOString(), completed_at: new Date().toISOString(),
-  briefing_text: `## Patient Summary\n\nMargaret Thompson (DOB 1945-03-12) presents with a documented 18-month decline in renal function across 6 lab draws sourced from 3 different providers. GFR has fallen from 65 to 47 over this period.\n\nHer new cardiologist prescribed Lisinopril (10 mg daily) on 2024-03-14 — an ACE inhibitor that is contraindicated in the context of declining kidney function.\n\n## Current Medications\n\n- Lisinopril 10 mg daily — NEW, prescribed 2024-03-14\n- Atorvastatin 40 mg nightly — ongoing since 2022-06\n- Metoprolol succinate 25 mg daily — ongoing since 2021-11\n\n## Lab Trends\n\nGFR: \`65\` (Jun 2022) → \`58\` (Dec 2022) → \`51\` (Jun 2023) → \`47\` (Dec 2023) — consistent decline.\n\n## Recommendation\n\nFlag the Lisinopril prescription for review. Request nephrology consult.`,
+  briefing_text: "## Patient Summary\n\nMargaret Thompson (DOB 1945-03-12) presents with a documented 18-month decline in renal function across 6 lab draws sourced from 3 different providers. GFR has fallen from 65 to 47 over this period.\n\nHer new cardiologist prescribed Lisinopril (10 mg daily) on 2024-03-14 - an ACE inhibitor that is contraindicated in the context of declining kidney function.\n\n## Current Medications\n\n- Lisinopril 10 mg daily - NEW, prescribed 2024-03-14\n- Atorvastatin 40 mg nightly - ongoing since 2022-06\n- Metoprolol succinate 25 mg daily - ongoing since 2021-11\n\n## Lab Trends\n\nGFR: `65` (Jun 2022) → `58` (Dec 2022) → `51` (Jun 2023) → `47` (Dec 2023) - consistent decline.\n\n## Recommendation\n\nFlag the Lisinopril prescription for review. Request nephrology consult.",
   claims: [
     { claim_id: 'c1', claim_text: 'GFR has fallen from 65 to 47', claim_type: 'source_document', flag: 'SUPPORTED', evidence: { source_doc_id: 'd1', source_quote: 'eGFR 47 mL/min/1.73m2', source_page: 1 } },
     { claim_id: 'c2', claim_text: 'Lisinopril 10 mg daily', claim_type: 'source_document', flag: 'SUPPORTED', evidence: { source_doc_id: 'd2', source_quote: 'Lisinopril 10mg QD', source_page: 2 } },
@@ -53,10 +52,8 @@ interface Props { patient: Patient; initialDocuments: Document[]; initialBriefin
 
 export default function PatientDetailClient({ patient, initialDocuments, initialBriefings }: Props) {
   const isDemo = patient.id.startsWith('demo-')
-  const supabaseRef = useRef(createClient())
-  const supabase = supabaseRef.current
   const router = useRouter()
-  const isGuest = !supabase || isDemo
+  const isGuest = isDemo
 
   const [documents, setDocuments] = useState<Document[]>(isDemo ? DEMO_DOCUMENTS : initialDocuments)
   const [briefings, setBriefings] = useState<Briefing[]>(isDemo ? [DEMO_BRIEFING] : initialBriefings)
@@ -67,11 +64,11 @@ export default function PatientDetailClient({ patient, initialDocuments, initial
 
   const activeBriefing = briefings.find(b => b.id === activeBriefingId) ?? briefings[0] ?? null
 
-  PatientRealtime({ patientId: patient.id, isDemo, onDocumentChange: setDocuments, onBriefingChange: setBriefings, onNewBriefing: setActiveBriefingId })
+  PatientRealtime({})
 
   // Adaptive polling for in-progress documents
   useEffect(() => {
-    if (!supabase || isDemo) return
+    if (isDemo) return
     const hasPendingDoc = documents.some(d => ['uploaded', 'processing', 'extracting'].includes(d.status))
     const hasPendingBriefing = briefings.some(b => b.status === 'queued' || b.status === 'processing')
     if (!hasPendingBriefing && !hasPendingDoc) return
@@ -80,51 +77,54 @@ export default function PatientDetailClient({ patient, initialDocuments, initial
     let timer: ReturnType<typeof setTimeout>
     const poll = async () => {
       if (document.visibilityState === 'hidden') { timer = setTimeout(poll, interval * 2); return }
-      const [{ data: updatedDocs }, { data: updatedBriefings }] = await Promise.all([
-        supabase.from('documents').select('id, filename, status, uploaded_at, storage_path, document_date, document_type, extracted_entities').eq('patient_id', patient.id).order('uploaded_at', { ascending: false }),
-        supabase.from('briefings').select('id, audience, status, created_at, completed_at, briefing_text, claims, flagged_concerns, error_message').eq('patient_id', patient.id).order('created_at', { ascending: false }),
-      ])
-      if (updatedDocs) setDocuments(updatedDocs as Document[])
-      if (updatedBriefings) setBriefings(updatedBriefings as Briefing[])
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const stillPending = ((updatedDocs || []) as any[]).some((d: any) => ['uploaded', 'processing', 'extracting'].includes(d.status)) ||
-                           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                           ((updatedBriefings || []) as any[]).some((b: any) => b.status === 'queued' || b.status === 'processing')
-      interval = stillPending ? Math.min(interval * 1.5, 30000) : 3000
+      try {
+        const [docsRes, briefRes] = await Promise.all([
+          fetch(`/api/patients/${patient.id}/documents`).then(r => r.json()),
+          fetch(`/api/patients/${patient.id}/briefings`).then(r => r.json()),
+        ])
+        const updatedDocs = docsRes.documents
+        const updatedBriefings = briefRes.briefings
+
+        if (updatedDocs) setDocuments(updatedDocs as Document[])
+        if (updatedBriefings) setBriefings(updatedBriefings as Briefing[])
+        
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const stillPending = ((updatedDocs || []) as any[]).some((d: any) => ['uploaded', 'processing', 'extracting'].includes(d.status)) ||
+                             // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                             ((updatedBriefings || []) as any[]).some((b: any) => b.status === 'queued' || b.status === 'processing')
+        interval = stillPending ? Math.min(interval * 1.5, 30000) : 3000
+      } catch (err) {
+        console.error('Polling error', err)
+      }
       timer = setTimeout(poll, interval)
     }
     timer = setTimeout(poll, interval)
     return () => clearTimeout(timer)
-  }, [patient.id, supabase, isDemo, briefings, documents])
+  }, [patient.id, isDemo, briefings, documents])
 
   const handleGenerateBriefing = async () => {
-    if (!supabase || isGuest) { alert('Sign in to generate briefings.'); return }
+    if (isGuest) { alert('Sign in to generate briefings.'); return }
     setGenerating(true)
     try {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) return
-
-      const { data: caregiver } = await supabase.from('caregivers').select('id').eq('auth_user_id', user.id).single()
-      if (!caregiver?.id) { alert('Caregiver profile not found.'); return }
-
-      // Create a briefing record with status 'queued'
-      const { data: briefingData, error: briefingError } = await supabase.from('briefings').insert({
+      const result = await createBriefingRecord(patient.id, audience, documents.map(d => d.id))
+      if (result.error || !result.id) throw new Error(result.error ?? 'No briefing ID')
+      
+      const newBriefing = {
+        id: result.id,
         patient_id: patient.id,
-        caregiver_id: caregiver.id,
+        caregiver_id: patient.caregiver_id,
         audience,
         status: 'queued',
         source_doc_ids: documents.map(d => d.id),
-      }).select().single()
+        created_at: new Date().toISOString()
+      }
+      
+      setBriefings(prev => [newBriefing as Briefing, ...prev])
+      setActiveBriefingId(result.id)
 
-      if (briefingError || !briefingData?.id) throw briefingError || new Error('No briefing ID')
-
-      setBriefings(prev => [briefingData as Briefing, ...prev])
-      setActiveBriefingId(briefingData.id)
-
-      // Call server action directly — no job queue
-      generateBriefing(patient.id, briefingData.id, audience, caregiver.id)
-        .then(result => {
-          if (result?.error) console.error('[Briefing] Failed:', result.error)
+      generateBriefing(patient.id, result.id, audience, patient.caregiver_id)
+        .then(res => {
+          if (res?.error) console.error('[Briefing] Failed:', res.error)
           router.refresh()
         })
         .catch(err => console.error('[Briefing] Unexpected error:', err))
@@ -137,12 +137,10 @@ export default function PatientDetailClient({ patient, initialDocuments, initial
 
   const handleDocClick = async (e: React.MouseEvent, docId: string, page?: number) => {
     e.preventDefault()
-    if (isDemo || !supabase) return
+    if (isDemo) return
     const doc = documents.find(d => d.id === docId)
-    if (!doc?.storage_path) { alert('Document path not available.'); return }
-    const { data, error } = await supabase.storage.from('medical_records').createSignedUrl(doc.storage_path, 60)
-    if (error || !data?.signedUrl) { alert('Could not open document.'); return }
-    const url = page ? `${data.signedUrl}#page=${page}` : data.signedUrl
+    if (!doc?.blob_url) { alert('Document not available.'); return }
+    const url = page ? `${doc.blob_url}#page=${page}` : doc.blob_url
     window.open(url, '_blank')
   }
 
@@ -322,7 +320,7 @@ export default function PatientDetailClient({ patient, initialDocuments, initial
               {isDemo && (
                 <div className="border-t border-border mt-8 pt-6">
                   <p className="font-mono text-[9px] tracking-widest text-muted-foreground uppercase mb-2">This is a demo briefing</p>
-                  <p className="text-[12px] text-muted-foreground leading-relaxed">Real briefings are generated from your uploaded documents. Every claim above would link to an exact source quote, page number, and date.{' '}<Link href="/signup" className="text-accent hover:underline">Create an account</Link> to get started.</p>
+                  <p className="text-[12px] text-muted-foreground leading-relaxed">Real briefings are generated from your uploaded documents. Every claim above would link to an exact source quote, page number, and date. <Link href="/signup" className="text-accent hover:underline">Create an account</Link> to get started.</p>
                 </div>
               )}
             </div>
