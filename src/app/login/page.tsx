@@ -2,14 +2,11 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
-import { login } from '@/app/auth/actions'
-
-import { useRouter } from 'next/navigation'
+import { authClient } from '@/lib/auth-client'
 
 export default function LoginPage() {
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
-  const router = useRouter()
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
@@ -17,14 +14,20 @@ export default function LoginPage() {
     setLoading(true)
     setError(null)
 
+    const formData = new FormData(e.currentTarget)
+    const email = formData.get('email') as string
+    const password = formData.get('password') as string
+
     try {
-      const formData = new FormData(e.currentTarget)
-      const result = await login(formData)
+      const result = await authClient.signIn.email({
+        email,
+        password,
+      })
       if (result?.error) {
-        setError(result.error)
+        setError(result.error.message || 'Login failed')
         setLoading(false)
-      } else if (result?.success) {
-        router.push('/dashboard')
+      } else {
+        window.location.href = '/dashboard'
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Login failed'

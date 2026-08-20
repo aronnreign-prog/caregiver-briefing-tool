@@ -1,10 +1,10 @@
 'use client'
 
-import { logout } from '@/app/auth/actions'
+import { authClient } from '@/lib/auth-client'
 
 export default function SignOutButton() {
   async function handleSignOut() {
-    await logout()
+    await authClient.signOut()
     window.location.href = '/login'
   }
 

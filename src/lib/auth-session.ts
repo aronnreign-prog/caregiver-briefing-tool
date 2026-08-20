@@ -12,10 +12,23 @@ export const getSession = cache(async () => {
 export const getCaregiver = cache(async () => {
   const session = await getSession()
   if (!session?.user?.id) return null
-  const [caregiver] = await db
+  let [caregiver] = await db
     .select()
     .from(caregivers)
     .where(eq(caregivers.user_id, session.user.id))
     .limit(1)
+
+  if (!caregiver) {
+    const [created] = await db
+      .insert(caregivers)
+      .values({
+        user_id: session.user.id,
+        email: session.user.email,
+        name: session.user.name || 'Caregiver',
+      })
+      .returning()
+    caregiver = created
+  }
+
   return caregiver ?? null
 })

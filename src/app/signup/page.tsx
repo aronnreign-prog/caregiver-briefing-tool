@@ -1,15 +1,12 @@
 'use client'
 
 import { useState } from 'react'
-import { signup } from '@/app/auth/actions'
+import { authClient } from '@/lib/auth-client'
 import Link from 'next/link'
-
-import { useRouter } from 'next/navigation'
 
 export default function SignupPage() {
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
-  const router = useRouter()
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
@@ -17,14 +14,22 @@ export default function SignupPage() {
     setLoading(true)
     setError(null)
 
+    const formData = new FormData(e.currentTarget)
+    const email = formData.get('email') as string
+    const password = formData.get('password') as string
+    const name = formData.get('name') as string
+
     try {
-      const formData = new FormData(e.currentTarget)
-      const result = await signup(formData)
+      const result = await authClient.signUp.email({
+        email,
+        password,
+        name,
+      })
       if (result?.error) {
-        setError(result.error)
+        setError(result.error.message || 'Signup failed')
         setLoading(false)
-      } else if (result?.success) {
-        router.push('/dashboard')
+      } else {
+        window.location.href = '/dashboard'
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Signup failed'
