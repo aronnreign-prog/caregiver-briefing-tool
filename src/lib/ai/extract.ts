@@ -41,7 +41,7 @@ export async function extractClinicalFacts(
   pdfBuffer: Buffer,
   filename: string,
 ): Promise<ClinicalExtraction> {
-  const model = google('gemini-2.0-flash')
+  const model = google('gemini-2.5-flash')
 
   const { object } = await generateObject({
     model,
