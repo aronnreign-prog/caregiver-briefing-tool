@@ -143,7 +143,31 @@ export async function generateBriefing(
   await db.update(briefings).set({ status: 'processing' }).where(eq(briefings.id, briefingId))
 
   try {
-    const context = await queryPatientMemory(caregiverId, patientId, 'medications lab values conditions diagnoses vital signs allergies')
+    let context = await queryPatientMemory(caregiverId, patientId, 'medications lab values conditions diagnoses vital signs allergies')
+
+    // If Zep graph memory returns empty, build clinical context directly from extracted DB entities
+    if (!context || context.trim().length === 0) {
+      const patientDocs = await db
+        .select()
+        .from(documents)
+        .where(eq(documents.patient_id, patientId))
+      
+      const factBlocks = patientDocs
+        .filter(d => d.status === 'extracted' && d.extracted_entities)
+        .map(doc => {
+          const entities = doc.extracted_entities as { medications?: { name: string; dose?: string; frequency?: string }[]; lab_values?: { name: string; value: string; unit?: string; date?: string }[]; conditions?: { name: string; status?: string }[] } | null
+          if (!entities) return ''
+          const meds = (entities.medications || []).map(m => `Medication: ${m.name} ${m.dose || ''} ${m.frequency || ''}`.trim())
+          const labs = (entities.lab_values || []).map(l => `Lab: ${l.name} = ${l.value} ${l.unit || ''} (Date: ${l.date || doc.document_date || 'unknown'})`.trim())
+          const conds = (entities.conditions || []).map(c => `Condition: ${c.name} (${c.status || 'active'})`.trim())
+          return `Document: ${doc.filename} (Date: ${doc.document_date || 'unknown'}, Type: ${doc.document_type || 'Record'})\n${[...meds, ...labs, ...conds].join('\n')}`
+        })
+        .filter(Boolean)
+
+      if (factBlocks.length > 0) {
+        context = factBlocks.join('\n\n---\n\n')
+      }
+    }
 
     if (!context || context.trim().length === 0) {
       await db.update(briefings).set({
