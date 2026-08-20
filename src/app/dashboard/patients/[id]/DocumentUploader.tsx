@@ -10,11 +10,20 @@ interface Props {
   isDemo: boolean
   isGuest: boolean
   uploading: boolean
+  variant?: 'compact' | 'dropzone'
   onUploadStart: (uploading: boolean) => void
   onDocumentAdded: (doc: Document) => void
 }
 
-export default function DocumentUploader({ patientId, isDemo, isGuest, uploading, onUploadStart, onDocumentAdded }: Props) {
+export default function DocumentUploader({
+  patientId,
+  isDemo,
+  isGuest,
+  uploading,
+  variant = 'compact',
+  onUploadStart,
+  onDocumentAdded,
+}: Props) {
   const router = useRouter()
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -74,17 +83,37 @@ export default function DocumentUploader({ patientId, isDemo, isGuest, uploading
 
   if (isDemo || isGuest) return null
 
+  if (variant === 'dropzone') {
+    return (
+      <div className="mt-3">
+        <label className="inline-flex flex-col items-center justify-center cursor-pointer">
+          <input type="file" accept=".pdf" multiple className="hidden" onChange={handleUpload} disabled={uploading} />
+          <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded bg-accent text-background font-mono text-[11px] font-semibold hover:opacity-90 transition-opacity">
+            {uploading ? (
+              'Uploading...'
+            ) : (
+              <>
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                  <path d="M6 2.5v7M2.5 6h7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                </svg>
+                Upload PDF
+              </>
+            )}
+          </span>
+        </label>
+        <p className="font-mono text-[9px] text-muted-foreground mt-2">
+          One document per visit · Select multiple PDFs
+        </p>
+      </div>
+    )
+  }
+
   return (
-    <div>
-      <label className="cursor-pointer">
-        <input type="file" accept=".pdf" multiple className="hidden" onChange={handleUpload} disabled={uploading} />
-        <span className="font-mono text-[10px] text-accent hover:text-foreground transition-colors">
-          {uploading ? 'Uploading...' : '+ Upload'}
-        </span>
-      </label>
-      <p className="font-mono text-[8px] text-muted-foreground mt-0.5 leading-tight">
-        One document per visit. Select multiple PDFs at once.
-      </p>
-    </div>
+    <label className="cursor-pointer inline-flex items-center">
+      <input type="file" accept=".pdf" multiple className="hidden" onChange={handleUpload} disabled={uploading} />
+      <span className="font-mono text-[10px] text-accent hover:text-foreground transition-colors font-medium">
+        {uploading ? 'Uploading...' : '+ Upload'}
+      </span>
+    </label>
   )
 }

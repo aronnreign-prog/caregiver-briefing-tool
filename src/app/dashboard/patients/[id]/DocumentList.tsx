@@ -24,30 +24,36 @@ export default function DocumentList({
 }: Props) {
   return (
     <div className="flex-1 overflow-y-auto px-4 py-4">
-      <div className="flex items-center justify-between mb-3">
+      <div className="flex items-center justify-between mb-3 px-1">
         <p className="font-mono text-[9px] tracking-widest text-muted-foreground uppercase">Documents</p>
-        <DocumentUploader
-          patientId={patientId}
-          isDemo={isDemo}
-          isGuest={isGuest}
-          uploading={uploading}
-          onUploadStart={onUploadStart}
-          onDocumentAdded={onDocumentAdded}
-        />
+        {documents.length > 0 && !isGuest && !isDemo && (
+          <DocumentUploader
+            patientId={patientId}
+            isDemo={isDemo}
+            isGuest={isGuest}
+            uploading={uploading}
+            variant="compact"
+            onUploadStart={onUploadStart}
+            onDocumentAdded={onDocumentAdded}
+          />
+        )}
       </div>
 
       {documents.length === 0 ? (
-        <div className="border border-dashed border-border rounded-md p-5 text-center">
-          <p className="text-[11px] text-muted-foreground">No documents yet.</p>
-          {!isGuest && !isDemo && (
+        <div className="border border-dashed border-border rounded-lg p-6 text-center bg-surface/50">
+          <p className="text-[12px] font-medium text-foreground">No documents yet</p>
+          {!isGuest && !isDemo ? (
             <DocumentUploader
               patientId={patientId}
               isDemo={isDemo}
               isGuest={isGuest}
               uploading={uploading}
+              variant="dropzone"
               onUploadStart={onUploadStart}
               onDocumentAdded={onDocumentAdded}
             />
+          ) : (
+            <p className="font-mono text-[9px] text-muted-foreground mt-1">Sign in to upload medical records.</p>
           )}
         </div>
       ) : (
