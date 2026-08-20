@@ -62,11 +62,6 @@ export async function ingestDocument(documentId: string): Promise<{ error?: stri
       status: 'extracted',
       document_date: extraction.documentDate ?? null,
       document_type: extraction.documentType ?? null,
-      extracted_entities: {
-        medications: extraction.medications,
-        lab_values: extraction.lab_values,
-        conditions: extraction.conditions,
-      },
       processed_at: new Date(),
     }).where(eq(documents.id, documentId))
 
@@ -161,11 +156,6 @@ export async function generateBriefing(
               status: 'extracted',
               document_date: extraction.documentDate ?? null,
               document_type: extraction.documentType ?? null,
-              extracted_entities: {
-                medications: extraction.medications,
-                lab_values: extraction.lab_values,
-                conditions: extraction.conditions,
-              },
               processed_at: new Date(),
             }).where(eq(documents.id, doc.id))
           }
@@ -175,32 +165,8 @@ export async function generateBriefing(
       }
     }
 
-    // 2. Query clinical memory from Zep
-    let context = await queryPatientMemory(caregiverId, patientId, 'medications lab values conditions diagnoses vital signs allergies')
-
-    // 3. Fallback: If Zep memory returns empty, build clinical context directly from extracted DB entities
-    if (!context || context.trim().length === 0) {
-      const refreshedDocs = await db
-        .select()
-        .from(documents)
-        .where(eq(documents.patient_id, patientId))
-      
-      const factBlocks = refreshedDocs
-        .filter(d => d.status === 'extracted' && d.extracted_entities)
-        .map(doc => {
-          const entities = doc.extracted_entities as { medications?: { name: string; dose?: string; frequency?: string }[]; lab_values?: { name: string; value: string; unit?: string; date?: string }[]; conditions?: { name: string; status?: string }[] } | null
-          if (!entities) return ''
-          const meds = (entities.medications || []).map(m => `Medication: ${m.name} ${m.dose || ''} ${m.frequency || ''}`.trim())
-          const labs = (entities.lab_values || []).map(l => `Lab: ${l.name} = ${l.value} ${l.unit || ''} (Date: ${l.date || doc.document_date || 'unknown'})`.trim())
-          const conds = (entities.conditions || []).map(c => `Condition: ${c.name} (${c.status || 'active'})`.trim())
-          return `Document: ${doc.filename} (Date: ${doc.document_date || 'unknown'}, Type: ${doc.document_type || 'Record'})\n${[...meds, ...labs, ...conds].join('\n')}`
-        })
-        .filter(Boolean)
-
-      if (factBlocks.length > 0) {
-        context = factBlocks.join('\n\n---\n\n')
-      }
-    }
+    // 2. Query clinical memory solely from Zep
+    const context = await queryPatientMemory(caregiverId, patientId, 'medications lab values conditions diagnoses vital signs allergies')
 
     if (!context || context.trim().length === 0) {
       await db.update(briefings).set({

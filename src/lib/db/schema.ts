@@ -76,7 +76,6 @@ export const documents = pgTable('documents', {
   status: text('status').notNull().default('uploaded'),
   uploaded_at: timestamp('uploaded_at').defaultNow().notNull(),
   processed_at: timestamp('processed_at'),
-  extracted_entities: jsonb('extracted_entities'),
   document_date: text('document_date'),
   document_type: text('document_type'),
   error_message: text('error_message'),

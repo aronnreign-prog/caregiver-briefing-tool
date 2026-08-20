@@ -20,7 +20,6 @@ export interface Document {
   status: string
   uploaded_at: string | Date
   processed_at?: string | Date | null
-  extracted_entities?: unknown
   document_date?: string | null
   document_type?: string | null
   error_message?: string | null
