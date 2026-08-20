@@ -143,16 +143,49 @@ export async function generateBriefing(
   await db.update(briefings).set({ status: 'processing' }).where(eq(briefings.id, briefingId))
 
   try {
+    // 1. Ensure all documents for this patient are extracted first
+    const patientDocs = await db
+      .select()
+      .from(documents)
+      .where(eq(documents.patient_id, patientId))
+
+    for (const doc of patientDocs) {
+      if (doc.status !== 'extracted' && doc.blob_url) {
+        try {
+          const response = await fetch(doc.blob_url)
+          if (response.ok) {
+            const buf = Buffer.from(await response.arrayBuffer())
+            const extraction = await extractClinicalFacts(buf, doc.filename)
+            await ingestDocumentFacts(caregiverId, patientId, doc.id, doc.filename, extraction).catch(() => {})
+            await db.update(documents).set({
+              status: 'extracted',
+              document_date: extraction.documentDate ?? null,
+              document_type: extraction.documentType ?? null,
+              extracted_entities: {
+                medications: extraction.medications,
+                lab_values: extraction.lab_values,
+                conditions: extraction.conditions,
+              },
+              processed_at: new Date(),
+            }).where(eq(documents.id, doc.id))
+          }
+        } catch (e) {
+          console.error('[Briefing] Auto-extraction error for doc:', doc.id, e)
+        }
+      }
+    }
+
+    // 2. Query clinical memory from Zep
     let context = await queryPatientMemory(caregiverId, patientId, 'medications lab values conditions diagnoses vital signs allergies')
 
-    // If Zep graph memory returns empty, build clinical context directly from extracted DB entities
+    // 3. Fallback: If Zep memory returns empty, build clinical context directly from extracted DB entities
     if (!context || context.trim().length === 0) {
-      const patientDocs = await db
+      const refreshedDocs = await db
         .select()
         .from(documents)
         .where(eq(documents.patient_id, patientId))
       
-      const factBlocks = patientDocs
+      const factBlocks = refreshedDocs
         .filter(d => d.status === 'extracted' && d.extracted_entities)
         .map(doc => {
           const entities = doc.extracted_entities as { medications?: { name: string; dose?: string; frequency?: string }[]; lab_values?: { name: string; value: string; unit?: string; date?: string }[]; conditions?: { name: string; status?: string }[] } | null
