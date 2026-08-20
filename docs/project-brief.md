@@ -1,7 +1,7 @@
 # Project Brief: Caregiver Medical Briefing Tool (CareNote)
 
 > **This document captures the architectural decisions and design rationale for the CareNote platform.**
-> **Architecture Status:** 100% TypeScript Next.js App Router (Gemini 2.0 Flash + Zep Cloud v2 + Supabase).
+> **Architecture Status:** 100% TypeScript Next.js App Router (Gemini 2.5 Flash + Zep Cloud v2 + Better Auth + Drizzle/Neon + Vercel Blob).
 
 ---
 
@@ -25,7 +25,7 @@ Caregivers of aging parents or chronically ill relatives carry the burden of rec
 
 ### The Core Architectural Pillars
 
-1. **Direct Multimodal Ingestion (Gemini 2.0 Flash + Zod)**:
+1. **Direct Multimodal Ingestion (Gemini 2.5 Flash + Zod)**:
    Extracts structured clinical facts (medications, lab values, diagnosed conditions, document dates/types) directly from raw PDF bytes without intermediate multi-step OCR pipelines.
 2. **Bi-Temporal Clinical Graph Memory (Zep Cloud v2)**:
    Maintains longitudinal facts tied to document dates (`valid_from`). Enables temporal queries ("what was true on date X") and accumulates context across multiple visits.
@@ -34,19 +34,19 @@ Caregivers of aging parents or chronically ill relatives carry the burden of rec
 
 ---
 
-## 3. Simplified TypeScript Architecture
+## 3. Unified TypeScript Architecture
 
 ```
-Browser (React 19) → Next.js 16.2 Server Actions → Supabase Postgres + Storage
+Browser (React 19) → Next.js 16.2 Server Actions → Neon Postgres (Drizzle) + Vercel Blob
                             ↓ ingestDocument()
-                    Gemini 2.0 Flash (multimodal PDF → Zod schema)
+                    Gemini 2.5 Flash (multimodal PDF → Zod schema)
                             ↓
                     Zep Cloud (graph.add — bi-temporal clinical memory)
                             ↓ generateBriefing()
-                    Gemini 2.0 Flash (generateObject → structured briefing)
+                    Gemini 2.5 Flash (generateObject → structured briefing)
 ```
 
 - **Runtime**: 100% TypeScript (Next.js App Router + Server Actions).
 - **No legacy multi-runtime bloat**: No Python, no Deno Edge Functions, no Docker containers, no custom job queue tables or cron triggers.
-- **Data Layer**: Supabase Postgres (Auth, Patient records, Document metadata, Briefings) + Supabase Storage (`medical_records` bucket).
-- **AI & Memory**: Google Gemini 2.0 Flash via `@ai-sdk/google` + Zep Cloud v2 graph API (`@getzep/zep-cloud`).
+- **Data & Auth Layer**: Better Auth (session cookies) + Neon Serverless Postgres via Drizzle ORM + Vercel Blob storage for raw patient PDFs.
+- **AI & Memory**: Google Gemini 2.5 Flash via `@ai-sdk/google` + Zep Cloud v2 graph API (`@getzep/zep-cloud`).

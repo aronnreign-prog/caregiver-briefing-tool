@@ -1,7 +1,7 @@
 # Pipeline Orchestration Spec
 
 > **End-to-End Pipeline in Pure TypeScript.**
-> Executed via Next.js Server Actions with Google Gemini 2.0 Flash and Zep Cloud v2.
+> Executed via Next.js Server Actions with Google Gemini 2.5 Flash, Zep Cloud v2, Neon (Drizzle), and Vercel Blob.
 
 ---
 
@@ -10,16 +10,16 @@
 **Trigger:** Caregiver selects and uploads one or more PDF records in `DocumentUploader.tsx`.
 
 ```
-User uploads PDF → Supabase Storage (medical_records bucket)
+User uploads PDF → Vercel Blob (client upload via /api/upload)
     ↓
-Document row created (status: 'uploaded')
+Document row created via createDocumentRecord() (status: 'uploaded')
     ↓
 DocumentUploader triggers ingestDocument(documentId) [Server Action]
     ↓
 1. Download PDF Buffer:
-   Supabase Storage -> Buffer from raw file arrayBuffer
+   fetch(doc.blob_url) -> Buffer from raw file arrayBuffer
     ↓
-2. Gemini 2.0 Flash Multimodal Extraction (src/lib/ai/extract.ts):
+2. Gemini 2.5 Flash Multimodal Extraction (src/lib/ai/extract.ts):
    extractClinicalFacts(pdfBuffer, filename) -> ClinicalExtractionSchema
    Extracts:
    - documentDate & documentType
@@ -32,7 +32,7 @@ DocumentUploader triggers ingestDocument(documentId) [Server Action]
    Calls Zep client.graph.add({ data, type: 'text', userId })
    userId format: "caregiver-{caregiverId}-patient-{patientId}"
     ↓
-4. Supabase Update:
+4. Neon Database Update:
    documents table updated with status: 'extracted', document_date, document_type,
    extracted_entities JSON, processed_at timestamp.
 ```
@@ -46,28 +46,31 @@ DocumentUploader triggers ingestDocument(documentId) [Server Action]
 ```
 User clicks "Generate Briefing"
     ↓
-Briefings row created (status: 'queued')
+Briefings row created via createBriefingRecord() (status: 'queued')
     ↓
 PatientDetailClient calls generateBriefing(patientId, briefingId, audience, caregiverId) [Server Action]
     ↓
-1. Query Patient Memory (src/lib/zep/ingest.ts):
+1. Pre-Extraction Check:
+   Automatically scans for any unextracted documents and extracts them first.
+    ↓
+2. Query Patient Memory (src/lib/zep/ingest.ts):
    queryPatientMemory(caregiverId, patientId, 'medications lab values conditions diagnoses vital signs allergies')
    Calls Zep client.graph.search({ query, userId, limit: 20 })
-   Aggregates graph facts and episodes into clinical context text.
+   Fallback: If Zep memory is empty, compiles clinical facts directly from Neon DB extracted_entities.
     ↓
-2. Structured Synthesis via Gemini 2.0 Flash:
+3. Structured Synthesis via Gemini 2.5 Flash:
    generateObject({
-     model: google('gemini-2.0-flash'),
+     model: google('gemini-2.5-flash'),
      schema: BriefingOutputSchema,
      system: Prompt adapted to audience target,
-     messages: Patient header + Zep clinical memory context
+     messages: Patient header + clinical context facts
    })
    Returns structured object:
    - briefing_text (Markdown clinical summary)
    - claims (array of claim_text, claim_type, flag, evidence)
    - flagged_concerns (array of concern, severity, related_claims)
     ↓
-3. Supabase Update:
+4. Neon Database Update:
    briefings table updated with status: 'complete', briefing_text, claims,
    flagged_concerns, completed_at timestamp.
 ```
@@ -77,6 +80,6 @@ PatientDetailClient calls generateBriefing(patientId, briefingId, audience, care
 ## 3. Error Handling & Recovery
 
 - **Document Ingestion Failure**:
-  If Gemini extraction or Storage download fails, document status is set to `'failed'` and `error_message` is populated. Zep ingestion failures are logged non-fatally to preserve extracted facts in Supabase.
+  If Gemini extraction or Blob download fails, document status is set to `'failed'` and `error_message` is populated. Zep ingestion failures are logged non-fatally to preserve extracted facts in Neon.
 - **Briefing Generation Failure**:
-  If memory query returns empty or synthesis fails, briefing status is set to `'failed'` with `error_message` for inline display in the UI with a Retry button.
+  If all clinical facts are missing or synthesis fails, briefing status is set to `'failed'` with `error_message` for inline display in the UI with a Retry action.
