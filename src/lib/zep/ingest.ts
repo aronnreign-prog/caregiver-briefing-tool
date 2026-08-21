@@ -37,42 +37,66 @@ function buildFactSummary(
   documentId: string,
   filename: string,
 ): string {
-  const lines: string[] = [
-    'Document: ' + filename + ' (id: ' + documentId + ')',
-    'Type: ' + (extraction.documentType ?? 'Unknown'),
-    'Date: ' + (extraction.documentDate ?? 'Unknown'),
-  ]
+  const docDate = extraction.documentDate ?? 'date unknown'
+  const lines: string[] = []
 
+  // ── Document context header ───────────────────────────────────────────────
+  lines.push(`CLINICAL DOCUMENT: ${filename}`)
+  lines.push(`Document type: ${extraction.documentType ?? 'Unspecified'}`)
+  lines.push(`Document date: ${docDate}`)
+  if (extraction.provider) lines.push(`Provider: ${extraction.provider}`)
+  if (extraction.specialty) lines.push(`Specialty: ${extraction.specialty}`)
+  if (extraction.encounterContext) lines.push(`Encounter context: ${extraction.encounterContext}`)
+
+  // ── Lab values ────────────────────────────────────────────────────────────
+  if (extraction.lab_values.length > 0) {
+    lines.push('\nLAB RESULTS:')
+    for (const lab of extraction.lab_values) {
+      const onDate = lab.date ? lab.date : docDate
+      const val = lab.unit ? `${lab.value} ${lab.unit}` : lab.value
+      const range = lab.referenceRange ? ` (ref: ${lab.referenceRange})` : ''
+      const flag = lab.flag ? ` [${lab.flag}]` : ''
+      lines.push(`  On ${onDate}, ${lab.name} was ${val}${range}${flag}.`)
+    }
+  }
+
+  // ── Medications ───────────────────────────────────────────────────────────
   if (extraction.medications.length > 0) {
-    lines.push('\nMedications:')
+    lines.push('\nMEDICATIONS:')
     for (const med of extraction.medications) {
-      const parts = [med.name]
+      const onDate = med.prescribedDate ? med.prescribedDate : docDate
+      const parts: string[] = [med.name]
       if (med.dose) parts.push(med.dose)
       if (med.frequency) parts.push(med.frequency)
-      if (med.prescribedDate) parts.push('(prescribed ' + med.prescribedDate + ')')
-      lines.push('  - ' + parts.join(' '))
+      if (med.route) parts.push(`(${med.route})`)
+      lines.push(`  On ${onDate}, ${parts.join(' ')} documented as ${med.status}.`)
     }
   }
 
-  if (extraction.lab_values.length > 0) {
-    lines.push('\nLab Values:')
-    for (const lab of extraction.lab_values) {
-      const val = lab.unit ? lab.value + ' ' + lab.unit : lab.value
-      const date = lab.date ? ' on ' + lab.date : ''
-      lines.push('  - ' + lab.name + ': ' + val + date)
-    }
-  }
-
+  // ── Conditions ────────────────────────────────────────────────────────────
   if (extraction.conditions.length > 0) {
-    lines.push('\nConditions:')
+    lines.push('\nCONDITIONS / DIAGNOSES:')
     for (const cond of extraction.conditions) {
-      const status = cond.status ? ' (' + cond.status + ')' : ''
-      lines.push('  - ' + cond.name + status)
+      const onDate = cond.onsetDate ? cond.onsetDate : docDate
+      const status = cond.status ? ` (${cond.status})` : ''
+      lines.push(`  As of ${onDate}, ${cond.name}${status}.`)
     }
   }
+
+  // ── Other clinical observations ───────────────────────────────────────────
+  if (extraction.otherObservations.length > 0) {
+    lines.push('\nCLINICAL NOTES:')
+    for (const obs of extraction.otherObservations) {
+      lines.push(`  ${obs}`)
+    }
+  }
+
+  // ── Source provenance ─────────────────────────────────────────────────────
+  lines.push(`\nSOURCE: ${filename} (document_id: ${documentId})`)
 
   return lines.join('\n')
 }
+
 
 export interface IngestResult {
   success: boolean
