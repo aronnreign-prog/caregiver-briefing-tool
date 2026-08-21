@@ -138,42 +138,61 @@ export async function generateBriefing(
   await db.update(briefings).set({ status: 'processing' }).where(eq(briefings.id, briefingId))
 
   try {
-    // 1. Ensure all documents for this patient are extracted first
-    const patientDocs = await db
-      .select()
-      .from(documents)
-      .where(eq(documents.patient_id, patientId))
+    // 1. Query Zep — the single source of truth for clinical memory
+    let context = await queryPatientMemory(caregiverId, patientId, 'medications lab values conditions diagnoses vital signs allergies observations')
 
-    for (const doc of patientDocs) {
-      if (doc.status !== 'extracted' && doc.blob_url) {
+    // 2. If Zep is empty (deleted, never ingested, or any other reason),
+    //    rebuild from Vercel Blob PDFs — regardless of Neon document status.
+    //    Neon only holds metadata; Zep is the memory.
+    if (!context || context.trim().length === 0) {
+      console.log('[Briefing] Zep memory empty — rebuilding from Blob PDFs...')
+
+      const patientDocs = await db
+        .select()
+        .from(documents)
+        .where(eq(documents.patient_id, patientId))
+
+      const docsWithBlob = patientDocs.filter((d) => d.blob_url)
+
+      if (docsWithBlob.length === 0) {
+        await db.update(briefings).set({
+          status: 'failed',
+          error_message: 'No documents uploaded for this patient yet.',
+        }).where(eq(briefings.id, briefingId))
+        return { error: 'No documents found.' }
+      }
+
+      for (const doc of docsWithBlob) {
         try {
-          const response = await fetch(doc.blob_url)
-          if (response.ok) {
-            const buf = Buffer.from(await response.arrayBuffer())
-            const extraction = await extractClinicalFacts(buf, doc.filename)
-            await ingestDocumentFacts(caregiverId, patientId, doc.id, doc.filename, extraction).catch(() => {})
-            await db.update(documents).set({
-              status: 'extracted',
-              document_date: extraction.documentDate ?? null,
-              document_type: extraction.documentType ?? null,
-              processed_at: new Date(),
-            }).where(eq(documents.id, doc.id))
-          }
+          console.log('[Briefing] Rebuilding Zep from:', doc.filename)
+          const response = await fetch(doc.blob_url!)
+          if (!response.ok) throw new Error(`Blob fetch failed: ${response.status}`)
+          const buf = Buffer.from(await response.arrayBuffer())
+          const extraction = await extractClinicalFacts(buf, doc.filename)
+          await ingestDocumentFacts(caregiverId, patientId, doc.id, doc.filename, extraction)
+          await db.update(documents).set({
+            status: 'extracted',
+            document_date: extraction.documentDate ?? null,
+            document_type: extraction.documentType ?? null,
+            processed_at: new Date(),
+            error_message: null,
+          }).where(eq(documents.id, doc.id))
         } catch (e) {
-          console.error('[Briefing] Auto-extraction error for doc:', doc.id, e)
+          console.error('[Briefing] Rebuild error for doc:', doc.id, e)
         }
       }
+
+      // Re-query Zep after rebuild
+      context = await queryPatientMemory(caregiverId, patientId, 'medications lab values conditions diagnoses vital signs allergies observations')
     }
 
-    // 2. Query clinical memory solely from Zep
-    const context = await queryPatientMemory(caregiverId, patientId, 'medications lab values conditions diagnoses vital signs allergies')
-
+    // 3. If still empty after rebuild attempt, fail with a clear message
     if (!context || context.trim().length === 0) {
       await db.update(briefings).set({
         status: 'failed',
-        error_message: 'No clinical memory found. Upload and ingest at least one document first.',
+        error_message: 'Could not retrieve clinical memory even after rebuilding from documents. Check document contents.',
       }).where(eq(briefings.id, briefingId))
-      return { error: 'No clinical context found in memory.' }
+      return { error: 'Clinical memory unavailable.' }
     }
 
     const [patient] = await db.select().from(patients).where(eq(patients.id, patientId)).limit(1)
