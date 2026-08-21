@@ -144,6 +144,11 @@ export async function queryPatientMemory(
     // Ensure user exists before searching
     await ensureZepUser(userId)
 
+    console.log('\n=== [ZEP QUERY] ===')
+    console.log('userId :', userId)
+    console.log('query  :', query)
+    console.log('limit  : 20')
+
     const result = await client.graph.search({
       query,
       userId,
@@ -151,17 +156,36 @@ export async function queryPatientMemory(
     })
 
     // result.edges contain factual relationships
-    const edges = (result.edges ?? [])
-      .map((e) => (e.fact ?? ''))
-      .filter(Boolean)
+    const rawEdges = result.edges ?? []
+    const edges = rawEdges.map((e) => (e.fact ?? '')).filter(Boolean)
 
     // Also include episodes (raw text) if present
-    const episodes = (result.episodes ?? [])
-      .map((ep) => (ep.content ?? ''))
-      .filter(Boolean)
+    const rawEpisodes = result.episodes ?? []
+    const episodes = rawEpisodes.map((ep) => (ep.content ?? '')).filter(Boolean)
+
+    console.log('\n--- [ZEP RESULTS] ---')
+    console.log(`Edges returned   : ${rawEdges.length} (${edges.length} with fact text)`)
+    console.log(`Episodes returned: ${rawEpisodes.length} (${episodes.length} with content)`)
+
+    if (edges.length > 0) {
+      console.log('\n[EDGES]')
+      edges.forEach((e, i) => console.log(`  [${i + 1}] ${e}`))
+    }
+
+    if (episodes.length > 0) {
+      console.log('\n[EPISODES]')
+      episodes.forEach((ep, i) => {
+        const preview = ep.length > 300 ? ep.slice(0, 300) + '…' : ep
+        console.log(`  [${i + 1}] ${preview}`)
+      })
+    }
 
     const allFacts = [...edges, ...episodes]
-    return allFacts.join('\n\n---\n\n')
+    const context = allFacts.join('\n\n---\n\n')
+    console.log(`\nTotal context length: ${context.length} chars`)
+    console.log('=== [END ZEP QUERY] ===\n')
+
+    return context
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     console.error('[Zep] Memory query failed:', message)

@@ -201,6 +201,15 @@ export async function generateBriefing(
       : `Patient ID: ${patientId}`
 
     const model = google('gemini-2.5-flash')
+
+    // ── [TEMP DIAGNOSTICS] Context sent to Gemini ──────────────────────────
+    console.log('=== [ZEP RETRIEVAL CONTEXT TO GEMINI] ===')
+    console.log(patientHeader)
+    console.log('--- context ---')
+    console.log(context)
+    console.log('=== [END CONTEXT] ===')
+    // ───────────────────────────────────────────────────────────────────────
+
     const { object } = await generateObject({
       model,
       system: `You are a clinical AI assistant generating a structured medical briefing.\n${audienceInstruction(audience)}\n\nUse only the clinical facts provided. Do not hallucinate.\nFor each claim, mark it SUPPORTED if backed by source context, or UNVERIFIED if uncertain.\nFlag drug-drug interactions, contraindications, or concerning trends as flagged_concerns.`,
