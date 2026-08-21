@@ -144,46 +144,57 @@ export async function queryPatientMemory(
     // Ensure user exists before searching
     await ensureZepUser(userId)
 
-    console.log('\n=== [ZEP QUERY] ===')
-    console.log('userId :', userId)
-    console.log('query  :', query)
-    console.log('limit  : 20')
-
-    const result = await client.graph.search({
+    // 1. Retrieve graph edges via search (limit 30)
+    const searchResult = await client.graph.search({
       query,
       userId,
-      limit: 20,
+      limit: 30,
     })
 
-    // result.edges contain factual relationships
-    const rawEdges = result.edges ?? []
+    const rawEdges = searchResult.edges ?? []
     const edges = rawEdges.map((e) => (e.fact ?? '')).filter(Boolean)
 
-    // Also include episodes (raw text) if present
-    const rawEpisodes = result.episodes ?? []
-    const episodes = rawEpisodes.map((ep) => (ep.content ?? '')).filter(Boolean)
-
-    console.log('\n--- [ZEP RESULTS] ---')
-    console.log(`Edges returned   : ${rawEdges.length} (${edges.length} with fact text)`)
-    console.log(`Episodes returned: ${rawEpisodes.length} (${episodes.length} with content)`)
-
-    if (edges.length > 0) {
-      console.log('\n[EDGES]')
-      edges.forEach((e, i) => console.log(`  [${i + 1}] ${e}`))
+    // 2. Retrieve chronological episodes/documents for this user
+    let rawEpisodes: { content?: string; createdAt?: string }[] = []
+    try {
+      const episodeResponse = await client.graph.episode.getByUserId(userId, { lastn: 30 })
+      rawEpisodes = episodeResponse.episodes ?? []
+    } catch (epErr) {
+      console.warn('[Zep] Could not fetch episodes via getByUserId:', epErr)
     }
 
-    if (episodes.length > 0) {
-      console.log('\n[EPISODES]')
-      episodes.forEach((ep, i) => {
-        const preview = ep.length > 300 ? ep.slice(0, 300) + '…' : ep
-        console.log(`  [${i + 1}] ${preview}`)
-      })
+    // Preserve chronological order (ascending by creation date)
+    const sortedEpisodes = [...rawEpisodes].sort((a, b) => {
+      const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0
+      const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0
+      return timeA - timeB
+    })
+
+    const episodesContent = sortedEpisodes
+      .map((ep) => ep.content?.trim())
+      .filter((c): c is string => Boolean(c && c.length > 0))
+
+    // If both episodes and edges are completely absent, return empty string for self-heal detection
+    if (episodesContent.length === 0 && edges.length === 0) {
+      console.log('[Zep Retrieval] 0 episodes and 0 edges found for user:', userId)
+      return ''
     }
 
-    const allFacts = [...edges, ...episodes]
-    const context = allFacts.join('\n\n---\n\n')
-    console.log(`\nTotal context length: ${context.length} chars`)
-    console.log('=== [END ZEP QUERY] ===\n')
+    // 3. Build two clearly separated sections
+    const episodeSection = episodesContent.length > 0
+      ? `=== CHRONOLOGICAL CLINICAL EPISODES ===\n\n${episodesContent.join('\n\n---\n\n')}`
+      : '=== CHRONOLOGICAL CLINICAL EPISODES ===\n\n(No document episodes found)'
+
+    const graphSection = edges.length > 0
+      ? `=== EXTRACTED GRAPH FACTS & RELATIONSHIPS ===\n\n${edges.map((e, idx) => `${idx + 1}. ${e}`).join('\n')}`
+      : '=== EXTRACTED GRAPH FACTS & RELATIONSHIPS ===\n\n(No graph facts found)'
+
+    const context = `${episodeSection}\n\n${graphSection}`
+
+    // 4. Concise logging
+    console.log('[Zep Retrieval] Episodes retrieved:', episodesContent.length)
+    console.log('[Zep Retrieval] Graph edges retrieved:', edges.length)
+    console.log('[Zep Retrieval] Final context character length:', context.length)
 
     return context
   } catch (err) {
