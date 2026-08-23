@@ -26,7 +26,7 @@
 2. **Fast path first** — happy path is in Server Actions and typed API routes. Errors are explicit `{ error: string }` returns, never unhandled throws.
 3. **Modules should be deep** — `extract.ts` is 1 export with rich extraction logic. `ingest.ts` manages Zep graph memory.
 4. **Precompute once, query many** — Facts are extracted at upload time into Neon and Zep. `generateBriefing()` synthesizes directly from verified data.
-5. **Database-backed fallback** — If external graph queries are empty, briefings synthesize seamlessly from PostgreSQL `documents.extracted_entities`.
+5. **Automated self-healing memory** — Zep Cloud is the single source of truth for longitudinal clinical memory. If graph memory is ever empty or wiped, the pipeline automatically re-extracts from Vercel Blob PDFs and re-ingests.
 
 ---
 
@@ -40,12 +40,11 @@ Next.js 16.2 Server Actions / Route Handlers (TypeScript only)
   │     ↓ download PDF (@vercel/blob)
   │     ↓ extractClinicalFacts() → Gemini 2.5 Flash + Zod
   │     ↓ ingestDocumentFacts()  → Zep Cloud graph.add({ data, userId })
-  │     ↓ db.update(documents, { status: "extracted", extracted_entities })
+  │     ↓ db.update(documents, { status: "extracted", document_date, document_type })
   │
   └── generateBriefing()         # direct call from PatientDetailClient
-        ↓ pre-extract any pending documents
-        ↓ queryPatientMemory()   → Zep Cloud graph.search({ query, userId })
-        ↓ fallback to Neon DB extracted_entities if graph memory empty
+        ↓ queryPatientMemory()   → Zep Cloud graph.search + episodes.getByUserId
+        ↓ self-heal fallback: re-extract from Blob PDFs if graph memory empty
         ↓ generateObject()       → Gemini 2.5 Flash + BriefingOutputSchema
         ↓ db.update(briefings, { status: "complete", briefing_text, claims })
 ```

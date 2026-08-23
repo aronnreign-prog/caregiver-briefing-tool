@@ -34,7 +34,7 @@ DocumentUploader triggers ingestDocument(documentId) [Server Action]
     ↓
 4. Neon Database Update:
    documents table updated with status: 'extracted', document_date, document_type,
-   extracted_entities JSON, processed_at timestamp.
+   processed_at timestamp.
 ```
 
 ---
@@ -48,15 +48,12 @@ User clicks "Generate Briefing"
     ↓
 Briefings row created via createBriefingRecord() (status: 'queued')
     ↓
-PatientDetailClient calls generateBriefing(patientId, briefingId, audience, caregiverId) [Server Action]
+PatientDetailClient calls generateBriefing(patientId, briefingId, audience) [Server Action]
     ↓
-1. Pre-Extraction Check:
-   Automatically scans for any unextracted documents and extracts them first.
-    ↓
-2. Query Patient Memory (src/lib/zep/ingest.ts):
-   queryPatientMemory(caregiverId, patientId, 'medications lab values conditions diagnoses vital signs allergies')
-   Calls Zep client.graph.search({ query, userId, limit: 20 })
-   Fallback: If Zep memory is empty, compiles clinical facts directly from Neon DB extracted_entities.
+1. Query Patient Memory (src/lib/zep/ingest.ts):
+   queryPatientMemory(caregiverId, patientId, 'medications lab values conditions diagnoses vital signs allergies observations')
+   Calls Zep client.graph.search({ query, userId, limit: 30 }) + client.graph.episode.getByUserId(userId)
+   Fallback: If Zep memory is empty, automatically re-extracts from Vercel Blob PDFs and rebuilds Zep graph memory.
     ↓
 3. Structured Synthesis via Gemini 2.5 Flash:
    generateObject({

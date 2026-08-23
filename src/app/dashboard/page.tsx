@@ -233,7 +233,7 @@ export default async function DashboardPage() {
               {[
                 { n: '01', title: 'Upload', body: 'Lab reports, discharge summaries, prescriptions — any PDF from any provider.' },
                 { n: '02', title: 'Extract', body: 'AI reads every page. Every fact is dated and tagged to its exact source quote.' },
-                { n: '03', title: 'Analyse', body: 'Trends detected across months. Contraindications checked via DDInter.' },
+                { n: '03', title: 'Analyse', body: 'Trends detected across months. Contraindications & drug interactions flagged.' },
                 { n: '04', title: 'Briefing', body: 'One document. Every claim cited to source, page number, and date.' },
               ].map(s => (
                 <div key={s.n} className="bg-surface px-5 py-4">

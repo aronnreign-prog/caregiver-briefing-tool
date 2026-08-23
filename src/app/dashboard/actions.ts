@@ -39,10 +39,16 @@ export async function deleteDocument(patientId: string, documentId: string): Pro
   const caregiver = await getCaregiver()
   if (!caregiver) return { error: 'Unauthorized' }
 
-  const [doc] = await db.select().from(documents).where(and(eq(documents.id, documentId), eq(documents.patient_id, patientId))).limit(1)
-  if (!doc) return { error: 'Document not found' }
+  const [doc] = await db
+    .select()
+    .from(documents)
+    .where(and(eq(documents.id, documentId), eq(documents.patient_id, patientId), eq(documents.caregiver_id, caregiver.id)))
+    .limit(1)
+  if (!doc) return { error: 'Document not found or unauthorized' }
 
-  await db.delete(documents).where(eq(documents.id, documentId))
+  await db
+    .delete(documents)
+    .where(and(eq(documents.id, documentId), eq(documents.caregiver_id, caregiver.id)))
 
   if (doc.blob_url) {
     await del(doc.blob_url).catch(() => {})

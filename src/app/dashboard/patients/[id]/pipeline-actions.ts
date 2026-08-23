@@ -2,7 +2,7 @@
 
 import { db } from '@/lib/db'
 import { documents, briefings, patients } from '@/lib/db/schema'
-import { eq } from 'drizzle-orm'
+import { eq, and } from 'drizzle-orm'
 import { extractClinicalFacts } from '@/lib/ai/extract'
 import { ingestDocumentFacts, queryPatientMemory } from '@/lib/zep/ingest'
 import { google } from '@ai-sdk/google'
@@ -14,6 +14,13 @@ import { getCaregiver } from '@/lib/auth-session'
 export async function createDocumentRecord(patientId: string, filename: string, blobUrl: string, fileSize: number, mimeType: string): Promise<{ id?: string; error?: string }> {
   const caregiver = await getCaregiver()
   if (!caregiver) return { error: 'Unauthorized' }
+
+  const [patient] = await db
+    .select()
+    .from(patients)
+    .where(and(eq(patients.id, patientId), eq(patients.caregiver_id, caregiver.id)))
+    .limit(1)
+  if (!patient) return { error: 'Patient not found or unauthorized' }
   
   try {
     const [inserted] = await db.insert(documents).values({
@@ -35,11 +42,18 @@ export async function ingestDocument(documentId: string): Promise<{ error?: stri
   const caregiver = await getCaregiver()
   if (!caregiver) return { error: 'Unauthorized' }
 
-  const [doc] = await db.select().from(documents).where(eq(documents.id, documentId)).limit(1)
-  if (!doc) return { error: 'Document not found' }
+  const [doc] = await db
+    .select()
+    .from(documents)
+    .where(and(eq(documents.id, documentId), eq(documents.caregiver_id, caregiver.id)))
+    .limit(1)
+  if (!doc) return { error: 'Document not found or unauthorized' }
   if (!doc.blob_url) return { error: 'Document has no blob URL' }
 
-  await db.update(documents).set({ status: 'extracting' }).where(eq(documents.id, documentId))
+  await db
+    .update(documents)
+    .set({ status: 'extracting' })
+    .where(and(eq(documents.id, documentId), eq(documents.caregiver_id, caregiver.id)))
 
   try {
     const response = await fetch(doc.blob_url)
@@ -63,14 +77,14 @@ export async function ingestDocument(documentId: string): Promise<{ error?: stri
       document_date: extraction.documentDate ?? null,
       document_type: extraction.documentType ?? null,
       processed_at: new Date(),
-    }).where(eq(documents.id, documentId))
+    }).where(and(eq(documents.id, documentId), eq(documents.caregiver_id, caregiver.id)))
 
     revalidatePath('/dashboard/patients/' + doc.patient_id)
     return {}
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     console.error('[Pipeline] Extraction failed:', message)
-    await db.update(documents).set({ status: 'failed', error_message: message }).where(eq(documents.id, documentId))
+    await db.update(documents).set({ status: 'failed', error_message: message }).where(and(eq(documents.id, documentId), eq(documents.caregiver_id, caregiver.id)))
     return { error: message }
   }
 }
@@ -115,6 +129,13 @@ export async function createBriefingRecord(
   const caregiver = await getCaregiver()
   if (!caregiver) return { error: 'Unauthorized' }
 
+  const [patient] = await db
+    .select()
+    .from(patients)
+    .where(and(eq(patients.id, patientId), eq(patients.caregiver_id, caregiver.id)))
+    .limit(1)
+  if (!patient) return { error: 'Patient not found or unauthorized' }
+
   try {
     const [inserted] = await db.insert(briefings).values({
       patient_id: patientId,
@@ -133,13 +154,38 @@ export async function generateBriefing(
   patientId: string,
   briefingId: string,
   audience: BriefingAudience,
-  caregiverId: string,
 ): Promise<{ error?: string }> {
-  await db.update(briefings).set({ status: 'processing' }).where(eq(briefings.id, briefingId))
+  const caregiver = await getCaregiver()
+  if (!caregiver) return { error: 'Unauthorized' }
+
+  const [patient] = await db
+    .select()
+    .from(patients)
+    .where(and(eq(patients.id, patientId), eq(patients.caregiver_id, caregiver.id)))
+    .limit(1)
+  if (!patient) {
+    await db
+      .update(briefings)
+      .set({ status: 'failed', error_message: 'Unauthorized or patient not found' })
+      .where(and(eq(briefings.id, briefingId), eq(briefings.caregiver_id, caregiver.id)))
+    return { error: 'Unauthorized or patient not found' }
+  }
+
+  const [briefing] = await db
+    .select()
+    .from(briefings)
+    .where(and(eq(briefings.id, briefingId), eq(briefings.caregiver_id, caregiver.id)))
+    .limit(1)
+  if (!briefing) return { error: 'Briefing not found or unauthorized' }
+
+  await db
+    .update(briefings)
+    .set({ status: 'processing' })
+    .where(and(eq(briefings.id, briefingId), eq(briefings.caregiver_id, caregiver.id)))
 
   try {
     // 1. Query Zep — the single source of truth for clinical memory
-    let context = await queryPatientMemory(caregiverId, patientId, 'medications lab values conditions diagnoses vital signs allergies observations')
+    let context = await queryPatientMemory(caregiver.id, patientId, 'medications lab values conditions diagnoses vital signs allergies observations')
 
     // 2. If Zep is empty (deleted, never ingested, or any other reason),
     //    rebuild from Vercel Blob PDFs — regardless of Neon document status.
@@ -150,7 +196,7 @@ export async function generateBriefing(
       const patientDocs = await db
         .select()
         .from(documents)
-        .where(eq(documents.patient_id, patientId))
+        .where(and(eq(documents.patient_id, patientId), eq(documents.caregiver_id, caregiver.id)))
 
       const docsWithBlob = patientDocs.filter((d) => d.blob_url)
 
@@ -158,7 +204,7 @@ export async function generateBriefing(
         await db.update(briefings).set({
           status: 'failed',
           error_message: 'No documents uploaded for this patient yet.',
-        }).where(eq(briefings.id, briefingId))
+        }).where(and(eq(briefings.id, briefingId), eq(briefings.caregiver_id, caregiver.id)))
         return { error: 'No documents found.' }
       }
 
@@ -169,21 +215,21 @@ export async function generateBriefing(
           if (!response.ok) throw new Error(`Blob fetch failed: ${response.status}`)
           const buf = Buffer.from(await response.arrayBuffer())
           const extraction = await extractClinicalFacts(buf, doc.filename)
-          await ingestDocumentFacts(caregiverId, patientId, doc.id, doc.filename, extraction)
+          await ingestDocumentFacts(caregiver.id, patientId, doc.id, doc.filename, extraction)
           await db.update(documents).set({
             status: 'extracted',
             document_date: extraction.documentDate ?? null,
             document_type: extraction.documentType ?? null,
             processed_at: new Date(),
             error_message: null,
-          }).where(eq(documents.id, doc.id))
+          }).where(and(eq(documents.id, doc.id), eq(documents.caregiver_id, caregiver.id)))
         } catch (e) {
           console.error('[Briefing] Rebuild error for doc:', doc.id, e)
         }
       }
 
       // Re-query Zep after rebuild
-      context = await queryPatientMemory(caregiverId, patientId, 'medications lab values conditions diagnoses vital signs allergies observations')
+      context = await queryPatientMemory(caregiver.id, patientId, 'medications lab values conditions diagnoses vital signs allergies observations')
     }
 
     // 3. If still empty after rebuild attempt, fail with a clear message
@@ -191,14 +237,11 @@ export async function generateBriefing(
       await db.update(briefings).set({
         status: 'failed',
         error_message: 'Could not retrieve clinical memory even after rebuilding from documents. Check document contents.',
-      }).where(eq(briefings.id, briefingId))
+      }).where(and(eq(briefings.id, briefingId), eq(briefings.caregiver_id, caregiver.id)))
       return { error: 'Clinical memory unavailable.' }
     }
 
-    const [patient] = await db.select().from(patients).where(eq(patients.id, patientId)).limit(1)
-    const patientHeader = patient
-      ? `Patient: ${patient.name}, DOB: ${patient.date_of_birth}, Relationship: ${patient.relationship}`
-      : `Patient ID: ${patientId}`
+    const patientHeader = `Patient: ${patient.name}, DOB: ${patient.date_of_birth}, Relationship: ${patient.relationship}`
 
     const model = google('gemini-2.5-flash')
 
@@ -226,14 +269,14 @@ export async function generateBriefing(
       claims: object.claims,
       flagged_concerns: object.flagged_concerns,
       completed_at: new Date(),
-    }).where(eq(briefings.id, briefingId))
+    }).where(and(eq(briefings.id, briefingId), eq(briefings.caregiver_id, caregiver.id)))
 
     revalidatePath('/dashboard/patients/' + patientId)
     return {}
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     console.error('[Briefing] Generation failed:', message)
-    await db.update(briefings).set({ status: 'failed', error_message: message }).where(eq(briefings.id, briefingId))
+    await db.update(briefings).set({ status: 'failed', error_message: message }).where(and(eq(briefings.id, briefingId), eq(briefings.caregiver_id, caregiver.id)))
     return { error: message }
   }
 }

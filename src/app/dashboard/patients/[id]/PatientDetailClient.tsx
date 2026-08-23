@@ -39,7 +39,7 @@ function CitationChip({ claim, onDocClick }: { claim: Claim; onDocClick: (e: Rea
   const isDrug = claim.flag === 'MEDICAL_KNOWLEDGE'
   const docId = claim.evidence?.source_doc_id
   const page = claim.evidence?.source_page
-  const label = isDrug ? (claim.claim_text?.slice(0, 10) || 'DDInter') : `Doc · p.${page ?? '?'}`
+  const label = isDrug ? (claim.claim_text?.slice(0, 14) || 'Med Knowledge') : `Doc · p.${page ?? '?'}`
   const title = claim.evidence?.source_quote || claim.evidence?.entry_text || ''
   return (
     <button onClick={(e) => !isDrug && docId ? onDocClick(e, docId, page ?? undefined) : undefined}
@@ -122,7 +122,7 @@ export default function PatientDetailClient({ patient, initialDocuments, initial
       setBriefings(prev => [newBriefing as Briefing, ...prev])
       setActiveBriefingId(result.id)
 
-      generateBriefing(patient.id, result.id, audience, patient.caregiver_id)
+      generateBriefing(patient.id, result.id, audience)
         .then(res => {
           if (res?.error) console.error('[Briefing] Failed:', res.error)
           router.refresh()

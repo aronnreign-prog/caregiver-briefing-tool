@@ -6,8 +6,8 @@ import Link from 'next/link'
 import type { Patient, Document, Briefing } from '@/types/database'
 import { db } from '@/lib/db'
 import { documents as documentsTable, briefings as briefingsTable } from '@/lib/db/schema'
-import { eq } from 'drizzle-orm'
-import { getSession } from '@/lib/auth-session'
+import { eq, and } from 'drizzle-orm'
+import { getSession, getCaregiver } from '@/lib/auth-session'
 
 const DEMO_PATIENTS: Record<string, Patient> = {
   'demo-1': {
@@ -51,9 +51,14 @@ export default async function PatientPage({ params }: { params: Promise<{ id: st
       redirect('/dashboard')
     }
 
+    const caregiver = await getCaregiver()
+    if (!caregiver) {
+      redirect('/dashboard')
+    }
+
     const result = await getPatientSafely(patientId)
-    if (!result.success) {
-      throw new Error(result.errorMessage || 'Failed to load patient')
+    if (!result.success || !result.data) {
+      redirect('/dashboard')
     }
     patient = result.data as Patient
 
@@ -70,7 +75,9 @@ export default async function PatientPage({ params }: { params: Promise<{ id: st
       processed_at: documentsTable.processed_at,
       document_date: documentsTable.document_date,
       document_type: documentsTable.document_type,
-    }).from(documentsTable).where(eq(documentsTable.patient_id, patientId)).orderBy(documentsTable.uploaded_at)
+    }).from(documentsTable)
+      .where(and(eq(documentsTable.patient_id, patientId), eq(documentsTable.caregiver_id, caregiver.id)))
+      .orderBy(documentsTable.uploaded_at)
 
     const briefingResult = await db.select({
       id: briefingsTable.id,
@@ -83,7 +90,9 @@ export default async function PatientPage({ params }: { params: Promise<{ id: st
       briefing_text: briefingsTable.briefing_text,
       claims: briefingsTable.claims,
       flagged_concerns: briefingsTable.flagged_concerns,
-    }).from(briefingsTable).where(eq(briefingsTable.patient_id, patientId)).orderBy(briefingsTable.created_at)
+    }).from(briefingsTable)
+      .where(and(eq(briefingsTable.patient_id, patientId), eq(briefingsTable.caregiver_id, caregiver.id)))
+      .orderBy(briefingsTable.created_at)
 
     documents = (docResult || []) as unknown as Document[]
     briefings = (briefingResult || []) as unknown as Briefing[]

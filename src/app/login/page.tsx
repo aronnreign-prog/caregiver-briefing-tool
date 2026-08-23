@@ -72,7 +72,7 @@ export default function LoginPage() {
               },
               {
                 label: 'Contraindication alerts',
-                desc: 'Drug interactions checked in real-time against the DDInter database.',
+                desc: 'Drug interactions and contraindications flagged with clinical reasoning.',
                 color: 'bg-alert',
               },
             ].map(item => (
