@@ -52,6 +52,7 @@ export const ClinicalExtractionSchema = z.object({
           .enum(['active', 'discontinued', 'changed', 'historical'])
           .default('active')
           .describe('"active" = currently prescribed; "discontinued" = explicitly stopped; "changed" = dose or drug altered; "historical" = listed as prior medication.'),
+        pageNumber: z.number().optional().describe('1-indexed page number where this medication appears in the PDF.'),
       }),
     )
     .default([]),
@@ -72,6 +73,7 @@ export const ClinicalExtractionSchema = z.object({
           .enum(['NORMAL', 'HIGH', 'LOW', 'ABNORMAL'])
           .optional()
           .describe('Abnormality flag if physically printed next to the result (H, L, A, *). Only set if explicitly marked; do not infer from the value.'),
+        pageNumber: z.number().optional().describe('1-indexed page number where this lab result appears in the PDF.'),
       }),
     )
     .default([]),
@@ -89,6 +91,7 @@ export const ClinicalExtractionSchema = z.object({
           .string()
           .optional()
           .describe('ISO 8601 date of onset or first diagnosis if stated.'),
+        pageNumber: z.number().optional().describe('1-indexed page number where this diagnosis appears in the PDF.'),
       }),
     )
     .default([]),
@@ -109,11 +112,12 @@ const SYSTEM_PROMPT = `You are a precise medical document parser. Extract clinic
 Rules:
 1. Extract ONLY what is explicitly stated. Do not infer, correct, or supplement.
 2. Capture dates on every entity where visible. Use ISO 8601 (YYYY-MM-DD). If only month+year visible, use the first of the month. If no date, leave field empty.
-3. Medication status: "continue"/"started"/"prescribed" → active. "Stopped"/"discontinued"/"withheld" → discontinued. "Increased"/"reduced"/"changed to" → changed. Listed in prior history → historical.
-4. Lab flags: only set "flag" if the document physically prints a marker (H, L, A, *) next to the result. Do not infer from the numeric value.
-5. encounterContext: quote or closely paraphrase the stated reason for visit, chief complaint, or referral indication. Keep it factual and brief.
-6. otherObservations: capture vitals, allergies, surgical history, follow-up instructions, imaging findings not covered by structured fields. Include a date on each where visible.
-7. Never hallucinate drug names, lab values, or diagnoses.`
+3. Capture 1-indexed pageNumber on each entity where visible.
+4. Medication status: "continue"/"started"/"prescribed" → active. "Stopped"/"discontinued"/"withheld" → discontinued. "Increased"/"reduced"/"changed to" → changed. Listed in prior history → historical.
+5. Lab flags: only set "flag" if the document physically prints a marker (H, L, A, *) next to the result. Do not infer from the numeric value.
+6. encounterContext: quote or closely paraphrase the stated reason for visit, chief complaint, or referral indication. Keep it factual and brief.
+7. otherObservations: capture vitals, allergies, surgical history, follow-up instructions, imaging findings not covered by structured fields. Include a date on each where visible.
+8. Never hallucinate drug names, lab values, or diagnoses.`
 
 export async function extractClinicalFacts(
   pdfBuffer: Buffer,

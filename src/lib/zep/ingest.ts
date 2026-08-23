@@ -41,7 +41,7 @@ function buildFactSummary(
   const lines: string[] = []
 
   // ── Document context header ───────────────────────────────────────────────
-  lines.push(`CLINICAL DOCUMENT: ${filename}`)
+  lines.push(`CLINICAL DOCUMENT: ${filename} (document_id: ${documentId})`)
   lines.push(`Document type: ${extraction.documentType ?? 'Unspecified'}`)
   lines.push(`Document date: ${docDate}`)
   if (extraction.provider) lines.push(`Provider: ${extraction.provider}`)
@@ -56,7 +56,8 @@ function buildFactSummary(
       const val = lab.unit ? `${lab.value} ${lab.unit}` : lab.value
       const range = lab.referenceRange ? ` (ref: ${lab.referenceRange})` : ''
       const flag = lab.flag ? ` [${lab.flag}]` : ''
-      lines.push(`  On ${onDate}, ${lab.name} was ${val}${range}${flag}.`)
+      const page = lab.pageNumber ? ` [page: ${lab.pageNumber}]` : ''
+      lines.push(`  On ${onDate}, ${lab.name} was ${val}${range}${flag}.${page} [doc_id: ${documentId}]`)
     }
   }
 
@@ -69,7 +70,8 @@ function buildFactSummary(
       if (med.dose) parts.push(med.dose)
       if (med.frequency) parts.push(med.frequency)
       if (med.route) parts.push(`(${med.route})`)
-      lines.push(`  On ${onDate}, ${parts.join(' ')} documented as ${med.status}.`)
+      const page = med.pageNumber ? ` [page: ${med.pageNumber}]` : ''
+      lines.push(`  On ${onDate}, ${parts.join(' ')} documented as ${med.status}.${page} [doc_id: ${documentId}]`)
     }
   }
 
@@ -79,7 +81,8 @@ function buildFactSummary(
     for (const cond of extraction.conditions) {
       const onDate = cond.onsetDate ? cond.onsetDate : docDate
       const status = cond.status ? ` (${cond.status})` : ''
-      lines.push(`  As of ${onDate}, ${cond.name}${status}.`)
+      const page = cond.pageNumber ? ` [page: ${cond.pageNumber}]` : ''
+      lines.push(`  As of ${onDate}, ${cond.name}${status}.${page} [doc_id: ${documentId}]`)
     }
   }
 
@@ -87,7 +90,7 @@ function buildFactSummary(
   if (extraction.otherObservations.length > 0) {
     lines.push('\nCLINICAL NOTES:')
     for (const obs of extraction.otherObservations) {
-      lines.push(`  ${obs}`)
+      lines.push(`  ${obs} [doc_id: ${documentId}]`)
     }
   }
 

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import React, { useState, useEffect } from 'react'
 import type { Patient, Document, Briefing } from '@/types/database'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
@@ -20,12 +20,15 @@ const DEMO_DOCUMENTS: Document[] = [
 const DEMO_BRIEFING: Briefing = {
   id: 'b1', patient_id: 'demo-1', caregiver_id: 'demo', audience: 'specialist', status: 'complete',
   source_doc_ids: ['d1', 'd2', 'd3'], created_at: new Date().toISOString(), completed_at: new Date().toISOString(),
-  briefing_text: "## Patient Summary\n\nMargaret Thompson (DOB 1945-03-12) presents with a documented 18-month decline in renal function across 6 lab draws sourced from 3 different providers. GFR has fallen from 65 to 47 over this period.\n\nHer new cardiologist prescribed Lisinopril (10 mg daily) on 2024-03-14 - an ACE inhibitor that is contraindicated in the context of declining kidney function.\n\n## Current Medications\n\n- Lisinopril 10 mg daily - NEW, prescribed 2024-03-14\n- Atorvastatin 40 mg nightly - ongoing since 2022-06\n- Metoprolol succinate 25 mg daily - ongoing since 2021-11\n\n## Lab Trends\n\nGFR: `65` (Jun 2022) → `58` (Dec 2022) → `51` (Jun 2023) → `47` (Dec 2023) - consistent decline.\n\n## Recommendation\n\nFlag the Lisinopril prescription for review. Request nephrology consult.",
+  briefing_text: "## Patient Summary\n\nMargaret Thompson (DOB 1945-03-12) presents with a documented 18-month decline in renal function across 6 lab draws sourced from 3 different providers. GFR has fallen from 65 to 47 over this period [claim:c1].\n\nHer new cardiologist prescribed Lisinopril (10 mg daily) on 2024-03-14 [claim:c2] - an ACE inhibitor that is contraindicated in the context of declining kidney function [claim:c3].\n\n## Current Medications\n\n- Lisinopril 10 mg daily - NEW, prescribed 2024-03-14 [claim:c2]\n- Atorvastatin 40 mg nightly - ongoing since 2022-06 [claim:c4]\n- Metoprolol succinate 25 mg daily - ongoing since 2021-11 [claim:c5]\n\n## Lab Trends\n\nGFR: `65` (Jun 2022) → `58` (Dec 2022) → `51` (Jun 2023) → `47` (Dec 2023) - consistent decline [claim:c1].\n\n## Recommendation\n\nFlag the Lisinopril prescription for review. Request nephrology consult [claim:c3].",
   claims: [
     { claim_id: 'c1', claim_text: 'GFR has fallen from 65 to 47', claim_type: 'source_document', flag: 'SUPPORTED', evidence: { source_doc_id: 'd1', source_quote: 'eGFR 47 mL/min/1.73m2', source_page: 1 } },
     { claim_id: 'c2', claim_text: 'Lisinopril 10 mg daily', claim_type: 'source_document', flag: 'SUPPORTED', evidence: { source_doc_id: 'd2', source_quote: 'Lisinopril 10mg QD', source_page: 2 } },
+    { claim_id: 'c3', claim_text: 'ACE inhibitor contraindicated in declining kidney function', claim_type: 'medical_knowledge', flag: 'MEDICAL_KNOWLEDGE', evidence: { entry_text: 'ACE inhibitors reduce renal perfusion pressure and can exacerbate acute renal decline.' } },
+    { claim_id: 'c4', claim_text: 'Atorvastatin 40 mg nightly ongoing', claim_type: 'source_document', flag: 'SUPPORTED', evidence: { source_doc_id: 'd2', source_quote: 'Atorvastatin 40mg', source_page: 1 } },
+    { claim_id: 'c5', claim_text: 'Metoprolol succinate 25 mg daily ongoing', claim_type: 'source_document', flag: 'SUPPORTED', evidence: { source_doc_id: 'd2', source_quote: 'Metoprolol succinate 25mg', source_page: 1 } },
   ],
-  flagged_concerns: [{ concern: 'ACE inhibitor prescribed despite declining GFR trend.', severity: 'high', related_claims: ['c1'] }],
+  flagged_concerns: [{ concern: 'ACE inhibitor prescribed despite declining GFR trend.', severity: 'high', related_claims: ['c1', 'c2', 'c3'] }],
 }
 
 type Claim = {
@@ -36,16 +39,60 @@ type Claim = {
 type FlaggedConcern = { severity: 'high' | 'medium' | 'low'; description?: string; concern?: string }
 
 function CitationChip({ claim, onDocClick }: { claim: Claim; onDocClick: (e: React.MouseEvent, id: string, page?: number) => void }) {
-  const isDrug = claim.flag === 'MEDICAL_KNOWLEDGE'
+  const isDrug = claim.flag === 'MEDICAL_KNOWLEDGE' || claim.claim_type === 'medical_knowledge'
   const docId = claim.evidence?.source_doc_id
   const page = claim.evidence?.source_page
-  const label = isDrug ? (claim.claim_text?.slice(0, 14) || 'Med Knowledge') : `Doc · p.${page ?? '?'}`
-  const title = claim.evidence?.source_quote || claim.evidence?.entry_text || ''
+  const label = isDrug ? (claim.claim_text?.slice(0, 14) || 'Med Knowledge') : `Doc · p.${page ?? '1'}`
+  const title = claim.evidence?.source_quote || claim.evidence?.entry_text || claim.claim_text || ''
   return (
-    <button onClick={(e) => !isDrug && docId ? onDocClick(e, docId, page ?? undefined) : undefined}
-      className={`inline-flex items-center gap-1 font-mono text-[9px] border rounded px-1.5 py-0.5 ml-1.5 align-middle transition-colors ${isDrug ? 'border-warning/40 text-warning bg-warning-dim cursor-default' : 'border-accent/40 text-accent bg-accent-dim hover:border-accent hover:bg-accent/10 cursor-pointer'}`}
+    <button onClick={(e) => !isDrug && docId ? onDocClick(e, docId, page ?? 1) : undefined}
+      className={`inline-flex items-center gap-1 font-mono text-[9px] border rounded px-1.5 py-0.5 ml-1.5 align-middle transition-colors ${isDrug ? 'border-warning/40 text-warning bg-warning-dim cursor-default' : 'border-accent/40 text-accent bg-accent-dim hover:border-accent hover:bg-accent/20 cursor-pointer'}`}
       title={title}>{isDrug ? '⚠' : '↗'} {label}</button>
   )
+}
+
+function renderContentWithClaims(
+  node: React.ReactNode,
+  claimsMap: Record<string, Claim>,
+  onDocClick: (e: React.MouseEvent, id: string, page?: number) => void
+): React.ReactNode {
+  if (typeof node === 'string') {
+    const parts = node.split(/(\[claim:[a-zA-Z0-9_-]+\])/g)
+    if (parts.length === 1) return node
+    return parts.map((part, i) => {
+      const match = part.match(/^\[claim:([a-zA-Z0-9_-]+)\]$/)
+      if (match) {
+        const claimId = match[1]
+        const claim = claimsMap[claimId]
+        if (claim) {
+          return <CitationChip key={i} claim={claim} onDocClick={onDocClick} />
+        }
+        return null
+      }
+      return part
+    })
+  }
+
+  if (Array.isArray(node)) {
+    return node.map((child, i) => (
+      <React.Fragment key={i}>
+        {renderContentWithClaims(child, claimsMap, onDocClick)}
+      </React.Fragment>
+    ))
+  }
+
+  if (React.isValidElement(node)) {
+    const element = node as React.ReactElement<{ children?: React.ReactNode }>
+    if (element.props && element.props.children) {
+      return React.cloneElement(
+        element,
+        element.props,
+        renderContentWithClaims(element.props.children, claimsMap, onDocClick)
+      )
+    }
+  }
+
+  return node
 }
 
 interface Props { patient: Patient; initialDocuments: Document[]; initialBriefings: Briefing[] }
@@ -297,23 +344,29 @@ export default function PatientDetailClient({ patient, initialDocuments, initial
 
               {activeBriefing.briefing_text && (
                 <div className="space-y-0">
-                  <ReactMarkdown components={{
-                    h2: ({ children }) => <h2 className="font-mono text-[9px] tracking-widest text-muted-foreground uppercase mt-8 mb-3 pb-2 border-b border-border">{children}</h2>,
-                    p: ({ children }) => {
-                      const text = String(children ?? '')
-                      const matched = claimsArray.filter(c => c.claim_text && text.includes(c.claim_text))
-                      return <p className="text-[13px] text-foreground leading-relaxed mb-4">{children}{matched.map((c, i) => <CitationChip key={i} claim={c} onDocClick={handleDocClick} />)}</p>
-                    },
-                    li: ({ children }) => {
-                      const text = String(children ?? '')
-                      const matched = claimsArray.filter(c => c.claim_text && text.includes(c.claim_text))
-                      return <li className="flex items-baseline gap-2 text-[13px] text-foreground mb-2"><span className="w-1 h-1 rounded-full bg-muted-foreground mt-2 shrink-0" /><span>{children}{matched.map((c, i) => <CitationChip key={i} claim={c} onDocClick={handleDocClick} />)}</span></li>
-                    },
-                    ul: ({ children }) => <ul className="list-none pl-0 my-3 space-y-0">{children}</ul>,
-                    ol: ({ children }) => <ol className="list-decimal pl-5 my-3 space-y-1 text-[13px] text-foreground">{children}</ol>,
-                    strong: ({ children }) => <strong className="font-semibold text-foreground">{children}</strong>,
-                    code: ({ children }) => <code className="font-mono text-[11px] bg-surface-raised border border-border px-1.5 py-0.5 rounded text-accent">{children}</code>,
-                  }}>{activeBriefing.briefing_text}</ReactMarkdown>
+                  {(() => {
+                    const claimsMap = claimsArray.reduce<Record<string, Claim>>((acc, c) => {
+                      if (c.claim_id) acc[c.claim_id] = c
+                      return acc
+                    }, {})
+
+                    return (
+                      <ReactMarkdown components={{
+                        h2: ({ children }) => <h2 className="font-mono text-[9px] tracking-widest text-muted-foreground uppercase mt-8 mb-3 pb-2 border-b border-border">{renderContentWithClaims(children, claimsMap, handleDocClick)}</h2>,
+                        p: ({ children }) => <p className="text-[13px] text-foreground leading-relaxed mb-4">{renderContentWithClaims(children, claimsMap, handleDocClick)}</p>,
+                        li: ({ children }) => (
+                          <li className="flex items-baseline gap-2 text-[13px] text-foreground mb-2">
+                            <span className="w-1 h-1 rounded-full bg-muted-foreground mt-2 shrink-0" />
+                            <span>{renderContentWithClaims(children, claimsMap, handleDocClick)}</span>
+                          </li>
+                        ),
+                        ul: ({ children }) => <ul className="list-none pl-0 my-3 space-y-0">{children}</ul>,
+                        ol: ({ children }) => <ol className="list-decimal pl-5 my-3 space-y-1 text-[13px] text-foreground">{children}</ol>,
+                        strong: ({ children }) => <strong className="font-semibold text-foreground">{renderContentWithClaims(children, claimsMap, handleDocClick)}</strong>,
+                        code: ({ children }) => <code className="font-mono text-[11px] bg-surface-raised border border-border px-1.5 py-0.5 rounded text-accent">{children}</code>,
+                      }}>{activeBriefing.briefing_text}</ReactMarkdown>
+                    )
+                  })()}
                 </div>
               )}
 

@@ -90,15 +90,15 @@ export async function ingestDocument(documentId: string): Promise<{ error?: stri
 }
 
 const BriefingOutputSchema = z.object({
-  briefing_text: z.string(),
+  briefing_text: z.string().describe('The clinical briefing markdown text. Embed inline claim markers like [claim:c1], [claim:c2] immediately after each fact, statement, or concern being asserted.'),
   claims: z.array(z.object({
-    claim_id: z.string(),
-    claim_text: z.string(),
+    claim_id: z.string().describe('Matching identifier used in briefing_text, e.g. "c1", "c2".'),
+    claim_text: z.string().describe('The specific factual assertion or clinical statement.'),
     claim_type: z.enum(['source_document', 'medical_knowledge', 'reasoning']),
     flag: z.enum(['SUPPORTED', 'PARTIALLY SUPPORTED', 'UNSUPPORTED', 'MEDICAL_KNOWLEDGE', 'UNVERIFIED']).optional(),
     evidence: z.object({
-      source_doc_id: z.string().optional(),
-      source_page: z.number().optional(),
+      source_doc_id: z.string().optional().describe('UUID of the source document from [doc_id: <uuid>] in context.'),
+      source_page: z.number().optional().describe('1-indexed page number from [page: <n>] in context.'),
       source_quote: z.string().optional(),
       entry_text: z.string().optional(),
     }).optional(),
@@ -253,12 +253,24 @@ export async function generateBriefing(
     console.log('=== [END CONTEXT] ===')
     // ───────────────────────────────────────────────────────────────────────
 
+    const SYSTEM_PROMPT = `You are a clinical AI assistant generating a structured medical briefing.
+${audienceInstruction(audience)}
+
+Use only the clinical facts provided. Do not hallucinate.
+For each claim, mark it SUPPORTED if backed by source context, or UNVERIFIED if uncertain.
+Flag drug-drug interactions, contraindications, or concerning trends as flagged_concerns.
+
+PaperTrail Citation Requirement:
+- Embed inline claim markers like [claim:c1], [claim:c2] in the briefing_text immediately after the factual statement, lab value, medication, or concern being asserted.
+- Every [claim:cN] in the text must have a corresponding entry in the 'claims' array with matching claim_id ("cN").
+- In each claim's evidence, extract source_doc_id from the [doc_id: <uuid>] tag and source_page from the [page: <number>] tag in the context.`
+
     const { object } = await generateObject({
       model,
-      system: `You are a clinical AI assistant generating a structured medical briefing.\n${audienceInstruction(audience)}\n\nUse only the clinical facts provided. Do not hallucinate.\nFor each claim, mark it SUPPORTED if backed by source context, or UNVERIFIED if uncertain.\nFlag drug-drug interactions, contraindications, or concerning trends as flagged_concerns.`,
+      system: SYSTEM_PROMPT,
       messages: [{
         role: 'user',
-        content: `${patientHeader}\n\nExtracted clinical facts:\n\n${context}\n\nGenerate a comprehensive ${audience} briefing.`,
+        content: `${patientHeader}\n\nExtracted clinical facts:\n\n${context}\n\nGenerate a comprehensive ${audience} briefing with inline [claim:cN] citations.`,
       }],
       schema: BriefingOutputSchema,
     })
