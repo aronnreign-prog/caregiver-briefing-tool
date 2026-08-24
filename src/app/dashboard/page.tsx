@@ -3,7 +3,7 @@ import AddPatientForm from './AddPatientForm'
 import SignOutButton from './SignOutButton'
 import DeletePatientButton from './DeletePatientButton'
 import { db } from '@/lib/db'
-import { patients as patientsTable, caregivers } from '@/lib/db/schema'
+import { patients as patientsTable, documents as documentsTable, briefings as briefingsTable, caregivers } from '@/lib/db/schema'
 import { eq } from 'drizzle-orm'
 import { getSession, getCaregiver } from '@/lib/auth-session'
 
@@ -33,14 +33,45 @@ export default async function DashboardPage() {
     const cgData = await getCaregiver()
     caregiver = cgData
     if (caregiver?.id) {
-      const patientData = await db.select({
-        id: patientsTable.id,
-        name: patientsTable.name,
-        relationship: patientsTable.relationship,
-        date_of_birth: patientsTable.date_of_birth
-      }).from(patientsTable).where(eq(patientsTable.caregiver_id, caregiver.id)).orderBy(patientsTable.created_at)
-      
-      patients = patientData || []
+      const [patientRows, docRows, briefingRows] = await Promise.all([
+        db.select({
+          id: patientsTable.id,
+          name: patientsTable.name,
+          relationship: patientsTable.relationship,
+          date_of_birth: patientsTable.date_of_birth,
+        }).from(patientsTable).where(eq(patientsTable.caregiver_id, caregiver.id)).orderBy(patientsTable.created_at),
+
+        db.select({
+          id: documentsTable.id,
+          patient_id: documentsTable.patient_id,
+        }).from(documentsTable).where(eq(documentsTable.caregiver_id, caregiver.id)),
+
+        db.select({
+          id: briefingsTable.id,
+          patient_id: briefingsTable.patient_id,
+          status: briefingsTable.status,
+          flagged_concerns: briefingsTable.flagged_concerns,
+          created_at: briefingsTable.created_at,
+        }).from(briefingsTable).where(eq(briefingsTable.caregiver_id, caregiver.id)).orderBy(briefingsTable.created_at),
+      ])
+
+      patients = (patientRows || []).map((p) => {
+        const pDocs = (docRows || []).filter((d) => d.patient_id === p.id)
+        const pBriefings = (briefingRows || []).filter((b) => b.patient_id === p.id)
+        const latestBriefing = pBriefings[pBriefings.length - 1]
+
+        let flagCount = 0
+        if (latestBriefing?.flagged_concerns && Array.isArray(latestBriefing.flagged_concerns)) {
+          flagCount = latestBriefing.flagged_concerns.length
+        }
+
+        return {
+          ...p,
+          docCount: pDocs.length,
+          flagCount,
+          briefingStatus: latestBriefing?.status,
+        }
+      })
     }
   } else {
     patients = DEMO_PATIENTS
