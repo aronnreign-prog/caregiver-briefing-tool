@@ -15,6 +15,7 @@
     "@getzep/zep-cloud": "^3.28.0",
     "@neondatabase/serverless": "^1.1.0",
     "@vercel/blob": "^0.23.0",
+    "@vercel/speed-insights": "^2.0.0",
     "ai": "^7.0.68",
     "better-auth": "^0.8.0",
     "class-variance-authority": "^0.7.1",
