@@ -29,10 +29,29 @@ export async function deletePatient(patientId: string): Promise<{ error?: string
   const caregiver = await getCaregiver()
   if (!caregiver) return { error: 'Unauthorized' }
 
-  await db.delete(patients).where(and(eq(patients.id, patientId), eq(patients.caregiver_id, caregiver.id)))
-  await deletePatientMemory(patientId)
-  revalidatePath('/dashboard')
-  return {}
+  try {
+    // 1. Fetch document blob URLs before deleting from DB so we can delete them from Vercel Blob
+    const patientDocs = await db
+      .select({ blob_url: documents.blob_url })
+      .from(documents)
+      .where(and(eq(documents.patient_id, patientId), eq(documents.caregiver_id, caregiver.id)))
+
+    const blobUrls = patientDocs.map((d) => d.blob_url).filter(Boolean) as string[]
+    if (blobUrls.length > 0) {
+      await del(blobUrls).catch((err) => console.warn('[Blob] Bulk delete error on patient removal:', err))
+    }
+
+    // 2. Delete patient from Neon Postgres (cascades to documents and briefings)
+    await db.delete(patients).where(and(eq(patients.id, patientId), eq(patients.caregiver_id, caregiver.id)))
+
+    // 3. Delete Zep Cloud memory graph for this patient
+    await deletePatientMemory(caregiver.id, patientId)
+
+    revalidatePath('/dashboard')
+    return {}
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : 'Failed to delete patient' }
+  }
 }
 
 export async function deleteDocument(patientId: string, documentId: string): Promise<{ error?: string }> {

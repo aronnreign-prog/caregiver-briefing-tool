@@ -338,10 +338,13 @@ export async function queryPatientMemory(
   }
 }
 
-export async function deletePatientMemory(patientId: string): Promise<void> {
-  // Zep Cloud v2: delete user deletes their graph data
-  // We do not delete the user since we don't know the caregiverId here;
-  // caller should call client.user.delete(userId) if needed.
-  // This is a best-effort cleanup.
-  console.log('[Zep] Patient memory cleanup requested for', patientId, '— manual graph cleanup needed if required.')
+export async function deletePatientMemory(caregiverId: string, patientId: string): Promise<void> {
+  try {
+    const client = getZepClient()
+    const userId = zepUserId(caregiverId, patientId)
+    await client.user.delete(userId)
+    console.log('[Zep] Successfully deleted patient memory graph for user:', userId)
+  } catch (err) {
+    console.warn('[Zep] Could not delete patient memory graph:', err)
+  }
 }
