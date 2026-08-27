@@ -112,6 +112,23 @@ const BriefingOutputSchema = z.object({
 
 type BriefingAudience = 'specialist' | 'gp' | 'family' | 'general' | 'er_visit' | 'second_opinion'
 
+function buildZepQuery(audience: BriefingAudience): string {
+  switch (audience) {
+    case 'er_visit':
+      return 'critical flags emergency triage vital signs acute symptoms allergies current medications recent lab values contraindications'
+    case 'specialist':
+      return 'longitudinal lab trends kidney renal cardiovascular metabolic exact values drug interactions contraindications'
+    case 'gp':
+      return 'chronic conditions ongoing medications preventive management practical care lab values treatment plan'
+    case 'second_opinion':
+      return 'full diagnostic history clinical trajectory prior treatments medication changes unresolved symptoms'
+    case 'family':
+      return 'daily medications warning signs symptoms what to watch for general care follow up schedule'
+    default:
+      return 'medications lab values conditions diagnoses vital signs allergies observations trends contraindications'
+  }
+}
+
 function audienceInstruction(audience: BriefingAudience): string {
   if (audience === 'specialist') return 'Write for a specialist — include lab trends, exact values, drug interactions, clinical reasoning.'
   if (audience === 'gp') return 'Write for a GP — clinical detail with practical management recommendations.'
@@ -184,8 +201,9 @@ export async function generateBriefing(
     .where(and(eq(briefings.id, briefingId), eq(briefings.caregiver_id, caregiver.id)))
 
   try {
-    // 1. Query Zep — the single source of truth for clinical memory
-    let context = await queryPatientMemory(caregiver.id, patientId, 'medications lab values conditions diagnoses vital signs allergies observations')
+    // 1. Query Zep with audience-dynamic query — the single source of truth for clinical memory
+    const zepQuery = buildZepQuery(audience)
+    let context = await queryPatientMemory(caregiver.id, patientId, zepQuery)
 
     // 2. If Zep is empty (deleted, never ingested, or any other reason),
     //    rebuild from Vercel Blob PDFs — regardless of Neon document status.
@@ -229,7 +247,7 @@ export async function generateBriefing(
       }
 
       // Re-query Zep after rebuild
-      context = await queryPatientMemory(caregiver.id, patientId, 'medications lab values conditions diagnoses vital signs allergies observations')
+      context = await queryPatientMemory(caregiver.id, patientId, zepQuery)
     }
 
     // 3. If still empty after rebuild attempt, fail with a clear message
@@ -245,23 +263,36 @@ export async function generateBriefing(
 
     const model = google('gemini-2.5-flash')
 
-    // ── [TEMP DIAGNOSTICS] Context sent to Gemini ──────────────────────────
+    // ── Diagnostics Context ────────────────────────────────────────────────
     console.log('=== [ZEP RETRIEVAL CONTEXT TO GEMINI] ===')
     console.log(patientHeader)
-    console.log('--- context ---')
-    console.log(context)
-    console.log('=== [END CONTEXT] ===')
+    console.log('--- context length: ' + context.length + ' chars ---')
+    console.log('=== [END CONTEXT HEADER] ===')
     // ───────────────────────────────────────────────────────────────────────
 
     const SYSTEM_PROMPT = `You are a clinical AI assistant generating a structured medical briefing.
 ${audienceInstruction(audience)}
 
-Use only the clinical facts provided. Do not hallucinate.
+Use only the clinical facts provided in the context. Do not hallucinate or invent clinical findings.
 For each claim, mark it SUPPORTED if backed by source context, or UNVERIFIED if uncertain.
-Flag drug-drug interactions, contraindications, or concerning trends as flagged_concerns.
+
+Clinical Triage & Synthesis Hierarchy:
+1. CRITICAL & URGENT SAFETY:
+   - Identify and flag any drug-drug interactions, contraindications, or lab values outside safe therapeutic ranges as flagged_concerns.
+2. ACTIVE MEDICATIONS & CURRENT DIAGNOSES:
+   - Detail current active medications with exact dosages, schedules, and start/change dates.
+   - Summarize active medical conditions and chief complaints.
+3. LONGITUDINAL TRAJECTORY & MULTI-SYSTEM TRENDS:
+   - For every organ system with recorded lab tests (e.g. renal, cardiovascular, metabolic, hepatic, hematologic), track values chronologically over time.
+   - If multiple historical values exist, explicitly show the chronological progression (e.g., "eGFR: 65 (Jun 2022) → 58 (Dec 2022) → 47 (Dec 2023) - consistent decline").
+   - Synthesize multiple concurrent trends across different organ systems rather than focusing on only one.
+4. STABLE BASELINE ACKNOWLEDGEMENT:
+   - If a patient or specific clinical parameter is stable with no adverse changes, drug interactions, or concerning drifts, state this clearly (e.g., "Patient maintains a stable clinical baseline with no acute safety flags"). Do not invent non-existent trends.
+5. SCALE DEPTH TO RECORD VOLUME:
+   - Synthesize a comprehensive briefing that covers all key clinical systems without unnecessary brevity when longitudinal records are provided.
 
 PaperTrail Citation Requirement:
-- Embed inline claim markers like [claim:c1], [claim:c2] in the briefing_text immediately after the factual statement, lab value, medication, or concern being asserted.
+- Embed inline claim markers like [claim:c1], [claim:c2] in the briefing_text immediately after each factual statement, lab value, medication, or concern being asserted.
 - Every [claim:cN] in the text must have a corresponding entry in the 'claims' array with matching claim_id ("cN").
 - In each claim's evidence, extract source_doc_id from the [doc_id: <uuid>] tag and source_page from the [page: <number>] tag in the context.`
 

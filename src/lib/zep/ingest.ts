@@ -144,20 +144,23 @@ export async function queryPatientMemory(
     const client = getZepClient()
     const userId = zepUserId(caregiverId, patientId)
 
-    // Ensure user exists before searching
+    // Ensure user exists before querying
     await ensureZepUser(userId)
 
-    // 1. Retrieve graph edges via search (limit 30)
-    const searchResult = await client.graph.search({
-      query,
-      userId,
-      limit: 30,
-    })
+    // ── Layer 1: Longitudinal Entity Summaries (Holistic patient / condition trajectory) ──
+    let entitySummaries: string[] = []
+    try {
+      const nodes = await client.graph.node.getByUserId(userId, { limit: 50 })
+      if (Array.isArray(nodes)) {
+        entitySummaries = nodes
+          .filter((n) => n.summary && n.summary.trim().length > 0)
+          .map((n) => `[Entity: ${n.name}] ${n.summary.trim()}`)
+      }
+    } catch (nodeErr) {
+      console.warn('[Zep] Entity node summaries fetch skipped or unavailable:', nodeErr)
+    }
 
-    const rawEdges = searchResult.edges ?? []
-    const edges = rawEdges.map((e) => (e.fact ?? '')).filter(Boolean)
-
-    // 2. Retrieve chronological episodes/documents for this user
+    // ── Layer 2: Chronological Document Episodes (Citable ground truth with doc/page tags) ──
     let rawEpisodes: { content?: string; createdAt?: string }[] = []
     try {
       const episodeResponse = await client.graph.episode.getByUserId(userId, { lastn: 30 })
@@ -177,24 +180,49 @@ export async function queryPatientMemory(
       .map((ep) => ep.content?.trim())
       .filter((c): c is string => Boolean(c && c.length > 0))
 
-    // If both episodes and edges are completely absent, return empty string for self-heal detection
-    if (episodesContent.length === 0 && edges.length === 0) {
-      console.log('[Zep Retrieval] 0 episodes and 0 edges found for user:', userId)
+    // ── Layer 3: Semantic Graph Search (Query-aligned clinical facts & relationships) ──
+    let edges: string[] = []
+    try {
+      const searchResult = await client.graph.search({
+        query,
+        userId,
+        limit: 50,
+      })
+      const rawEdges = searchResult.edges ?? []
+      edges = rawEdges.map((e) => (e.fact ?? '')).filter(Boolean)
+    } catch (searchErr) {
+      console.warn('[Zep] Semantic graph search error:', searchErr)
+    }
+
+    // If all layers are completely absent, return empty string for self-heal detection
+    if (entitySummaries.length === 0 && episodesContent.length === 0 && edges.length === 0) {
+      console.log('[Zep Retrieval] 0 entity nodes, 0 episodes, and 0 edges found for user:', userId)
       return ''
     }
 
-    // 3. Build two clearly separated sections
-    const episodeSection = episodesContent.length > 0
-      ? `=== CHRONOLOGICAL CLINICAL EPISODES ===\n\n${episodesContent.join('\n\n---\n\n')}`
-      : '=== CHRONOLOGICAL CLINICAL EPISODES ===\n\n(No document episodes found)'
+    // ── Build 3 structured memory sections ──
+    const sections: string[] = []
 
-    const graphSection = edges.length > 0
-      ? `=== EXTRACTED GRAPH FACTS & RELATIONSHIPS ===\n\n${edges.map((e, idx) => `${idx + 1}. ${e}`).join('\n')}`
-      : '=== EXTRACTED GRAPH FACTS & RELATIONSHIPS ===\n\n(No graph facts found)'
+    if (entitySummaries.length > 0) {
+      sections.push(`=== LONGITUDINAL PATIENT & ENTITY OVERVIEW ===\n\n${entitySummaries.join('\n\n')}`)
+    }
 
-    const context = `${episodeSection}\n\n${graphSection}`
+    sections.push(
+      episodesContent.length > 0
+        ? `=== CHRONOLOGICAL CLINICAL EPISODES ===\n\n${episodesContent.join('\n\n---\n\n')}`
+        : '=== CHRONOLOGICAL CLINICAL EPISODES ===\n\n(No document episodes found)'
+    )
 
-    // 4. Concise logging
+    sections.push(
+      edges.length > 0
+        ? `=== EXTRACTED GRAPH FACTS & RELATIONSHIPS ===\n\n${edges.map((e, idx) => `${idx + 1}. ${e}`).join('\n')}`
+        : '=== EXTRACTED GRAPH FACTS & RELATIONSHIPS ===\n\n(No graph facts found)'
+    )
+
+    const context = sections.join('\n\n')
+
+    // Logging metrics
+    console.log('[Zep Retrieval] Entity node summaries retrieved:', entitySummaries.length)
     console.log('[Zep Retrieval] Episodes retrieved:', episodesContent.length)
     console.log('[Zep Retrieval] Graph edges retrieved:', edges.length)
     console.log('[Zep Retrieval] Final context character length:', context.length)
