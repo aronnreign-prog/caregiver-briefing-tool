@@ -51,23 +51,26 @@ Briefings row created via createBriefingRecord() (status: 'queued')
 PatientDetailClient calls generateBriefing(patientId, briefingId, audience) [Server Action]
     ↓
 1. Query Patient Memory (src/lib/zep/ingest.ts):
-   queryPatientMemory(caregiverId, patientId, 'medications lab values conditions diagnoses vital signs allergies observations')
-   Calls Zep client.graph.search({ query, userId, limit: 30 }) + client.graph.episode.getByUserId(userId)
+   buildZepQuery(audience) -> Dynamic targeted query based on audience (ER, Specialist, GP, etc.)
+   queryPatientMemory(caregiverId, patientId, zepQuery):
+   - Layer 1: Longitudinal Entity Summaries via client.graph.node.getByUserId(userId) (uncapped timeline backstop)
+   - Layer 2: Chronological Episodes via client.graph.episode.getByUserId(userId, { lastn: 30 }) (with [doc_id] & [page] tags)
+   - Layer 3: Concurrent Multi-Domain Search via Promise.allSettled(client.graph.search({ query, userId })) (with [valid_from] & [SUPERSEDED] temporal invalidation tags)
    Fallback: If Zep memory is empty, automatically re-extracts from Vercel Blob PDFs and rebuilds Zep graph memory.
     ↓
-3. Structured Synthesis via Gemini 2.5 Flash:
+2. Structured Synthesis via Gemini 2.5 Flash:
    generateObject({
      model: google('gemini-2.5-flash'),
      schema: BriefingOutputSchema,
-     system: Prompt adapted to audience target,
-     messages: Patient header + clinical context facts
+     system: Clinical Triage & Synthesis prompt adapted to audience target + multi-trend & PaperTrail instructions,
+     messages: Patient header + 3-layer clinical context facts
    })
    Returns structured object:
-   - briefing_text (Markdown clinical summary)
-   - claims (array of claim_text, claim_type, flag, evidence)
+   - briefing_text (Markdown clinical summary with inline [claim:cN] tokens)
+   - claims (array of claim_text, claim_type, flag, evidence[])
    - flagged_concerns (array of concern, severity, related_claims)
     ↓
-4. Neon Database Update:
+3. Neon Database Update:
    briefings table updated with status: 'complete', briefing_text, claims,
    flagged_concerns, completed_at timestamp.
 ```

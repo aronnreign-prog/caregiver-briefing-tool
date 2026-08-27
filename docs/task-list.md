@@ -27,6 +27,16 @@
 - [x] Rewrite `README.md` and `.env.example`
 - [x] Refresh `docs/project-brief.md`, `docs/specs/pipeline.md`, and `docs/specs/papertrail.md`
 
+### Phase 4: Core Clinical Intelligence & PaperTrail Grounding
+- [x] Implement PaperTrail deterministic citation extraction (`[doc_id: UUID]`, `[page: N]`)
+- [x] Multi-evidence citation arrays supporting longitudinal trend citations
+- [x] 3-layer Zep memory retrieval (Longitudinal Entity Nodes + Chronological Episodes + Multi-Domain Search)
+- [x] Audience-dynamic Zep search querying (`buildZepQuery`)
+- [x] Concurrent multi-domain search via `Promise.allSettled` covering 8 medical domains (Psychiatric/Neuro, Renal, Cardio, Endocrine, Pulmonary, GI, Infectious, Hematology/Oncology)
+- [x] Temporal invalidation metadata formatting on graph edges (`valid_from`, `SUPERSEDED`)
+- [x] Clinical triage hierarchy & multi-trend prompting with stable patient recognition
+- [x] Interactive UI badges for `CONFLICTING` findings and `notable_absence` in PaperTrail
+
 ---
 
 ## Active & Upcoming Restructuring Tasks
