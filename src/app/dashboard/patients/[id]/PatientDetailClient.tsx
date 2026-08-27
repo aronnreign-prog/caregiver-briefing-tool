@@ -5,7 +5,6 @@ import type { Patient, Document, Briefing } from '@/types/database'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import ReactMarkdown from 'react-markdown'
-import PatientRealtime from './PatientRealtime'
 import DocumentList from './DocumentList'
 import { PipelineBar } from './PipelineBar'
 import { generateBriefing, createBriefingRecord } from './pipeline-actions'
@@ -184,8 +183,6 @@ export default function PatientDetailClient({ patient, initialDocuments, initial
   const [audience, setAudience] = useState<'specialist' | 'gp' | 'family' | 'general' | 'er_visit' | 'second_opinion'>('specialist')
 
   const activeBriefing = briefings.find(b => b.id === activeBriefingId) ?? briefings[0] ?? null
-
-  PatientRealtime({})
 
   // Adaptive polling for in-progress documents
   useEffect(() => {

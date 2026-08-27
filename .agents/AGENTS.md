@@ -16,7 +16,7 @@ The codebase has been fully migrated twice:
 - `src/lib/supabase/` (server.ts, client.ts) — Supabase clients gone entirely
 - `supabase/config.toml` — Supabase project config
 - `@supabase/ssr`, `@supabase/supabase-js` — uninstalled from package.json
-- `PatientRealtime.tsx` Supabase Realtime subscription — replaced by adaptive polling
+- `PatientRealtime.tsx` — deleted (polling handled by PatientDetailClient)
 
 **Added:**
 - `src/lib/auth.ts` — Better Auth instance (Drizzle adapter, email/password)
@@ -34,10 +34,9 @@ The codebase has been fully migrated twice:
 - `src/proxy.ts` — Better Auth session check (was Supabase)
 - `src/app/auth/actions.ts` — Better Auth sign-in/sign-up/sign-out (was Supabase Auth)
 - `src/app/dashboard/actions.ts` — Drizzle queries (was Supabase client)
-- `src/app/dashboard/patients/[id]/pipeline-actions.ts` — Drizzle + Vercel Blob + Gemini 2.5 Flash
+- `src/app/dashboard/patients/[id]/pipeline-actions.ts` — Drizzle + Vercel Blob + Gemini 2.5 Flash + 3-Layer Zep Retrieval
 - `src/app/dashboard/patients/[id]/DocumentUploader.tsx` — @vercel/blob upload (was Supabase Storage)
 - `src/app/dashboard/patients/[id]/PatientDetailClient.tsx` — fetch() polling (was supabase.from())
-- `src/app/dashboard/patients/[id]/PatientRealtime.tsx` — no-op null component
 - `src/app/dashboard/page.tsx` — Drizzle queries (was Supabase)
 - `src/app/dashboard/patients/[id]/page.tsx` — Drizzle queries (was Supabase)
 - `src/lib/data/patient.ts` — Drizzle query (was Supabase)
