@@ -31,23 +31,97 @@ const DEMO_BRIEFING: Briefing = {
   flagged_concerns: [{ concern: 'ACE inhibitor prescribed despite declining GFR trend.', severity: 'high', related_claims: ['c1', 'c2', 'c3'] }],
 }
 
+type EvidenceItem = {
+  source_doc_id?: string
+  source_page?: number
+  source_quote?: string
+  entry_text?: string
+}
+
 type Claim = {
-  claim_id?: string; claim_text: string; claim_type?: string; flag?: string;
-  evidence?: { source_doc_id?: string; source_page?: number; source_quote?: string; entry_text?: string } | null;
+  claim_id?: string
+  claim_text: string
+  claim_type?: string
+  flag?: string
+  evidence?: EvidenceItem | EvidenceItem[] | null
 }
 
 type FlaggedConcern = { severity: 'high' | 'medium' | 'low'; description?: string; concern?: string }
 
 function CitationChip({ claim, onDocClick }: { claim: Claim; onDocClick: (e: React.MouseEvent, id: string, page?: number) => void }) {
   const isDrug = claim.flag === 'MEDICAL_KNOWLEDGE' || claim.claim_type === 'medical_knowledge'
-  const docId = claim.evidence?.source_doc_id
-  const page = claim.evidence?.source_page
-  const label = isDrug ? (claim.claim_text?.slice(0, 14) || 'Med Knowledge') : `Doc · p.${page ?? '1'}`
-  const title = claim.evidence?.source_quote || claim.evidence?.entry_text || claim.claim_text || ''
+  const isConflicting = claim.flag === 'CONFLICTING'
+  const isAbsence = claim.claim_type === 'notable_absence'
+
+  if (isConflicting) {
+    return (
+      <span
+        className="inline-flex items-center gap-1 font-mono text-[9px] border rounded px-1.5 py-0.5 ml-1.5 align-middle border-amber-500/50 text-amber-400 bg-amber-500/10 cursor-help"
+        title={claim.claim_text || 'Conflicting findings across records'}
+      >
+        ⚡ Conflicting
+      </span>
+    )
+  }
+
+  if (isAbsence) {
+    return (
+      <span
+        className="inline-flex items-center gap-1 font-mono text-[9px] border rounded px-1.5 py-0.5 ml-1.5 align-middle border-purple-500/50 text-purple-300 bg-purple-500/10 cursor-help"
+        title={claim.claim_text || 'Notable absence in medical documentation'}
+      >
+        ∅ Not Documented
+      </span>
+    )
+  }
+
+  if (isDrug) {
+    const label = claim.claim_text?.slice(0, 14) || 'Med Knowledge'
+    const title = (Array.isArray(claim.evidence) ? claim.evidence[0]?.entry_text : claim.evidence?.entry_text) || claim.claim_text || ''
+    return (
+      <span
+        className="inline-flex items-center gap-1 font-mono text-[9px] border rounded px-1.5 py-0.5 ml-1.5 align-middle border-warning/40 text-warning bg-warning-dim cursor-default"
+        title={title}
+      >
+        ⚠ {label}
+      </span>
+    )
+  }
+
+  const evidenceList: EvidenceItem[] = Array.isArray(claim.evidence)
+    ? claim.evidence
+    : (claim.evidence ? [claim.evidence] : [])
+
+  if (evidenceList.length === 0) {
+    return (
+      <span
+        className="inline-flex items-center gap-1 font-mono text-[9px] border rounded px-1.5 py-0.5 ml-1.5 align-middle border-muted text-muted-foreground bg-muted/20"
+        title={claim.claim_text}
+      >
+        ? Unverified
+      </span>
+    )
+  }
+
   return (
-    <button onClick={(e) => !isDrug && docId ? onDocClick(e, docId, page ?? 1) : undefined}
-      className={`inline-flex items-center gap-1 font-mono text-[9px] border rounded px-1.5 py-0.5 ml-1.5 align-middle transition-colors ${isDrug ? 'border-warning/40 text-warning bg-warning-dim cursor-default' : 'border-accent/40 text-accent bg-accent-dim hover:border-accent hover:bg-accent/20 cursor-pointer'}`}
-      title={title}>{isDrug ? '⚠' : '↗'} {label}</button>
+    <>
+      {evidenceList.map((ev, idx) => {
+        const docId = ev.source_doc_id
+        const page = ev.source_page
+        const label = `Doc · p.${page ?? '1'}`
+        const title = ev.source_quote || ev.entry_text || claim.claim_text || ''
+        return (
+          <button
+            key={idx}
+            onClick={(e) => (docId ? onDocClick(e, docId, page ?? 1) : undefined)}
+            className="inline-flex items-center gap-1 font-mono text-[9px] border rounded px-1.5 py-0.5 ml-1 align-middle transition-colors border-accent/40 text-accent bg-accent-dim hover:border-accent hover:bg-accent/20 cursor-pointer"
+            title={title}
+          >
+            ↗ {label}
+          </button>
+        )
+      })}
+    </>
   )
 }
 
@@ -199,6 +273,8 @@ export default function PatientDetailClient({ patient, initialDocuments, initial
   const supported = claimsArray.filter(c => c.flag === 'SUPPORTED').length
   const partial = claimsArray.filter(c => c.flag === 'PARTIALLY SUPPORTED').length
   const unsupported = claimsArray.filter(c => c.flag === 'UNSUPPORTED').length
+  const conflicting = claimsArray.filter(c => c.flag === 'CONFLICTING').length
+  const absences = claimsArray.filter(c => c.claim_type === 'notable_absence').length
   const age = Math.floor((Date.now() - new Date(patient.date_of_birth).getTime()) / (1000 * 60 * 60 * 24 * 365.25))
 
   return (
@@ -315,8 +391,10 @@ export default function PatientDetailClient({ patient, initialDocuments, initial
                     <p className="font-mono text-[10px] text-accent tracking-widest uppercase mb-0.5">PaperTrail</p>
                     <p className="font-mono text-[9px] text-muted-foreground">Every claim traced to source</p>
                   </div>
-                  <div className="flex items-center gap-4 ml-auto">
+                  <div className="flex items-center gap-4 ml-auto flex-wrap justify-end">
                     {supported > 0 && <div className="flex items-center gap-1.5"><div className="w-1.5 h-1.5 rounded-full bg-success" /><span className="font-mono text-[10px] text-muted-foreground">{supported} supported</span></div>}
+                    {conflicting > 0 && <div className="flex items-center gap-1.5"><div className="w-1.5 h-1.5 rounded-full bg-amber-400" /><span className="font-mono text-[10px] text-muted-foreground">{conflicting} conflicting</span></div>}
+                    {absences > 0 && <div className="flex items-center gap-1.5"><div className="w-1.5 h-1.5 rounded-full bg-purple-400" /><span className="font-mono text-[10px] text-muted-foreground">{absences} not documented</span></div>}
                     {partial > 0 && <div className="flex items-center gap-1.5"><div className="w-1.5 h-1.5 rounded-full bg-warning" /><span className="font-mono text-[10px] text-muted-foreground">{partial} partial</span></div>}
                     {unsupported > 0 && <div className="flex items-center gap-1.5"><div className="w-1.5 h-1.5 rounded-full bg-alert" /><span className="font-mono text-[10px] text-muted-foreground">{unsupported} unsupported</span></div>}
                   </div>

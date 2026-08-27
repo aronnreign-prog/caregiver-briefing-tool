@@ -147,14 +147,19 @@ export async function queryPatientMemory(
     // Ensure user exists before querying
     await ensureZepUser(userId)
 
-    // ── Layer 1: Longitudinal Entity Summaries (Holistic patient / condition trajectory) ──
+    // ── Layer 1: Longitudinal Entity Summaries (Uncapped holistic knowledge graph) ──
+    let rawNodes: any[] = []
     let entitySummaries: string[] = []
     try {
       const nodes = await client.graph.node.getByUserId(userId, { limit: 50 })
       if (Array.isArray(nodes)) {
+        rawNodes = nodes
         entitySummaries = nodes
           .filter((n) => n.summary && n.summary.trim().length > 0)
-          .map((n) => `[Entity: ${n.name}] ${n.summary.trim()}`)
+          .map((n) => {
+            const labels = n.labels && n.labels.length > 0 ? ` (${n.labels.join(', ')})` : ''
+            return `[Entity: ${n.name}${labels}] ${n.summary.trim()}`
+          })
       }
     } catch (nodeErr) {
       console.warn('[Zep] Entity node summaries fetch skipped or unavailable:', nodeErr)
@@ -180,19 +185,60 @@ export async function queryPatientMemory(
       .map((ep) => ep.content?.trim())
       .filter((c): c is string => Boolean(c && c.length > 0))
 
-    // ── Layer 3: Semantic Graph Search (Query-aligned clinical facts & relationships) ──
-    let edges: string[] = []
-    try {
-      const searchResult = await client.graph.search({
-        query,
-        userId,
-        limit: 50,
-      })
-      const rawEdges = searchResult.edges ?? []
-      edges = rawEdges.map((e) => (e.fact ?? '')).filter(Boolean)
-    } catch (searchErr) {
-      console.warn('[Zep] Semantic graph search error:', searchErr)
+    // ── Layer 3: Multi-Domain Semantic Graph Search with Temporal Invalidation ──
+    // Derive targeted clinical domains from entity nodes to avoid single-query budget starvation
+    const detectedDomainQueries: string[] = []
+    const entityText = rawNodes.map((n) => `${n.name} ${n.summary ?? ''}`).join(' ').toLowerCase()
+
+    if (/renal|kidney|gfr|creatinine|bun|dialysis|nephro/.test(entityText)) {
+      detectedDomainQueries.push('renal kidney function eGFR creatinine BUN urine lab trends')
     }
+    if (/cardio|heart|bp|hypertension|blood pressure|cardiac|ecg|lisinopril|metoprolol|statin/.test(entityText)) {
+      detectedDomainQueries.push('cardiovascular heart blood pressure hypertension cardiac medications')
+    }
+    if (/diabet|glucose|hba1c|sugar|insulin|metformin|endocrine/.test(entityText)) {
+      detectedDomainQueries.push('diabetes glucose HbA1c endocrine metabolic medications')
+    }
+    if (/pulmon|lung|respiratory|dyspnea|sob|asthma|copd|oxygen/.test(entityText)) {
+      detectedDomainQueries.push('respiratory lung pulmonary shortness of breath oxygen')
+    }
+    if (/liver|hepatic|alt|ast|bilirubin|cirrhosis/.test(entityText)) {
+      detectedDomainQueries.push('liver hepatic function enzymes ALT AST bilirubin')
+    }
+
+    // Execute primary query + up to 2 detected domain queries in parallel
+    const queriesToRun = [query, ...detectedDomainQueries.slice(0, 2)]
+    const edgeMap = new Map<string, string>()
+
+    for (const q of queriesToRun) {
+      try {
+        const searchResult = await client.graph.search({
+          query: q,
+          userId,
+          limit: 35,
+        })
+        const rawEdges = searchResult.edges ?? []
+        for (const e of rawEdges) {
+          const fact = (e.fact ?? '').trim()
+          if (!fact) continue
+          const key = e.uuid || fact
+
+          // Format temporal validity and superseding / invalidation dates
+          const validPart = e.validAt ? ` [valid_from: ${e.validAt.slice(0, 10)}]` : ''
+          const invalidPart = e.invalidAt ? ` [SUPERSEDED/INVALIDATED as of: ${e.invalidAt.slice(0, 10)}]` : ''
+          const expiredPart = e.expiredAt ? ` [EXPIRED: ${e.expiredAt.slice(0, 10)}]` : ''
+          const fullFact = `${fact}${validPart}${invalidPart}${expiredPart}`
+
+          if (!edgeMap.has(key)) {
+            edgeMap.set(key, fullFact)
+          }
+        }
+      } catch (searchErr) {
+        console.warn(`[Zep] Graph search failed for query "${q}":`, searchErr)
+      }
+    }
+
+    const edges = Array.from(edgeMap.values())
 
     // If all layers are completely absent, return empty string for self-heal detection
     if (entitySummaries.length === 0 && episodesContent.length === 0 && edges.length === 0) {
@@ -204,18 +250,18 @@ export async function queryPatientMemory(
     const sections: string[] = []
 
     if (entitySummaries.length > 0) {
-      sections.push(`=== LONGITUDINAL PATIENT & ENTITY OVERVIEW ===\n\n${entitySummaries.join('\n\n')}`)
+      sections.push(`=== LONGITUDINAL PATIENT & ENTITY OVERVIEW (UNCONSTRAINED GRAPH MEMORY) ===\n\n${entitySummaries.join('\n\n')}`)
     }
 
     sections.push(
       episodesContent.length > 0
-        ? `=== CHRONOLOGICAL CLINICAL EPISODES ===\n\n${episodesContent.join('\n\n---\n\n')}`
+        ? `=== CHRONOLOGICAL CLINICAL EPISODES (EVIDENCE & CITATION SOURCE) ===\n\n${episodesContent.join('\n\n---\n\n')}`
         : '=== CHRONOLOGICAL CLINICAL EPISODES ===\n\n(No document episodes found)'
     )
 
     sections.push(
       edges.length > 0
-        ? `=== EXTRACTED GRAPH FACTS & RELATIONSHIPS ===\n\n${edges.map((e, idx) => `${idx + 1}. ${e}`).join('\n')}`
+        ? `=== EXTRACTED GRAPH FACTS & TEMPORAL RELATIONSHIPS ===\n\n${edges.map((e, idx) => `${idx + 1}. ${e}`).join('\n')}`
         : '=== EXTRACTED GRAPH FACTS & RELATIONSHIPS ===\n\n(No graph facts found)'
     )
 
@@ -223,8 +269,8 @@ export async function queryPatientMemory(
 
     // Logging metrics
     console.log('[Zep Retrieval] Entity node summaries retrieved:', entitySummaries.length)
-    console.log('[Zep Retrieval] Episodes retrieved:', episodesContent.length)
-    console.log('[Zep Retrieval] Graph edges retrieved:', edges.length)
+    console.log('[Zep Retrieval] Chronological episodes retrieved:', episodesContent.length)
+    console.log('[Zep Retrieval] Distinct graph edges retrieved (multi-query):', edges.length)
     console.log('[Zep Retrieval] Final context character length:', context.length)
 
     return context

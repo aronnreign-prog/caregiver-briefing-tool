@@ -93,15 +93,15 @@ const BriefingOutputSchema = z.object({
   briefing_text: z.string().describe('The clinical briefing markdown text. Embed inline claim markers like [claim:c1], [claim:c2] immediately after each fact, statement, or concern being asserted.'),
   claims: z.array(z.object({
     claim_id: z.string().describe('Matching identifier used in briefing_text, e.g. "c1", "c2".'),
-    claim_text: z.string().describe('The specific factual assertion or clinical statement.'),
-    claim_type: z.enum(['source_document', 'medical_knowledge', 'reasoning']),
-    flag: z.enum(['SUPPORTED', 'PARTIALLY SUPPORTED', 'UNSUPPORTED', 'MEDICAL_KNOWLEDGE', 'UNVERIFIED']).optional(),
-    evidence: z.object({
+    claim_text: z.string().describe('The specific factual assertion, trend, notable absence, or clinical statement.'),
+    claim_type: z.enum(['source_document', 'medical_knowledge', 'reasoning', 'notable_absence']).describe('source_document for facts directly from records, medical_knowledge for general clinical pharmacology/pathology rules, reasoning for synthesized inferences, notable_absence when a critical expected test/medication/history is missing from the record.'),
+    flag: z.enum(['SUPPORTED', 'PARTIALLY SUPPORTED', 'UNSUPPORTED', 'MEDICAL_KNOWLEDGE', 'UNVERIFIED', 'CONFLICTING']).optional().describe('SUPPORTED if backed by records; CONFLICTING if contradictory findings exist across visits/docs; MEDICAL_KNOWLEDGE if general medical science; UNVERIFIED if uncertain.'),
+    evidence: z.array(z.object({
       source_doc_id: z.string().optional().describe('UUID of the source document from [doc_id: <uuid>] in context.'),
-      source_page: z.number().optional().describe('1-indexed page number from [page: <n>] in context.'),
-      source_quote: z.string().optional(),
-      entry_text: z.string().optional(),
-    }).optional(),
+      source_page: z.number().optional().describe('1-indexed page number from [page: <number>] in context.'),
+      source_quote: z.string().optional().describe('Verbatim quote or short excerpt from the source document.'),
+      entry_text: z.string().optional().describe('Context or clinical rationale note.'),
+    })).optional().describe('Array of citations supporting this claim. For multi-point trends or corroborating records, cite EVERY source document and page that supports the claim.'),
   })),
   flagged_concerns: z.array(z.object({
     concern: z.string(),
@@ -274,27 +274,36 @@ export async function generateBriefing(
 ${audienceInstruction(audience)}
 
 Use only the clinical facts provided in the context. Do not hallucinate or invent clinical findings.
-For each claim, mark it SUPPORTED if backed by source context, or UNVERIFIED if uncertain.
+For each claim, mark it:
+- SUPPORTED: directly confirmed by records
+- CONFLICTING: contradictory findings or superseded/invalidated diagnoses/allergies across records
+- MEDICAL_KNOWLEDGE: based on standard pharmacology/clinical principles
+- NOTABLE_ABSENCE (claim_type): an expected clinical test, monitoring baseline, or history is conspicuously missing
+- UNVERIFIED: uncertain or unconfirmed
 
 Clinical Triage & Synthesis Hierarchy:
 1. CRITICAL & URGENT SAFETY:
    - Identify and flag any drug-drug interactions, contraindications, or lab values outside safe therapeutic ranges as flagged_concerns.
 2. ACTIVE MEDICATIONS & CURRENT DIAGNOSES:
    - Detail current active medications with exact dosages, schedules, and start/change dates.
+   - Note if prior medications were discontinued or superseded (check temporal tags like [SUPERSEDED/INVALIDATED as of: ...]).
    - Summarize active medical conditions and chief complaints.
 3. LONGITUDINAL TRAJECTORY & MULTI-SYSTEM TRENDS:
    - For every organ system with recorded lab tests (e.g. renal, cardiovascular, metabolic, hepatic, hematologic), track values chronologically over time.
    - If multiple historical values exist, explicitly show the chronological progression (e.g., "eGFR: 65 (Jun 2022) → 58 (Dec 2022) → 47 (Dec 2023) - consistent decline").
    - Synthesize multiple concurrent trends across different organ systems rather than focusing on only one.
-4. STABLE BASELINE ACKNOWLEDGEMENT:
+4. NOTABLE ABSENCES & CONFLICTING DATA:
+   - If a vital test, follow-up monitor, or clinical history is conspicuously missing for a patient with these conditions, record a claim with claim_type: "notable_absence".
+   - If records disagree or a diagnosis/allergy was superseded, flag the claim as "CONFLICTING".
+5. STABLE BASELINE ACKNOWLEDGEMENT:
    - If a patient or specific clinical parameter is stable with no adverse changes, drug interactions, or concerning drifts, state this clearly (e.g., "Patient maintains a stable clinical baseline with no acute safety flags"). Do not invent non-existent trends.
-5. SCALE DEPTH TO RECORD VOLUME:
+6. SCALE DEPTH TO RECORD VOLUME:
    - Synthesize a comprehensive briefing that covers all key clinical systems without unnecessary brevity when longitudinal records are provided.
 
 PaperTrail Citation Requirement:
 - Embed inline claim markers like [claim:c1], [claim:c2] in the briefing_text immediately after each factual statement, lab value, medication, or concern being asserted.
 - Every [claim:cN] in the text must have a corresponding entry in the 'claims' array with matching claim_id ("cN").
-- In each claim's evidence, extract source_doc_id from the [doc_id: <uuid>] tag and source_page from the [page: <number>] tag in the context.`
+- In each claim's evidence array, cite EVERY source document and page that supports the claim (extract source_doc_id from [doc_id: <uuid>] and source_page from [page: <number>]). For longitudinal trends spanning multiple dates/visits, include an evidence entry for each supporting document.`
 
     const { object } = await generateObject({
       model,
