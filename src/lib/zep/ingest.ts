@@ -190,51 +190,108 @@ export async function queryPatientMemory(
     const detectedDomainQueries: string[] = []
     const entityText = rawNodes.map((n) => `${n.name} ${n.summary ?? ''}`).join(' ').toLowerCase()
 
-    if (/renal|kidney|gfr|creatinine|bun|dialysis|nephro/.test(entityText)) {
+    // 1. Psychiatric, Neurological & Mental Health (e.g. Sodium Valproate, Olanzapine, SSRIs, Antiepileptics)
+    if (/valproat|olanzapin|lithium|bipolar|schizo|depress|psych|neuro|seizure|epilep|antipsychot|anticonvuls|anxiet|insomnia|ssri|snri|haloperidol|quetiapine|risperidone|clonazepam|lorazepam|sertraline|fluoxetine|dementia|parkinson/.test(entityText)) {
+      detectedDomainQueries.push('psychiatric neurological mental health mood seizure antipsychotic anticonvulsant medications')
+    }
+
+    // 2. Renal & Nephrology
+    if (/renal|kidney|gfr|creatinine|bun|dialysis|nephro|urine|proteinuria/.test(entityText)) {
       detectedDomainQueries.push('renal kidney function eGFR creatinine BUN urine lab trends')
     }
-    if (/cardio|heart|bp|hypertension|blood pressure|cardiac|ecg|lisinopril|metoprolol|statin/.test(entityText)) {
-      detectedDomainQueries.push('cardiovascular heart blood pressure hypertension cardiac medications')
-    }
-    if (/diabet|glucose|hba1c|sugar|insulin|metformin|endocrine/.test(entityText)) {
-      detectedDomainQueries.push('diabetes glucose HbA1c endocrine metabolic medications')
-    }
-    if (/pulmon|lung|respiratory|dyspnea|sob|asthma|copd|oxygen/.test(entityText)) {
-      detectedDomainQueries.push('respiratory lung pulmonary shortness of breath oxygen')
-    }
-    if (/liver|hepatic|alt|ast|bilirubin|cirrhosis/.test(entityText)) {
-      detectedDomainQueries.push('liver hepatic function enzymes ALT AST bilirubin')
+
+    // 3. Cardiovascular, Hypertension & Cardiac
+    if (/cardio|heart|bp|hypertension|blood pressure|cardiac|ecg|lisinopril|metoprolol|statin|atorvastatin|amlodipine|carvedilol|losartan|chf|arrhythm/.test(entityText)) {
+      detectedDomainQueries.push('cardiovascular heart blood pressure hypertension cardiology cardiac medications')
     }
 
-    // Execute primary query + up to 2 detected domain queries in parallel
-    const queriesToRun = [query, ...detectedDomainQueries.slice(0, 2)]
-    const edgeMap = new Map<string, string>()
+    // 4. Diabetes, Endocrine & Thyroid
+    if (/diabet|glucose|hba1c|sugar|insulin|metformin|endocrine|thyroid|tsh|levothyroxine/.test(entityText)) {
+      detectedDomainQueries.push('diabetes glucose HbA1c endocrine metabolic thyroid medications')
+    }
 
-    for (const q of queriesToRun) {
-      try {
-        const searchResult = await client.graph.search({
+    // 5. Pulmonary & Respiratory
+    if (/pulmon|lung|respiratory|dyspnea|sob|asthma|copd|oxygen|inhaler|albuterol|pneumonia/.test(entityText)) {
+      detectedDomainQueries.push('respiratory lung pulmonary shortness of breath asthma COPD oxygen')
+    }
+
+    // 6. Hepatic, Liver & GI
+    if (/liver|hepatic|alt|ast|bilirubin|cirrhosis|hepatitis|gastro|gi|reflux|gerd|ppi|omeprazole/.test(entityText)) {
+      detectedDomainQueries.push('liver hepatic function enzymes ALT AST bilirubin gastrointestinal')
+    }
+
+    // 7. Infectious Disease & Antimicrobial
+    if (/infect|antibiot|culture|fever|sepsis|penicillin|amoxicillin|cipro|vancomycin|ceftriaxone/.test(entityText)) {
+      detectedDomainQueries.push('infection infectious disease antibiotics cultures microbiology')
+    }
+
+    // 8. Hematology & Oncology
+    if (/oncology|cancer|tumor|biopsy|chemo|anemia|hemoglobin|platelet|wbc|leukemia|lymphoma/.test(entityText)) {
+      detectedDomainQueries.push('hematology oncology complete blood count hemoglobin platelets cancer')
+    }
+
+    // Execute primary query + all detected domain queries concurrently via Promise.allSettled (capped at top 5 domains)
+    const activeDomainQueries = detectedDomainQueries.slice(0, 5)
+    if (detectedDomainQueries.length > 5) {
+      console.log(`[Zep Multi-Query] Detected ${detectedDomainQueries.length} domains; prioritizing top 5:`, activeDomainQueries)
+    }
+
+    const queriesToRun = [query, ...activeDomainQueries]
+    console.log(`[Zep Multi-Query] Firing ${queriesToRun.length} concurrent searches in parallel for user:`, userId)
+
+    const searchResults = await Promise.allSettled(
+      queriesToRun.map((q) =>
+        client.graph.search({
           query: q,
           userId,
           limit: 35,
         })
-        const rawEdges = searchResult.edges ?? []
-        for (const e of rawEdges) {
+      )
+    )
+
+    const edgeMap = new Map<string, string>()
+    let loggedSample = false
+
+    for (let i = 0; i < searchResults.length; i++) {
+      const res = searchResults[i]
+      const q = queriesToRun[i]
+      if (res.status === 'fulfilled') {
+        const rawEdges = res.value.edges ?? []
+        if (!loggedSample && rawEdges.length > 0) {
+          const sample = rawEdges[0] as any
+          console.log('[Zep Edge Diagnostics] Sample edge keys:', Object.keys(sample))
+          console.log('[Zep Edge Diagnostics] Sample edge payload:', {
+            fact: sample.fact,
+            validAt: sample.validAt ?? sample.valid_at,
+            invalidAt: sample.invalidAt ?? sample.invalid_at,
+            expiredAt: sample.expiredAt ?? sample.expired_at,
+            sourceNodeName: sample.sourceNodeName,
+            targetNodeName: sample.targetNodeName,
+          })
+          loggedSample = true
+        }
+
+        for (const e of rawEdges as any[]) {
           const fact = (e.fact ?? '').trim()
           if (!fact) continue
           const key = e.uuid || fact
 
-          // Format temporal validity and superseding / invalidation dates
-          const validPart = e.validAt ? ` [valid_from: ${e.validAt.slice(0, 10)}]` : ''
-          const invalidPart = e.invalidAt ? ` [SUPERSEDED/INVALIDATED as of: ${e.invalidAt.slice(0, 10)}]` : ''
-          const expiredPart = e.expiredAt ? ` [EXPIRED: ${e.expiredAt.slice(0, 10)}]` : ''
+          // Format temporal validity, superseding, and invalidation metadata
+          const rawValid = e.validAt ?? e.valid_at ?? e.attributes?.valid_at ?? e.attributes?.reference_time
+          const rawInvalid = e.invalidAt ?? e.invalid_at ?? e.attributes?.invalid_at
+          const rawExpired = e.expiredAt ?? e.expired_at ?? e.attributes?.expired_at
+
+          const validPart = rawValid ? ` [valid_from: ${String(rawValid).slice(0, 10)}]` : ''
+          const invalidPart = rawInvalid ? ` [SUPERSEDED/INVALIDATED as of: ${String(rawInvalid).slice(0, 10)}]` : ''
+          const expiredPart = rawExpired ? ` [EXPIRED: ${String(rawExpired).slice(0, 10)}]` : ''
           const fullFact = `${fact}${validPart}${invalidPart}${expiredPart}`
 
           if (!edgeMap.has(key)) {
             edgeMap.set(key, fullFact)
           }
         }
-      } catch (searchErr) {
-        console.warn(`[Zep] Graph search failed for query "${q}":`, searchErr)
+      } else {
+        console.warn(`[Zep Multi-Query] Search failed for query "${q}":`, res.reason)
       }
     }
 
