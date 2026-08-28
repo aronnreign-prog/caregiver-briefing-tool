@@ -11,9 +11,9 @@ import { generateBriefing, createBriefingRecord } from './pipeline-actions'
 
 // Demo data
 const DEMO_DOCUMENTS: Document[] = [
-  { id: 'd1', patient_id: 'demo-1', caregiver_id: 'demo', filename: 'Lab Result Mar 2024.pdf', status: 'extracted', uploaded_at: '2024-03-14T10:00:00Z' },
-  { id: 'd2', patient_id: 'demo-1', caregiver_id: 'demo', filename: 'Cardiology Visit Notes.pdf', status: 'extracted', uploaded_at: '2024-03-11T14:30:00Z' },
-  { id: 'd3', patient_id: 'demo-1', caregiver_id: 'demo', filename: 'Lab Result Sep 2023.pdf', status: 'extracted', uploaded_at: '2023-09-05T09:15:00Z' },
+  { id: 'd1', patient_id: 'demo-1', caregiver_id: 'demo', filename: 'Lab Result Mar 2024.pdf', document_type: 'Lab Result', document_date: '2024-03-14', status: 'extracted', uploaded_at: '2024-03-14T10:00:00Z' },
+  { id: 'd2', patient_id: 'demo-1', caregiver_id: 'demo', filename: 'Cardiology Visit Notes.pdf', document_type: 'Clinic Note', document_date: '2024-03-11', status: 'extracted', uploaded_at: '2024-03-11T14:30:00Z' },
+  { id: 'd3', patient_id: 'demo-1', caregiver_id: 'demo', filename: 'Lab Result Sep 2023.pdf', document_type: 'Lab Result', document_date: '2023-09-05', status: 'extracted', uploaded_at: '2023-09-05T09:15:00Z' },
 ]
 
 const DEMO_BRIEFING: Briefing = {
@@ -47,7 +47,26 @@ type Claim = {
 
 type FlaggedConcern = { severity: 'high' | 'medium' | 'low'; description?: string; concern?: string }
 
-function CitationChip({ claim, onDocClick }: { claim: Claim; onDocClick: (e: React.MouseEvent, id: string, page?: number) => void }) {
+function formatShortDate(dateStr: string | null | undefined): string {
+  if (!dateStr || dateStr.trim() === '' || dateStr.toLowerCase() === 'null') return 'Undated'
+  try {
+    const d = new Date(dateStr)
+    if (isNaN(d.getTime())) return dateStr
+    return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' })
+  } catch {
+    return dateStr
+  }
+}
+
+function CitationChip({
+  claim,
+  onDocClick,
+  documents = [],
+}: {
+  claim: Claim
+  onDocClick: (e: React.MouseEvent, id: string, page?: number) => void
+  documents?: Document[]
+}) {
   const isDrug = claim.flag === 'MEDICAL_KNOWLEDGE' || claim.claim_type === 'medical_knowledge'
   const isConflicting = claim.flag === 'CONFLICTING'
   const isAbsence = claim.claim_type === 'notable_absence'
@@ -94,7 +113,7 @@ function CitationChip({ claim, onDocClick }: { claim: Claim; onDocClick: (e: Rea
   if (evidenceList.length === 0) {
     return (
       <span
-        className="inline-flex items-center gap-1 font-mono text-[9px] border rounded px-1.5 py-0.5 ml-1.5 align-middle border-muted text-muted-foreground bg-muted/20"
+        className="inline-flex items-center gap-1 font-mono text-[9px] border rounded px-1.5 py-0.5 ml-1.5 align-middle border-muted text-muted-foreground bg-muted/20 cursor-default"
         title={claim.claim_text}
       >
         ? Unverified
@@ -107,12 +126,31 @@ function CitationChip({ claim, onDocClick }: { claim: Claim; onDocClick: (e: Rea
       {evidenceList.map((ev, idx) => {
         const docId = ev.source_doc_id
         const page = ev.source_page
-        const label = `Doc · p.${page ?? '1'}`
+        const doc = docId ? documents.find((d) => d.id === docId) : undefined
+
+        // If docId is missing/invalid or doc is not in patient documents, show honest unverified badge rather than broken dead button
+        if (!docId || !doc) {
+          return (
+            <span
+              key={idx}
+              className="inline-flex items-center gap-1 font-mono text-[9px] border rounded px-1.5 py-0.5 ml-1 align-middle border-muted text-muted-foreground bg-muted/20 cursor-default"
+              title={ev.source_quote || ev.entry_text || claim.claim_text || 'Source record not found in documents'}
+            >
+              ? Unverified
+            </span>
+          )
+        }
+
+        const typeLabel = doc.document_type || 'Doc'
+        const dateLabel = doc.document_date ? formatShortDate(doc.document_date) : 'Undated'
+        const pageLabel = page && page > 1 ? ` · p.${page}` : ''
+        const label = `${typeLabel} · ${dateLabel}${pageLabel}`
         const title = ev.source_quote || ev.entry_text || claim.claim_text || ''
+
         return (
           <button
             key={idx}
-            onClick={(e) => (docId ? onDocClick(e, docId, page ?? 1) : undefined)}
+            onClick={(e) => onDocClick(e, docId, page ?? 1)}
             className="inline-flex items-center gap-1 font-mono text-[9px] border rounded px-1.5 py-0.5 ml-1 align-middle transition-colors border-accent/40 text-accent bg-accent-dim hover:border-accent hover:bg-accent/20 cursor-pointer"
             title={title}
           >
@@ -127,7 +165,8 @@ function CitationChip({ claim, onDocClick }: { claim: Claim; onDocClick: (e: Rea
 function renderContentWithClaims(
   node: React.ReactNode,
   claimsMap: Record<string, Claim>,
-  onDocClick: (e: React.MouseEvent, id: string, page?: number) => void
+  onDocClick: (e: React.MouseEvent, id: string, page?: number) => void,
+  documents: Document[] = []
 ): React.ReactNode {
   if (typeof node === 'string') {
     const parts = node.split(/(\[claim:[a-zA-Z0-9_-]+\])/g)
@@ -138,7 +177,7 @@ function renderContentWithClaims(
         const claimId = match[1]
         const claim = claimsMap[claimId]
         if (claim) {
-          return <CitationChip key={i} claim={claim} onDocClick={onDocClick} />
+          return <CitationChip key={i} claim={claim} onDocClick={onDocClick} documents={documents} />
         }
         return null
       }
@@ -149,7 +188,7 @@ function renderContentWithClaims(
   if (Array.isArray(node)) {
     return node.map((child, i) => (
       <React.Fragment key={i}>
-        {renderContentWithClaims(child, claimsMap, onDocClick)}
+        {renderContentWithClaims(child, claimsMap, onDocClick, documents)}
       </React.Fragment>
     ))
   }
@@ -160,7 +199,7 @@ function renderContentWithClaims(
       return React.cloneElement(
         element,
         element.props,
-        renderContentWithClaims(element.props.children, claimsMap, onDocClick)
+        renderContentWithClaims(element.props.children, claimsMap, onDocClick, documents)
       )
     }
   }
@@ -427,17 +466,17 @@ export default function PatientDetailClient({ patient, initialDocuments, initial
 
                     return (
                       <ReactMarkdown components={{
-                        h2: ({ children }) => <h2 className="font-mono text-[9px] tracking-widest text-muted-foreground uppercase mt-8 mb-3 pb-2 border-b border-border">{renderContentWithClaims(children, claimsMap, handleDocClick)}</h2>,
-                        p: ({ children }) => <p className="text-[13px] text-foreground leading-relaxed mb-4">{renderContentWithClaims(children, claimsMap, handleDocClick)}</p>,
+                        h2: ({ children }) => <h2 className="font-mono text-[9px] tracking-widest text-muted-foreground uppercase mt-8 mb-3 pb-2 border-b border-border">{renderContentWithClaims(children, claimsMap, handleDocClick, documents)}</h2>,
+                        p: ({ children }) => <p className="text-[13px] text-foreground leading-relaxed mb-4">{renderContentWithClaims(children, claimsMap, handleDocClick, documents)}</p>,
                         li: ({ children }) => (
                           <li className="flex items-baseline gap-2 text-[13px] text-foreground mb-2">
                             <span className="w-1 h-1 rounded-full bg-muted-foreground mt-2 shrink-0" />
-                            <span>{renderContentWithClaims(children, claimsMap, handleDocClick)}</span>
+                            <span>{renderContentWithClaims(children, claimsMap, handleDocClick, documents)}</span>
                           </li>
                         ),
                         ul: ({ children }) => <ul className="list-none pl-0 my-3 space-y-0">{children}</ul>,
                         ol: ({ children }) => <ol className="list-decimal pl-5 my-3 space-y-1 text-[13px] text-foreground">{children}</ol>,
-                        strong: ({ children }) => <strong className="font-semibold text-foreground">{renderContentWithClaims(children, claimsMap, handleDocClick)}</strong>,
+                        strong: ({ children }) => <strong className="font-semibold text-foreground">{renderContentWithClaims(children, claimsMap, handleDocClick, documents)}</strong>,
                         code: ({ children }) => <code className="font-mono text-[11px] bg-surface-raised border border-border px-1.5 py-0.5 rounded text-accent">{children}</code>,
                       }}>{activeBriefing.briefing_text}</ReactMarkdown>
                     )

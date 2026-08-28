@@ -111,7 +111,7 @@ const SYSTEM_PROMPT = `You are a precise medical document parser. Extract clinic
 
 Rules:
 1. Extract ONLY what is explicitly stated. Do not infer, correct, or supplement.
-2. Capture dates on every entity where visible. Use ISO 8601 (YYYY-MM-DD). If only month+year visible, use the first of the month. If no date, leave field empty.
+2. Capture dates on every entity and documentDate where visible. Use ISO 8601 (YYYY-MM-DD). If the date is ambiguous, partial, or the year is unclear or missing, leave the date field empty/undefined rather than guessing. Never hallucinate or guess missing years.
 3. Capture 1-indexed pageNumber on each entity where visible.
 4. Medication status: "continue"/"started"/"prescribed" → active. "Stopped"/"discontinued"/"withheld" → discontinued. "Increased"/"reduced"/"changed to" → changed. Listed in prior history → historical.
 5. Lab flags: only set "flag" if the document physically prints a marker (H, L, A, *) next to the result. Do not infer from the numeric value.
