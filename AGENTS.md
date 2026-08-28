@@ -15,11 +15,11 @@ Browser (React 19) → Next.js 16.2 Server Actions → Drizzle ORM + Neon (Postg
                             ↓                                  ↑
                     Better Auth (cookie sessions)    @vercel/blob (PDF storage)
                             ↓ ingestDocument()
-                    Gemini 2.5 Flash (multimodal PDF → Zod schema)
+                    Gemini 3.1 Flash Lite (multimodal PDF → Zod schema)
                             ↓
                     Zep Cloud (graph.add — bi-temporal clinical memory)
                             ↓ generateBriefing()
-                    Gemini 2.5 Flash (generateObject → structured briefing)
+                    Gemini 3.1 Flash Lite (generateObject → structured briefing)
 ```
 
 **100% TypeScript. No Python. No Docker. No Deno. No job queue. No pg_cron. No Supabase.**

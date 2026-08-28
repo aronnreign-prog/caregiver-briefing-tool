@@ -41,7 +41,7 @@ The codebase has been fully migrated twice:
 - `src/app/dashboard/patients/[id]/page.tsx` — Drizzle queries (was Supabase)
 - `src/lib/data/patient.ts` — Drizzle query (was Supabase)
 - `src/types/database.ts` — `blob_url` replaces `storage_path`
-- AI model: `gemini-2.0-flash` → `gemini-2.5-flash` everywhere
+- AI model: `gemini-3.1-flash-lite` for high rate limit dev & testing (configurable via `AI_MODEL`)
 
 ### Debugging Guide
 

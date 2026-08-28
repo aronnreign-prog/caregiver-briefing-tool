@@ -261,7 +261,7 @@ export async function generateBriefing(
 
     const patientHeader = `Patient: ${patient.name}, DOB: ${patient.date_of_birth}, Relationship: ${patient.relationship}`
 
-    const model = google('gemini-2.5-flash')
+    const model = google(process.env.AI_MODEL || 'gemini-3.1-flash-lite')
 
     // ── Diagnostics Context ────────────────────────────────────────────────
     console.log('=== [ZEP RETRIEVAL CONTEXT TO GEMINI] ===')
