@@ -123,7 +123,7 @@ export async function extractClinicalFacts(
   pdfBuffer: Buffer,
   filename: string,
 ): Promise<ClinicalExtraction> {
-  const model = google(process.env.AI_MODEL || 'gemini-3.1-flash-lite')
+  const model = google(process.env.AI_MODEL || 'gemini-2.5-flash')
 
   const { object } = await generateObject({
     model,
