@@ -110,38 +110,52 @@ const BriefingOutputSchema = z.object({
   })),
 })
 
-type BriefingAudience = 'specialist' | 'gp' | 'family' | 'general' | 'er_visit' | 'second_opinion'
+export const ClinicalQueryOutputSchema = z.object({
+  answer: z.string().describe('The clinical answer in markdown with inline [claim:c1], [claim:c2] citations.'),
+  claims: z.array(
+    z.object({
+      claim_id: z.string(),
+      claim_text: z.string(),
+      flag: z.enum([
+        'SUPPORTED',
+        'PARTIALLY SUPPORTED',
+        'UNSUPPORTED',
+        'MEDICAL_KNOWLEDGE',
+        'UNVERIFIED',
+        'CONFLICTING',
+      ]).optional(),
+      evidence: z.array(
+        z.object({
+          source_doc_id: z.string().optional(),
+          source_page: z.number().optional(),
+          source_quote: z.string().optional(),
+          entry_text: z.string().optional(),
+        }),
+      ).optional(),
+    }),
+  ),
+})
 
-function buildZepQuery(audience: BriefingAudience): string {
-  switch (audience) {
-    case 'er_visit':
-      return 'critical flags emergency triage vital signs acute symptoms allergies current medications recent lab values contraindications'
-    case 'specialist':
-      return 'longitudinal lab trends kidney renal cardiovascular metabolic exact values drug interactions contraindications'
-    case 'gp':
-      return 'chronic conditions ongoing medications preventive management practical care lab values treatment plan'
-    case 'second_opinion':
-      return 'full diagnostic history clinical trajectory prior treatments medication changes unresolved symptoms'
-    case 'family':
-      return 'daily medications warning signs symptoms what to watch for general care follow up schedule'
-    default:
-      return 'medications lab values conditions diagnoses vital signs allergies observations trends contraindications'
-  }
+export type ClinicalQueryResult = {
+  answer?: string
+  claims?: z.infer<typeof ClinicalQueryOutputSchema>['claims']
+  error?: string
 }
 
-function audienceInstruction(audience: BriefingAudience): string {
-  if (audience === 'specialist') return 'Write for a specialist — include lab trends, exact values, drug interactions, clinical reasoning.'
-  if (audience === 'gp') return 'Write for a GP — clinical detail with practical management recommendations.'
-  if (audience === 'family') return 'Write for a family caregiver — plain language, no jargon, focus on what to watch for.'
-  if (audience === 'er_visit') return 'Write as an ER admission summary — critical flags first, current medications, allergies, recent labs.'
-  if (audience === 'second_opinion') return 'Write for a second-opinion consult — comprehensive history, all diagnoses, full medication list.'
-  return 'Write a clear, well-structured clinical summary.'
+export type BriefingAudience = 'specialist' | 'gp' | 'family' | 'general' | 'er_visit' | 'second_opinion'
+
+function buildZepQuery(audience?: string): string {
+  return 'longitudinal lab trends kidney renal cardiovascular metabolic psychiatric medications exact values drug interactions contraindications'
+}
+
+function audienceInstruction(audience?: string): string {
+  return 'Write for a specialist — include lab trends, exact values, drug interactions, clinical reasoning.'
 }
 
 export async function createBriefingRecord(
   patientId: string,
-  audience: string,
-  sourceDocIds: string[],
+  audience: string = 'specialist',
+  sourceDocIds: string[] = [],
 ): Promise<{ id?: string; error?: string }> {
   const caregiver = await getCaregiver()
   if (!caregiver) return { error: 'Unauthorized' }
@@ -329,6 +343,96 @@ PaperTrail Citation Requirement:
     const message = err instanceof Error ? err.message : String(err)
     console.error('[Briefing] Generation failed:', message)
     await db.update(briefings).set({ status: 'failed', error_message: message }).where(and(eq(briefings.id, briefingId), eq(briefings.caregiver_id, caregiver.id)))
+    return { error: message }
+  }
+}
+
+export async function askPatientClinicalQuery(
+  patientId: string,
+  question: string,
+): Promise<ClinicalQueryResult> {
+  const caregiver = await getCaregiver()
+  if (!caregiver) return { error: 'Unauthorized' }
+
+  const [patient] = await db
+    .select()
+    .from(patients)
+    .where(and(eq(patients.id, patientId), eq(patients.caregiver_id, caregiver.id)))
+    .limit(1)
+  if (!patient) return { error: 'Patient not found or unauthorized' }
+
+  const trimmedQuestion = question.trim()
+  if (!trimmedQuestion) return { error: 'Please enter a clinical question.' }
+
+  try {
+    // 1. Query Zep graph memory directly with the on-demand user question
+    let context = await queryPatientMemory(caregiver.id, patientId, trimmedQuestion)
+
+    // If Zep is empty, fallback to self-heal rebuild from PDF docs
+    if (!context || context.trim().length === 0) {
+      console.log('[Clinical Query] Zep memory empty — attempting rebuild from Blob PDFs...')
+      const patientDocs = await db
+        .select()
+        .from(documents)
+        .where(and(eq(documents.patient_id, patientId), eq(documents.caregiver_id, caregiver.id), eq(documents.status, 'extracted')))
+
+      for (const doc of patientDocs) {
+        if (doc.blob_url) {
+          try {
+            const res = await fetch(doc.blob_url)
+            if (res.ok) {
+              const buffer = Buffer.from(await res.arrayBuffer())
+              const extraction = await extractClinicalFacts(buffer, doc.filename)
+              await ingestDocumentFacts(caregiver.id, patientId, doc.id, doc.filename, extraction)
+            }
+          } catch (rebuildErr) {
+            console.warn('[Clinical Query Rebuild] Failed to reprocess doc:', doc.filename, rebuildErr)
+          }
+        }
+      }
+      context = await queryPatientMemory(caregiver.id, patientId, trimmedQuestion)
+    }
+
+    if (!context || context.trim().length === 0) {
+      return { error: 'No clinical facts available in records. Please upload at least one document first.' }
+    }
+
+    const patientHeader = `Patient: ${patient.name}, DOB: ${patient.date_of_birth}, Relationship: ${patient.relationship}`
+    const model = google(process.env.AI_MODEL || 'gemini-2.5-flash')
+
+    const SYSTEM_PROMPT = `You are a clinical AI assistant answering a specific clinical question about patient ${patient.name} based ONLY on their uploaded medical records and knowledge graph.
+
+Question: "${trimmedQuestion}"
+
+Guidelines:
+1. Provide a direct, factual, and concise answer formatted cleanly in Markdown (with bullet points or bold text where appropriate).
+2. Ground every single claim strictly in the provided clinical facts and episodes. Never hallucinate.
+3. If an aspect of the question is not documented in the records, explicitly state that it is not documented in the available records.
+4. For every specific fact, medication, date, lab value, or observation asserted, embed an inline token like [claim:c1], [claim:c2].
+5. For each claim in the schema:
+   - Mark flag: 'SUPPORTED', 'CONFLICTING', or 'MEDICAL_KNOWLEDGE'.
+   - In the evidence array, extract source_doc_id from [doc_id: <uuid>] and source_page from [page: <number>].
+   - If citing multiple documents or chronological changes, include an evidence item for each supporting document.`
+
+    const { object } = await generateObject({
+      model,
+      system: SYSTEM_PROMPT,
+      messages: [
+        {
+          role: 'user',
+          content: `${patientHeader}\n\nClinical Record & Graph Memory Context:\n\n${context}\n\nQuestion to answer: ${trimmedQuestion}`,
+        },
+      ],
+      schema: ClinicalQueryOutputSchema,
+    })
+
+    return {
+      answer: object.answer,
+      claims: object.claims,
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    console.error('[Clinical Query] Failed:', message)
     return { error: message }
   }
 }

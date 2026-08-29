@@ -7,7 +7,7 @@ import { useRouter } from 'next/navigation'
 import ReactMarkdown from 'react-markdown'
 import DocumentList from './DocumentList'
 import { PipelineBar } from './PipelineBar'
-import { generateBriefing, createBriefingRecord } from './pipeline-actions'
+import { generateBriefing, createBriefingRecord, askPatientClinicalQuery } from './pipeline-actions'
 
 // Demo data
 const DEMO_DOCUMENTS: Document[] = [
@@ -219,7 +219,19 @@ export default function PatientDetailClient({ patient, initialDocuments, initial
   const [activeBriefingId, setActiveBriefingId] = useState<string | null>(isDemo ? DEMO_BRIEFING.id : (initialBriefings[0]?.id ?? null))
   const [generating, setGenerating] = useState(false)
   const [uploadingFile, setUploadingFile] = useState(false)
-  const [audience, setAudience] = useState<'specialist' | 'gp' | 'family' | 'general' | 'er_visit' | 'second_opinion'>('specialist')
+  const [activeView, setActiveView] = useState<'briefing' | 'query'>('briefing')
+
+  // On-demand clinical query state
+  const [queryInput, setQueryInput] = useState('')
+  const [queryRunning, setQueryRunning] = useState(false)
+  const [queryError, setQueryError] = useState<string | null>(null)
+  const [queryHistory, setQueryHistory] = useState<Array<{
+    id: string
+    question: string
+    answer: string
+    claims: Claim[]
+    timestamp: string
+  }>>([])
 
   const activeBriefing = briefings.find(b => b.id === activeBriefingId) ?? briefings[0] ?? null
 
@@ -263,14 +275,14 @@ export default function PatientDetailClient({ patient, initialDocuments, initial
     if (isGuest) { alert('Sign in to generate briefings.'); return }
     setGenerating(true)
     try {
-      const result = await createBriefingRecord(patient.id, audience, documents.map(d => d.id))
+      const result = await createBriefingRecord(patient.id, 'specialist', documents.map(d => d.id))
       if (result.error || !result.id) throw new Error(result.error ?? 'No briefing ID')
       
       const newBriefing = {
         id: result.id,
         patient_id: patient.id,
         caregiver_id: patient.caregiver_id,
-        audience,
+        audience: 'specialist',
         status: 'queued',
         source_doc_ids: documents.map(d => d.id),
         created_at: new Date().toISOString()
@@ -279,7 +291,7 @@ export default function PatientDetailClient({ patient, initialDocuments, initial
       setBriefings(prev => [newBriefing as Briefing, ...prev])
       setActiveBriefingId(result.id)
 
-      generateBriefing(patient.id, result.id, audience)
+      generateBriefing(patient.id, result.id, 'specialist')
         .then(res => {
           if (res?.error) console.error('[Briefing] Failed:', res.error)
           router.refresh()
@@ -289,6 +301,67 @@ export default function PatientDetailClient({ patient, initialDocuments, initial
       alert('Failed to start briefing: ' + (err instanceof Error ? err.message : 'Unknown error'))
     } finally {
       setGenerating(false)
+    }
+  }
+
+  const handleRunQuery = async (customQuestion?: string) => {
+    const q = (customQuestion || queryInput).trim()
+    if (!q) return
+    if (isGuest) {
+      alert('Sign in to run on-demand record queries.')
+      return
+    }
+    if (documents.length === 0) {
+      alert('Please upload at least one document before asking questions.')
+      return
+    }
+
+    setQueryRunning(true)
+    setQueryError(null)
+
+    if (isDemo) {
+      setTimeout(() => {
+        const demoClaims: Claim[] = [
+          { claim_id: 'c1', claim_text: 'GFR has fallen from 65 to 47', claim_type: 'source_document', flag: 'SUPPORTED', evidence: [{ source_doc_id: 'd1', source_quote: 'eGFR 47 mL/min/1.73m2', source_page: 1 }] },
+          { claim_id: 'c2', claim_text: 'Lisinopril 10 mg daily prescribed 2024-03-14', claim_type: 'source_document', flag: 'SUPPORTED', evidence: [{ source_doc_id: 'd2', source_quote: 'Lisinopril 10 mg PO daily', source_page: 1 }] },
+        ]
+        setQueryHistory(prev => [
+          {
+            id: 'demo-q-' + Date.now(),
+            question: q,
+            answer: `Based on Margaret's records, eGFR shows a documented decline from 65 down to 47 across lab tests [claim:c1]. Lisinopril 10 mg daily was prescribed on 2024-03-14 [claim:c2].`,
+            claims: demoClaims,
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          },
+          ...prev,
+        ])
+        setQueryInput('')
+        setQueryRunning(false)
+      }, 700)
+      return
+    }
+
+    try {
+      const res = await askPatientClinicalQuery(patient.id, q)
+      if (res.error || !res.answer) {
+        setQueryError(res.error || 'Failed to retrieve answer from records.')
+      } else {
+        setQueryHistory(prev => [
+          {
+            id: 'q-' + Date.now(),
+            question: q,
+            answer: res.answer!,
+            claims: (res.claims as Claim[]) || [],
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          },
+          ...prev,
+        ])
+        setQueryInput('')
+      }
+    } catch (err) {
+      setQueryError(err instanceof Error ? err.message : 'Unknown query error')
+    } finally {
+      setQueryRunning(false)
     }
   }
 
@@ -377,131 +450,321 @@ export default function PatientDetailClient({ patient, initialDocuments, initial
 
           {!isDemo && !isGuest && (
             <div className="border-t border-border p-4 shrink-0">
-              <div className="flex items-center gap-2 mb-2">
-                <select value={audience} onChange={(e) => setAudience(e.target.value as typeof audience)}
-                  className="flex-1 bg-background border border-border rounded px-2 py-1.5 text-[11px] text-foreground font-mono focus:outline-none focus:border-accent">
-                  <option value="specialist">Specialist</option><option value="gp">GP</option><option value="family">Family</option>
-                  <option value="general">General</option><option value="er_visit">ER Visit</option><option value="second_opinion">2nd Opinion</option>
-                </select>
-                <button onClick={handleGenerateBriefing} disabled={generating || documents.length === 0}
-                  className="flex-1 bg-accent text-background font-mono text-[11px] font-semibold py-1.5 px-3 rounded hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed">
-                  {generating ? 'Starting...' : 'Generate briefing'}
-                </button>
-              </div>
+              <button
+                onClick={handleGenerateBriefing}
+                disabled={generating || documents.length === 0}
+                className="w-full bg-accent text-background font-mono text-[11px] font-semibold py-2 px-3 rounded hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+              >
+                {generating ? 'Generating briefing...' : 'Generate Specialist Briefing'}
+              </button>
             </div>
           )}
         </aside>
 
-        <main className="flex-1 overflow-y-auto">
-          {briefings.length > 1 && (
-            <div className="border-b border-border px-6 py-2 flex items-center gap-2 overflow-x-auto">
-              {briefings.map(b => (
-                <button key={b.id} onClick={() => setActiveBriefingId(b.id)}
-                  className={`font-mono text-[10px] px-3 py-1.5 rounded border whitespace-nowrap transition-colors ${b.id === activeBriefingId ? 'bg-accent-dim border-accent/40 text-accent' : 'border-border text-muted-foreground hover:border-foreground/30 hover:text-foreground'}`}>
-                  {b.audience?.toUpperCase()} · {new Date(b.created_at).toLocaleDateString()}
-                </button>
-              ))}
+        <main className="flex-1 overflow-y-auto flex flex-col">
+          {/* Mode Switcher Bar */}
+          <div className="border-b border-border px-8 py-2.5 flex items-center justify-between bg-surface sticky top-0 z-10 shrink-0">
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setActiveView('briefing')}
+                className={`font-mono text-[11px] px-3.5 py-1.5 rounded font-semibold transition-colors flex items-center gap-1.5 ${
+                  activeView === 'briefing'
+                    ? 'bg-accent text-background'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-surface-raised border border-border'
+                }`}
+              >
+                <span>📋</span> Specialist Briefing
+              </button>
+              <button
+                onClick={() => setActiveView('query')}
+                className={`font-mono text-[11px] px-3.5 py-1.5 rounded font-semibold transition-colors flex items-center gap-1.5 ${
+                  activeView === 'query'
+                    ? 'bg-accent text-background'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-surface-raised border border-border'
+                }`}
+              >
+                <span>🔍</span> On-Demand Record Query
+                {queryHistory.length > 0 && (
+                  <span className="ml-1 text-[9px] bg-background/20 px-1.5 py-0.2 rounded-full">
+                    {queryHistory.length}
+                  </span>
+                )}
+              </button>
             </div>
-          )}
+          </div>
 
-          {activeBriefing ? (
-            <div className="px-8 py-6 max-w-3xl">
-              <div className="flex items-start justify-between mb-5">
-                <div>
-                  <h2 className="text-[16px] font-semibold text-foreground">
-                    {activeBriefing.audience ? activeBriefing.audience.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase()) : 'Briefing'} Briefing
-                  </h2>
-                  <p className="font-mono text-[10px] text-muted-foreground mt-1">Generated {new Date(activeBriefing.created_at).toLocaleString()}</p>
+          {activeView === 'query' ? (
+            <div className="px-8 py-6 max-w-3xl flex-1">
+              <div className="mb-6">
+                <div className="flex items-center gap-2">
+                  <h2 className="text-[16px] font-semibold text-foreground">On-Demand Clinical Query</h2>
+                  <span className="font-mono text-[9px] border border-accent/40 text-accent bg-accent-dim px-2 py-0.5 rounded">ZEP GRAPH MEMORY</span>
                 </div>
-                <span className={`font-mono text-[9px] px-2 py-1 rounded border ${
-                  activeBriefing.status === 'complete' ? 'text-success border-success/30 bg-success-dim' :
-                  activeBriefing.status === 'processing' || activeBriefing.status === 'queued' ? 'text-accent border-accent/30 bg-accent-dim' :
-                  activeBriefing.status === 'failed' ? 'text-alert border-alert/30 bg-alert-dim' : 'text-muted-foreground border-border'}`}>
-                  {activeBriefing.status?.toUpperCase()}
-                </span>
+                <p className="text-[12px] text-muted-foreground mt-1">
+                  Ask any specific clinical question across {patient.name}&apos;s documents. Facts and numbers are grounded in Zep graph memory with interactive PaperTrail citations.
+                </p>
               </div>
 
-              {claimsArray.length > 0 && (
-                <div className="border border-border rounded-md bg-surface-raised px-4 py-3 mb-6 flex items-center gap-6">
-                  <div>
-                    <p className="font-mono text-[10px] text-accent tracking-widest uppercase mb-0.5">PaperTrail</p>
-                    <p className="font-mono text-[9px] text-muted-foreground">Every claim traced to source</p>
+              {/* Query Input Box */}
+              <div className="border border-border rounded-lg bg-surface-raised p-4 mb-6 shadow-sm">
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault()
+                    handleRunQuery()
+                  }}
+                  className="flex flex-col gap-3"
+                >
+                  <div className="relative">
+                    <input
+                      type="text"
+                      value={queryInput}
+                      onChange={(e) => setQueryInput(e.target.value)}
+                      placeholder={`Ask a question (e.g., "What was the Olanzapine dosage change in 2025?", "List all kidney lab values")`}
+                      disabled={queryRunning}
+                      className="w-full bg-background border border-border rounded-md px-3.5 py-2.5 text-[13px] text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-accent disabled:opacity-50"
+                    />
                   </div>
-                  <div className="flex items-center gap-4 ml-auto flex-wrap justify-end">
-                    {supported > 0 && <div className="flex items-center gap-1.5"><div className="w-1.5 h-1.5 rounded-full bg-success" /><span className="font-mono text-[10px] text-muted-foreground">{supported} supported</span></div>}
-                    {conflicting > 0 && <div className="flex items-center gap-1.5"><div className="w-1.5 h-1.5 rounded-full bg-amber-400" /><span className="font-mono text-[10px] text-muted-foreground">{conflicting} conflicting</span></div>}
-                    {absences > 0 && <div className="flex items-center gap-1.5"><div className="w-1.5 h-1.5 rounded-full bg-purple-400" /><span className="font-mono text-[10px] text-muted-foreground">{absences} not documented</span></div>}
-                    {partial > 0 && <div className="flex items-center gap-1.5"><div className="w-1.5 h-1.5 rounded-full bg-warning" /><span className="font-mono text-[10px] text-muted-foreground">{partial} partial</span></div>}
-                    {unsupported > 0 && <div className="flex items-center gap-1.5"><div className="w-1.5 h-1.5 rounded-full bg-alert" /><span className="font-mono text-[10px] text-muted-foreground">{unsupported} unsupported</span></div>}
-                  </div>
-                </div>
-              )}
 
-              {(activeBriefing.status === 'processing' || activeBriefing.status === 'queued') && (
-                <div className="border border-accent/20 bg-accent-dim rounded-md px-5 py-8 text-center mb-6">
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="font-mono text-[9px] text-muted-foreground uppercase mr-1">Quick Prompts:</span>
+                      {[
+                        'Medication changes & timeline',
+                        'Lab trends & biomarkers',
+                        'Any seizure or allergy history?',
+                        'Discontinued treatments & rationale',
+                      ].map((promptText, i) => (
+                        <button
+                          key={i}
+                          type="button"
+                          onClick={() => {
+                            setQueryInput(promptText)
+                            handleRunQuery(promptText)
+                          }}
+                          disabled={queryRunning}
+                          className="font-mono text-[9px] border border-border bg-surface px-2 py-1 rounded text-muted-foreground hover:text-foreground hover:border-accent/40 transition-colors disabled:opacity-50"
+                        >
+                          {promptText}
+                        </button>
+                      ))}
+                    </div>
+
+                    <button
+                      type="submit"
+                      disabled={queryRunning || !queryInput.trim()}
+                      className="bg-accent text-background font-mono text-[11px] font-semibold px-4 py-2 rounded hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed shrink-0 ml-auto flex items-center gap-1.5"
+                    >
+                      {queryRunning ? (
+                        <>
+                          <div className="w-1.5 h-1.5 rounded-full bg-background animate-pulse" />
+                          Searching records...
+                        </>
+                      ) : (
+                        'Ask Records ↗'
+                      )}
+                    </button>
+                  </div>
+                </form>
+
+                {queryError && (
+                  <div className="mt-3 border border-alert/30 bg-alert-dim rounded px-3 py-2 text-[12px] text-alert">
+                    {queryError}
+                  </div>
+                )}
+              </div>
+
+              {/* Query Running Progress */}
+              {queryRunning && (
+                <div className="border border-accent/20 bg-accent-dim rounded-md px-5 py-6 text-center mb-6">
                   <div className="flex items-center justify-center gap-2 mb-2">
                     <div className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />
-                    <div className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" style={{animationDelay: '0.2s'}} />
-                    <div className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" style={{animationDelay: '0.4s'}} />
+                    <div className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" style={{ animationDelay: '0.2s' }} />
+                    <div className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" style={{ animationDelay: '0.4s' }} />
                   </div>
-                  <p className="font-mono text-[11px] text-accent">Analysing documents and building briefing...</p>
-                  <p className="text-[11px] text-muted-foreground mt-1">This takes 30–90 seconds. Results appear automatically.</p>
+                  <p className="font-mono text-[11px] text-accent">Querying Zep graph memory & verifying citations...</p>
                 </div>
               )}
 
-              {activeBriefing.status === 'failed' && activeBriefing.error_message && (
-                <div className="border border-alert/30 bg-alert-dim rounded-md px-4 py-3 mb-6">
-                  <p className="font-mono text-[10px] text-alert mb-1">BRIEFING FAILED</p>
-                  <p className="text-[12px] text-foreground">{activeBriefing.error_message}</p>
-                </div>
-              )}
-
-              {activeBriefing.briefing_text && (
-                <div className="space-y-0">
-                  {(() => {
-                    const claimsMap = claimsArray.reduce<Record<string, Claim>>((acc, c) => {
+              {/* Query History Answers */}
+              {queryHistory.length > 0 ? (
+                <div className="space-y-6">
+                  {queryHistory.map((item) => {
+                    const claimsMap = item.claims.reduce<Record<string, Claim>>((acc, c) => {
                       if (c.claim_id) acc[c.claim_id] = c
                       return acc
                     }, {})
 
                     return (
-                      <ReactMarkdown components={{
-                        h2: ({ children }) => <h2 className="font-mono text-[9px] tracking-widest text-muted-foreground uppercase mt-8 mb-3 pb-2 border-b border-border">{renderContentWithClaims(children, claimsMap, handleDocClick, documents)}</h2>,
-                        p: ({ children }) => <p className="text-[13px] text-foreground leading-relaxed mb-4">{renderContentWithClaims(children, claimsMap, handleDocClick, documents)}</p>,
-                        li: ({ children }) => (
-                          <li className="flex items-baseline gap-2 text-[13px] text-foreground mb-2">
-                            <span className="w-1 h-1 rounded-full bg-muted-foreground mt-2 shrink-0" />
-                            <span>{renderContentWithClaims(children, claimsMap, handleDocClick, documents)}</span>
-                          </li>
-                        ),
-                        ul: ({ children }) => <ul className="list-none pl-0 my-3 space-y-0">{children}</ul>,
-                        ol: ({ children }) => <ol className="list-decimal pl-5 my-3 space-y-1 text-[13px] text-foreground">{children}</ol>,
-                        strong: ({ children }) => <strong className="font-semibold text-foreground">{renderContentWithClaims(children, claimsMap, handleDocClick, documents)}</strong>,
-                        code: ({ children }) => <code className="font-mono text-[11px] bg-surface-raised border border-border px-1.5 py-0.5 rounded text-accent">{children}</code>,
-                      }}>{activeBriefing.briefing_text}</ReactMarkdown>
+                      <div key={item.id} className="border border-border rounded-lg bg-surface overflow-hidden">
+                        <div className="bg-surface-raised px-4 py-2.5 border-b border-border flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <span className="font-mono text-[10px] text-accent font-bold">Q:</span>
+                            <span className="text-[13px] font-semibold text-foreground">{item.question}</span>
+                          </div>
+                          <span className="font-mono text-[9px] text-muted-foreground">{item.timestamp}</span>
+                        </div>
+                        <div className="p-4 text-[13px] text-foreground leading-relaxed">
+                          <ReactMarkdown
+                            components={{
+                              h2: ({ children }) => (
+                                <h2 className="font-mono text-[9px] tracking-widest text-muted-foreground uppercase mt-4 mb-2 pb-1 border-b border-border">
+                                  {renderContentWithClaims(children, claimsMap, handleDocClick, documents)}
+                                </h2>
+                              ),
+                              p: ({ children }) => (
+                                <p className="text-[13px] text-foreground leading-relaxed mb-3">
+                                  {renderContentWithClaims(children, claimsMap, handleDocClick, documents)}
+                                </p>
+                              ),
+                              li: ({ children }) => (
+                                <li className="flex items-baseline gap-2 text-[13px] text-foreground mb-1.5">
+                                  <span className="w-1 h-1 rounded-full bg-muted-foreground mt-2 shrink-0" />
+                                  <span>{renderContentWithClaims(children, claimsMap, handleDocClick, documents)}</span>
+                                </li>
+                              ),
+                              ul: ({ children }) => <ul className="list-none pl-0 my-2 space-y-0">{children}</ul>,
+                              ol: ({ children }) => <ol className="list-decimal pl-5 my-2 space-y-1 text-[13px] text-foreground">{children}</ol>,
+                              strong: ({ children }) => (
+                                <strong className="font-semibold text-foreground">
+                                  {renderContentWithClaims(children, claimsMap, handleDocClick, documents)}
+                                </strong>
+                              ),
+                              code: ({ children }) => (
+                                <code className="font-mono text-[11px] bg-surface-raised border border-border px-1.5 py-0.5 rounded text-accent">
+                                  {children}
+                                </code>
+                              ),
+                            }}
+                          >
+                            {item.answer}
+                          </ReactMarkdown>
+                        </div>
+                      </div>
                     )
-                  })()}
+                  })}
                 </div>
-              )}
-
-              {isDemo && (
-                <div className="border-t border-border mt-8 pt-6">
-                  <p className="font-mono text-[9px] tracking-widest text-muted-foreground uppercase mb-2">This is a demo briefing</p>
-                  <p className="text-[12px] text-muted-foreground leading-relaxed">Real briefings are generated from your uploaded documents. Every claim above would link to an exact source quote, page number, and date. <Link href="/signup" className="text-accent hover:underline">Create an account</Link> to get started.</p>
+              ) : !queryRunning && (
+                <div className="border border-dashed border-border rounded-lg p-8 text-center">
+                  <p className="font-mono text-[10px] tracking-widest text-muted-foreground uppercase mb-2">No queries asked yet</p>
+                  <p className="text-[12px] text-muted-foreground max-w-sm mx-auto">
+                    Type any clinical question above or select a quick prompt to query {patient.name}&apos;s verified timeline and documents.
+                  </p>
                 </div>
               )}
             </div>
           ) : (
-            <div className="flex-1 flex items-center justify-center px-8 py-16">
-              <div className="text-center max-w-sm">
-                <p className="font-mono text-[9px] tracking-widest text-muted-foreground uppercase mb-3">No briefing yet</p>
-                <p className="text-[13px] text-muted-foreground leading-relaxed mb-4">Upload at least one document, then generate a briefing.</p>
-                {!isGuest && documents.length > 0 && (
-                  <button onClick={handleGenerateBriefing} disabled={generating} className="bg-accent text-background font-mono text-[11px] font-semibold px-4 py-2 rounded hover:opacity-90 transition-opacity disabled:opacity-50">
-                    {generating ? 'Starting...' : 'Generate briefing'}
-                  </button>
-                )}
-              </div>
+            <div className="flex-1">
+              {briefings.length > 1 && (
+                <div className="border-b border-border px-6 py-2 flex items-center gap-2 overflow-x-auto">
+                  {briefings.map(b => (
+                    <button key={b.id} onClick={() => setActiveBriefingId(b.id)}
+                      className={`font-mono text-[10px] px-3 py-1.5 rounded border whitespace-nowrap transition-colors ${b.id === activeBriefingId ? 'bg-accent-dim border-accent/40 text-accent' : 'border-border text-muted-foreground hover:border-foreground/30 hover:text-foreground'}`}>
+                      {b.audience?.toUpperCase() === 'SPECIALIST' ? 'SPECIALIST' : (b.audience?.toUpperCase() || 'BRIEFING')} · {new Date(b.created_at).toLocaleDateString()}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {activeBriefing ? (
+                <div className="px-8 py-6 max-w-3xl">
+                  <div className="flex items-start justify-between mb-5">
+                    <div>
+                      <h2 className="text-[16px] font-semibold text-foreground">
+                        Specialist Briefing
+                      </h2>
+                      <p className="font-mono text-[10px] text-muted-foreground mt-1">Generated {new Date(activeBriefing.created_at).toLocaleString()}</p>
+                    </div>
+                    <span className={`font-mono text-[9px] px-2 py-1 rounded border ${
+                      activeBriefing.status === 'complete' ? 'text-success border-success/30 bg-success-dim' :
+                      activeBriefing.status === 'processing' || activeBriefing.status === 'queued' ? 'text-accent border-accent/30 bg-accent-dim' :
+                      activeBriefing.status === 'failed' ? 'text-alert border-alert/30 bg-alert-dim' : 'text-muted-foreground border-border'}`}>
+                      {activeBriefing.status?.toUpperCase()}
+                    </span>
+                  </div>
+
+                  {claimsArray.length > 0 && (
+                    <div className="border border-border rounded-md bg-surface-raised px-4 py-3 mb-6 flex items-center gap-6">
+                      <div>
+                        <p className="font-mono text-[10px] text-accent tracking-widest uppercase mb-0.5">PaperTrail</p>
+                        <p className="font-mono text-[9px] text-muted-foreground">Every claim traced to source</p>
+                      </div>
+                      <div className="flex items-center gap-4 ml-auto flex-wrap justify-end">
+                        {supported > 0 && <div className="flex items-center gap-1.5"><div className="w-1.5 h-1.5 rounded-full bg-success" /><span className="font-mono text-[10px] text-muted-foreground">{supported} supported</span></div>}
+                        {conflicting > 0 && <div className="flex items-center gap-1.5"><div className="w-1.5 h-1.5 rounded-full bg-amber-400" /><span className="font-mono text-[10px] text-muted-foreground">{conflicting} conflicting</span></div>}
+                        {absences > 0 && <div className="flex items-center gap-1.5"><div className="w-1.5 h-1.5 rounded-full bg-purple-400" /><span className="font-mono text-[10px] text-muted-foreground">{absences} not documented</span></div>}
+                        {partial > 0 && <div className="flex items-center gap-1.5"><div className="w-1.5 h-1.5 rounded-full bg-warning" /><span className="font-mono text-[10px] text-muted-foreground">{partial} partial</span></div>}
+                        {unsupported > 0 && <div className="flex items-center gap-1.5"><div className="w-1.5 h-1.5 rounded-full bg-alert" /><span className="font-mono text-[10px] text-muted-foreground">{unsupported} unsupported</span></div>}
+                      </div>
+                    </div>
+                  )}
+
+                  {(activeBriefing.status === 'processing' || activeBriefing.status === 'queued') && (
+                    <div className="border border-accent/20 bg-accent-dim rounded-md px-5 py-8 text-center mb-6">
+                      <div className="flex items-center justify-center gap-2 mb-2">
+                        <div className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />
+                        <div className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" style={{animationDelay: '0.2s'}} />
+                        <div className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" style={{animationDelay: '0.4s'}} />
+                      </div>
+                      <p className="font-mono text-[11px] text-accent">Analysing documents and building briefing...</p>
+                      <p className="text-[11px] text-muted-foreground mt-1">This takes 30–90 seconds. Results appear automatically.</p>
+                    </div>
+                  )}
+
+                  {activeBriefing.status === 'failed' && activeBriefing.error_message && (
+                    <div className="border border-alert/30 bg-alert-dim rounded-md px-4 py-3 mb-6">
+                      <p className="font-mono text-[10px] text-alert mb-1">BRIEFING FAILED</p>
+                      <p className="text-[12px] text-foreground">{activeBriefing.error_message}</p>
+                    </div>
+                  )}
+
+                  {activeBriefing.briefing_text && (
+                    <div className="space-y-0">
+                      {(() => {
+                        const claimsMap = claimsArray.reduce<Record<string, Claim>>((acc, c) => {
+                          if (c.claim_id) acc[c.claim_id] = c
+                          return acc
+                        }, {})
+
+                        return (
+                          <ReactMarkdown components={{
+                            h2: ({ children }) => <h2 className="font-mono text-[9px] tracking-widest text-muted-foreground uppercase mt-8 mb-3 pb-2 border-b border-border">{renderContentWithClaims(children, claimsMap, handleDocClick, documents)}</h2>,
+                            p: ({ children }) => <p className="text-[13px] text-foreground leading-relaxed mb-4">{renderContentWithClaims(children, claimsMap, handleDocClick, documents)}</p>,
+                            li: ({ children }) => (
+                              <li className="flex items-baseline gap-2 text-[13px] text-foreground mb-2">
+                                <span className="w-1 h-1 rounded-full bg-muted-foreground mt-2 shrink-0" />
+                                <span>{renderContentWithClaims(children, claimsMap, handleDocClick, documents)}</span>
+                              </li>
+                            ),
+                            ul: ({ children }) => <ul className="list-none pl-0 my-3 space-y-0">{children}</ul>,
+                            ol: ({ children }) => <ol className="list-decimal pl-5 my-3 space-y-1 text-[13px] text-foreground">{children}</ol>,
+                            strong: ({ children }) => <strong className="font-semibold text-foreground">{renderContentWithClaims(children, claimsMap, handleDocClick, documents)}</strong>,
+                            code: ({ children }) => <code className="font-mono text-[11px] bg-surface-raised border border-border px-1.5 py-0.5 rounded text-accent">{children}</code>,
+                          }}>{activeBriefing.briefing_text}</ReactMarkdown>
+                        )
+                      })()}
+                    </div>
+                  )}
+
+                  {isDemo && (
+                    <div className="border-t border-border mt-8 pt-6">
+                      <p className="font-mono text-[9px] tracking-widest text-muted-foreground uppercase mb-2">This is a demo briefing</p>
+                      <p className="text-[12px] text-muted-foreground leading-relaxed">Real briefings are generated from your uploaded documents. Every claim above would link to an exact source quote, page number, and date. <Link href="/signup" className="text-accent hover:underline">Create an account</Link> to get started.</p>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="flex-1 flex items-center justify-center px-8 py-16">
+                  <div className="text-center max-w-sm">
+                    <p className="font-mono text-[9px] tracking-widest text-muted-foreground uppercase mb-3">No briefing yet</p>
+                    <p className="text-[13px] text-muted-foreground leading-relaxed mb-4">Upload at least one document, then generate a briefing.</p>
+                    {!isGuest && documents.length > 0 && (
+                      <button onClick={handleGenerateBriefing} disabled={generating} className="bg-accent text-background font-mono text-[11px] font-semibold px-4 py-2 rounded hover:opacity-90 transition-opacity disabled:opacity-50">
+                        {generating ? 'Starting...' : 'Generate Specialist Briefing'}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </main>
