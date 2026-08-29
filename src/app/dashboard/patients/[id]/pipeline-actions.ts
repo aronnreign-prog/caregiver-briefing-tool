@@ -110,7 +110,7 @@ const BriefingOutputSchema = z.object({
   })),
 })
 
-export const ClinicalQueryOutputSchema = z.object({
+const ClinicalQueryOutputSchema = z.object({
   answer: z.string().describe('The clinical answer in markdown with inline [claim:c1], [claim:c2] citations.'),
   claims: z.array(
     z.object({
