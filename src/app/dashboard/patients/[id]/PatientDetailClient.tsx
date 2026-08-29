@@ -168,15 +168,27 @@ function renderContentWithClaims(
   documents: Document[] = []
 ): React.ReactNode {
   if (typeof node === 'string') {
-    const parts = node.split(/(\[claim:[a-zA-Z0-9_-]+\])/g)
+    const parts = node.split(/(\[claim:[^\]]+\])/g)
     if (parts.length === 1) return node
     return parts.map((part, i) => {
-      const match = part.match(/^\[claim:([a-zA-Z0-9_-]+)\]$/)
+      const match = part.match(/^\[claim:([^\]]+)\]$/)
       if (match) {
-        const claimId = match[1]
-        const claim = claimsMap[claimId]
-        if (claim) {
-          return <CitationChip key={i} claim={claim} onDocClick={onDocClick} documents={documents} />
+        const rawContent = match[1]
+        const idMatches = rawContent.match(/[a-zA-Z0-9_-]+/g) ?? []
+        const validChips: React.ReactNode[] = []
+
+        idMatches.forEach((rawId, subIdx) => {
+          const claimId = rawId.replace(/^claim:/, '')
+          const claim = claimsMap[claimId]
+          if (claim) {
+            validChips.push(
+              <CitationChip key={`${i}-${subIdx}`} claim={claim} onDocClick={onDocClick} documents={documents} />
+            )
+          }
+        })
+
+        if (validChips.length > 0) {
+          return <React.Fragment key={i}>{validChips}</React.Fragment>
         }
         return null
       }

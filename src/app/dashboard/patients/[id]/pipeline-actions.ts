@@ -144,12 +144,8 @@ export type ClinicalQueryResult = {
 
 export type BriefingAudience = 'specialist' | 'gp' | 'family' | 'general' | 'er_visit' | 'second_opinion'
 
-function buildZepQuery(audience?: string): string {
-  return 'longitudinal lab trends kidney renal cardiovascular metabolic psychiatric medications exact values drug interactions contraindications'
-}
-
-function audienceInstruction(audience?: string): string {
-  return 'Write for a specialist — include lab trends, exact values, drug interactions, clinical reasoning.'
+function buildZepQuery(): string {
+  return 'comprehensive longitudinal clinical trajectory medications diagnoses lab results vitals and safety flags'
 }
 
 export async function createBriefingRecord(
@@ -215,8 +211,8 @@ export async function generateBriefing(
     .where(and(eq(briefings.id, briefingId), eq(briefings.caregiver_id, caregiver.id)))
 
   try {
-    // 1. Query Zep with audience-dynamic query — the single source of truth for clinical memory
-    const zepQuery = buildZepQuery(audience)
+    // 1. Query Zep with clinical intent query — the single source of truth for clinical memory
+    const zepQuery = buildZepQuery()
     let context = await queryPatientMemory(caregiver.id, patientId, zepQuery)
 
     // 2. If Zep is empty (deleted, never ingested, or any other reason),
@@ -284,10 +280,10 @@ export async function generateBriefing(
     console.log('=== [END CONTEXT HEADER] ===')
     // ───────────────────────────────────────────────────────────────────────
 
-    const SYSTEM_PROMPT = `You are a clinical AI assistant generating a structured medical briefing.
-${audienceInstruction(audience)}
+    const SYSTEM_PROMPT = `You are a clinical AI assistant generating a structured specialist medical briefing.
+Write for a medical specialist — include longitudinal trends, exact medication dosages, drug interactions, clinical reasoning, and notable absences.
 
-Use only the clinical facts provided in the context. Do not hallucinate or invent clinical findings.
+Use ONLY the clinical facts provided in the context. Do not hallucinate or invent clinical findings.
 For each claim, mark it:
 - SUPPORTED: directly confirmed by records
 - CONFLICTING: contradictory findings or superseded/invalidated diagnoses/allergies across records
@@ -295,44 +291,32 @@ For each claim, mark it:
 - NOTABLE_ABSENCE (claim_type): an expected clinical test, monitoring baseline, or history is conspicuously missing
 - UNVERIFIED: uncertain or unconfirmed
 
-Clinical Triage & Synthesis Hierarchy:
-1. CRITICAL & URGENT SAFETY:
-   - Identify and flag any drug-drug interactions, contraindications, or lab values outside safe therapeutic ranges as flagged_concerns.
-2. ACTIVE MEDICATIONS & CURRENT DIAGNOSES:
-   - Detail current active medications with exact dosages, schedules, and start/change dates.
-   - Note if prior medications were discontinued or superseded (check temporal tags like [SUPERSEDED/INVALIDATED as of: ...]).
-   - Summarize active medical conditions and chief complaints.
-3. LONGITUDINAL TRAJECTORY & MULTI-SYSTEM TRENDS:
-   - For every organ system with recorded lab tests (e.g. renal, cardiovascular, metabolic, hepatic, hematologic), track values chronologically over time.
-   - If multiple historical values exist, explicitly show the chronological progression (e.g., "eGFR: 65 (Jun 2022) → 58 (Dec 2022) → 47 (Dec 2023) - consistent decline").
-   - Synthesize multiple concurrent trends across different organ systems rather than focusing on only one.
-4. NOTABLE ABSENCES & CONFLICTING DATA:
-   - If a vital test, follow-up monitor, or clinical history is conspicuously missing for a patient with these conditions, record a claim with claim_type: "notable_absence".
-   - If records disagree or a diagnosis/allergy was superseded, flag the claim as "CONFLICTING".
-5. STABLE BASELINE ACKNOWLEDGEMENT:
-   - If a patient or specific clinical parameter is stable with no adverse changes, drug interactions, or concerning drifts, state this clearly (e.g., "Patient maintains a stable clinical baseline with no acute safety flags"). Do not invent non-existent trends.
-6. SCALE DEPTH TO RECORD VOLUME:
-   - Synthesize a comprehensive briefing that covers all key clinical systems without unnecessary brevity when longitudinal records are provided.
+Clinical Narrative Structure:
+1. Patient Demographics & Baseline Overview: Start with patient identity, DOB/age, and core history.
+2. Longitudinal Clinical Trajectory: Synthesize the clinical history in chronological epochs (e.g. Initial Presentation & Diagnosis, Behavioral Management across years, Recent Trajectory). Write rich narrative prose rather than isolated bullet points.
+3. Active Pharmacotherapy & Multi-System Baselines: Detail current active medications with exact dosages and active conditions. Note if prior medications were discontinued or superseded.
+4. Flagged Safety Concerns & Discrepancies: Highlight acute contraindications, significant dosage fluctuations, abrupt discontinuations, or missing monitoring baselines.
 
 PaperTrail Citation Requirement:
-- Embed inline claim markers like [claim:c1], [claim:c2] in the briefing_text immediately after each factual statement, lab value, medication, or concern being asserted.
-- Every [claim:cN] in the text must have a corresponding entry in the 'claims' array with matching claim_id ("cN").
-- In each claim's evidence array, cite EVERY source document and page that supports the claim (extract source_doc_id from [doc_id: <uuid>] and source_page from [page: <number>] found inside <CHRONOLOGICAL_EVIDENCE>). For longitudinal trends spanning multiple dates/visits, include an evidence entry for each supporting document.
-- Narrative Formatting: Synthesize the clinical journey and trends into clean, cohesive clinical paragraphs. Do NOT generate a bloated date-by-date list of every visit unless directly relevant to an acute clinical shift.`
+- Embed inline claim markers like [claim:c1], [claim:c2] immediately after each factual assertion, lab value, medication dose, or concern.
+- Write individual claim tokens (e.g., [claim:c1][claim:c2]). Do NOT bundle multiple claim IDs inside a single comma-separated bracket.
+- In each claim's evidence array, cite EVERY source document and page that supports the claim (extract source_doc_id from [doc_id: <uuid>] and source_page from [page: <number>] found inside <CHRONOLOGICAL_EVIDENCE>). For longitudinal trends spanning multiple dates/visits, include an evidence entry for each supporting document.`
 
     const { object } = await generateObject({
       model,
       system: SYSTEM_PROMPT,
       messages: [{
         role: 'user',
-        content: `${patientHeader}\n\nExtracted clinical facts:\n\n${context}\n\nGenerate a comprehensive ${audience} briefing with inline [claim:cN] citations.`,
+        content: `${patientHeader}\n\nExtracted clinical facts:\n\n${context}\n\nGenerate a comprehensive specialist briefing with inline [claim:cN] citations.`,
       }],
       schema: BriefingOutputSchema,
     })
 
+    const cleanedBriefingText = object.briefing_text.replace(/^[0-9]+\s+/, '').trim()
+
     await db.update(briefings).set({
       status: 'complete',
-      briefing_text: object.briefing_text,
+      briefing_text: cleanedBriefingText,
       claims: object.claims,
       flagged_concerns: object.flagged_concerns,
       completed_at: new Date(),
