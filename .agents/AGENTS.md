@@ -23,39 +23,6 @@ The codebase has been fully migrated twice:
 1. **2026-08-19**: Python/Deno/Docker → TypeScript Next.js monolith
 2. **2026-08-20**: Supabase (Auth + Postgres + Storage) → Better Auth + Drizzle/Neon + Vercel Blob
 
-### What Changed (2026-08-20 migration)
-
-**Deleted:**
-- `src/lib/supabase/` (server.ts, client.ts) — Supabase clients gone entirely
-- `supabase/config.toml` — Supabase project config
-- `@supabase/ssr`, `@supabase/supabase-js` — uninstalled from package.json
-- `PatientRealtime.tsx` — deleted (polling handled by PatientDetailClient)
-
-**Added:**
-- `src/lib/auth.ts` — Better Auth instance (Drizzle adapter, email/password)
-- `src/lib/auth-session.ts` — `getSession()` + `getCaregiver()` React cache() helpers
-- `src/lib/auth-client.ts` — browser-side Better Auth client
-- `src/lib/db/schema.ts` — Drizzle table definitions (caregivers, patients, documents, briefings)
-- `src/lib/db/index.ts` — Neon serverless + Drizzle client
-- `drizzle.config.ts` — Drizzle Kit config
-- `src/app/api/auth/[...all]/route.ts` — Better Auth catch-all handler
-- `src/app/api/upload/route.ts` — Vercel Blob server upload handler
-- `src/app/api/patients/[id]/documents/route.ts` — polling API
-- `src/app/api/patients/[id]/briefings/route.ts` — polling API
-
-**Updated:**
-- `src/proxy.ts` — Better Auth session check (was Supabase)
-- `src/app/auth/actions.ts` — Better Auth sign-in/sign-up/sign-out (was Supabase Auth)
-- `src/app/dashboard/actions.ts` — Drizzle queries (was Supabase client)
-- `src/app/dashboard/patients/[id]/pipeline-actions.ts` — Drizzle + Vercel Blob + Gemini 2.5 Flash + 3-Layer Zep Retrieval
-- `src/app/dashboard/patients/[id]/DocumentUploader.tsx` — @vercel/blob upload (was Supabase Storage)
-- `src/app/dashboard/patients/[id]/PatientDetailClient.tsx` — fetch() polling (was supabase.from())
-- `src/app/dashboard/page.tsx` — Drizzle queries (was Supabase)
-- `src/app/dashboard/patients/[id]/page.tsx` — Drizzle queries (was Supabase)
-- `src/lib/data/patient.ts` — Drizzle query (was Supabase)
-- `src/types/database.ts` — `blob_url` replaces `storage_path`
-- AI model: `gemini-2.5-flash` for high-quality clinical extraction & synthesis (configurable via `AI_MODEL`)
-
 ### Debugging Guide
 
 When a document or briefing fails:
