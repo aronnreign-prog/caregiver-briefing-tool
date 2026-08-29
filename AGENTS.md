@@ -64,17 +64,24 @@ DocumentUploader.tsx calls ingestDocument(documentId)   ← fire-and-forget serv
   → db.update(documents, { status: "extracted", extracted_entities, document_date, ... })
 ```
 
-### Briefing Generation
+### Briefing Generation (Specialist Power Briefing)
 ```
-User clicks "Generate briefing" → createBriefingRecord() → inserts briefings row (status: "queued")
-PatientDetailClient calls generateBriefing(patientId, briefingId, audience)
-  → buildZepQuery(audience)                              ← audience-dynamic search query
+User clicks "Generate Specialist Briefing" → createBriefingRecord() → inserts briefings row (status: "queued")
+PatientDetailClient calls generateBriefing(patientId, briefingId, 'specialist')
   → queryPatientMemory(caregiverId, patientId, query)   ← 3-layer retrieval:
       1. Longitudinal Entity Nodes (client.graph.node.getByUserId)
       2. Chronological Episodes (client.graph.episode.getByUserId, with [doc_id] & [page] tags)
       3. Concurrent Multi-Domain Search (Promise.allSettled client.graph.search, with temporal invalidation)
   → generateObject({ model: gemini-2.5-flash, schema: BriefingOutputSchema })
   → db.update(briefings, { status: "complete", briefing_text, claims, flagged_concerns })
+```
+
+### On-Demand Clinical Query (Zep Graph Memory)
+```
+User asks question in Query Tab → calls askPatientClinicalQuery(patientId, question, previousTurn?)
+  → queryPatientMemory(caregiverId, patientId, retrievalQuery) (enriched with previousTurn if follow-up)
+  → generateObject({ model: gemini-2.5-flash, schema: ClinicalQueryOutputSchema })
+  → returns { answer, claims } with inline [claim:cN] tokens linking to source PDF page #page=N
 ```
 
 ### Status Polling
