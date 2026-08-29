@@ -67,7 +67,7 @@ DocumentUploader.tsx calls ingestDocument(documentId)   ← fire-and-forget serv
 ### Briefing Generation
 ```
 User clicks "Generate briefing" → createBriefingRecord() → inserts briefings row (status: "queued")
-PatientDetailClient calls generateBriefing(patientId, briefingId, audience, caregiverId)
+PatientDetailClient calls generateBriefing(patientId, briefingId, audience)
   → buildZepQuery(audience)                              ← audience-dynamic search query
   → queryPatientMemory(caregiverId, patientId, query)   ← 3-layer retrieval:
       1. Longitudinal Entity Nodes (client.graph.node.getByUserId)

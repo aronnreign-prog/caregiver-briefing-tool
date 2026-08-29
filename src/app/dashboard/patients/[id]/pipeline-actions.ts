@@ -350,6 +350,7 @@ PaperTrail Citation Requirement:
 export async function askPatientClinicalQuery(
   patientId: string,
   question: string,
+  previousTurn?: { question: string; answer: string },
 ): Promise<ClinicalQueryResult> {
   const caregiver = await getCaregiver()
   if (!caregiver) return { error: 'Unauthorized' }
@@ -365,8 +366,12 @@ export async function askPatientClinicalQuery(
   if (!trimmedQuestion) return { error: 'Please enter a clinical question.' }
 
   try {
-    // 1. Query Zep graph memory directly with the on-demand user question
-    let context = await queryPatientMemory(caregiver.id, patientId, trimmedQuestion)
+    // 1. Query Zep graph memory: if a previous turn exists, enrich search query with prior context so anaphoric questions (e.g. "and what about now?") find relevant entities
+    const retrievalQuery = previousTurn?.question
+      ? `${previousTurn.question.slice(0, 150)} ${trimmedQuestion}`
+      : trimmedQuestion
+
+    let context = await queryPatientMemory(caregiver.id, patientId, retrievalQuery)
 
     // If Zep is empty, fallback to self-heal rebuild from PDF docs
     if (!context || context.trim().length === 0) {
@@ -390,7 +395,7 @@ export async function askPatientClinicalQuery(
           }
         }
       }
-      context = await queryPatientMemory(caregiver.id, patientId, trimmedQuestion)
+      context = await queryPatientMemory(caregiver.id, patientId, retrievalQuery)
     }
 
     if (!context || context.trim().length === 0) {
@@ -400,16 +405,21 @@ export async function askPatientClinicalQuery(
     const patientHeader = `Patient: ${patient.name}, DOB: ${patient.date_of_birth}, Relationship: ${patient.relationship}`
     const model = google(process.env.AI_MODEL || 'gemini-2.5-flash')
 
+    const conversationContext = previousTurn
+      ? `Prior Conversation Turn:\nUser asked: "${previousTurn.question}"\nAssistant answered: "${previousTurn.answer}"\n\n`
+      : ''
+
     const SYSTEM_PROMPT = `You are a clinical AI assistant answering a specific clinical question about patient ${patient.name} based ONLY on their uploaded medical records and knowledge graph.
 
-Question: "${trimmedQuestion}"
+${conversationContext}Current Question to answer: "${trimmedQuestion}"
 
 Guidelines:
 1. Provide a direct, factual, and concise answer formatted cleanly in Markdown (with bullet points or bold text where appropriate).
-2. Ground every single claim strictly in the provided clinical facts and episodes. Never hallucinate.
-3. If an aspect of the question is not documented in the records, explicitly state that it is not documented in the available records.
-4. For every specific fact, medication, date, lab value, or observation asserted, embed an inline token like [claim:c1], [claim:c2].
-5. For each claim in the schema:
+2. If this is a follow-up question (e.g., "and what about now?", "why was that stopped?"), resolve pronouns and temporal references against the prior conversation turn, but strictly ground all facts in the provided medical records.
+3. Ground every single claim strictly in the provided clinical facts and episodes. Never hallucinate.
+4. If an aspect of the question is not documented in the records, explicitly state that it is not documented in the available records.
+5. For every specific fact, medication, date, lab value, or observation asserted, embed an inline token like [claim:c1], [claim:c2].
+6. For each claim in the schema:
    - Mark flag: 'SUPPORTED', 'CONFLICTING', or 'MEDICAL_KNOWLEDGE'.
    - In the evidence array, extract source_doc_id from [doc_id: <uuid>] and source_page from [page: <number>].
    - If citing multiple documents or chronological changes, include an evidence item for each supporting document.`

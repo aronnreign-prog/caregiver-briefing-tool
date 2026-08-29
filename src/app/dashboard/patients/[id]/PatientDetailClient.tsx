@@ -342,7 +342,11 @@ export default function PatientDetailClient({ patient, initialDocuments, initial
     }
 
     try {
-      const res = await askPatientClinicalQuery(patient.id, q)
+      const lastTurn = queryHistory[0]
+        ? { question: queryHistory[0].question, answer: queryHistory[0].answer }
+        : undefined
+
+      const res = await askPatientClinicalQuery(patient.id, q, lastTurn)
       if (res.error || !res.answer) {
         setQueryError(res.error || 'Failed to retrieve answer from records.')
       } else {

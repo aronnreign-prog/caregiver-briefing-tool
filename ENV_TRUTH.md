@@ -10,7 +10,8 @@
 | `BETTER_AUTH_SECRET` | `.env.local` / Vercel | `src/lib/auth.ts` | Secret key used to sign Better Auth session cookies. **Server-only.** |
 | `BETTER_AUTH_URL` | `.env.local` / Vercel | `src/lib/auth.ts` | Canonical app URL (e.g. `https://caregiver-briefing-tool.vercel.app`). |
 | `NEXT_PUBLIC_APP_URL` | `.env.local` / Vercel | `src/lib/auth-client.ts` | Public app URL exposed to browser for Better Auth client. |
-| `GOOGLE_GENERATIVE_AI_API_KEY` | `.env.local` / Vercel | `src/lib/ai/extract.ts`, `pipeline-actions.ts` | Google AI Studio key for Gemini 2.5 Flash. Read by `@ai-sdk/google`. **Server-only.** |
+| `GOOGLE_GENERATIVE_AI_API_KEY` | `.env.local` / Vercel | `src/lib/ai/extract.ts`, `pipeline-actions.ts` | Google AI Studio key for Gemini. Read by `@ai-sdk/google`. **Server-only.** |
+| `AI_MODEL` | `.env.local` / Vercel (optional) | `src/lib/ai/extract.ts`, `pipeline-actions.ts` | Optional model override (defaults to `gemini-2.5-flash`). **Server-only.** |
 | `ZEP_API_KEY` | `.env.local` / Vercel | `src/lib/zep/ingest.ts` | Zep Cloud API key for clinical memory graph. **Server-only.** |
 | `BLOB_READ_WRITE_TOKEN` | `.env.local` / Vercel | `@vercel/blob`, `src/app/api/upload/route.ts` | Vercel Blob read/write token for PDF storage. **Server-only.** |
 
