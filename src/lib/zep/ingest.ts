@@ -185,129 +185,86 @@ export async function queryPatientMemory(
       .map((ep) => ep.content?.trim())
       .filter((c): c is string => Boolean(c && c.length > 0))
 
-    // ── Layer 3: Multi-Domain Semantic Graph Search with Temporal Invalidation ──
-    // Derive targeted clinical domains from entity nodes to avoid single-query budget starvation
-    const detectedDomainQueries: string[] = []
-    const entityText = rawNodes.map((n) => `${n.name} ${n.summary ?? ''}`).join(' ').toLowerCase()
+    // ── Layer 3: Zep Native Dynamic Auto Search (Cross-Scope RRF & MMR Reranking) ──
+    // Truncate query to under 380 chars per Zep documentation
+    const cleanQuery = query.trim().slice(0, 380) || 'longitudinal clinical trajectory medications lab trends'
+    
+    let autoContext = ''
+    let edgesList: string[] = []
 
-    // 1. Psychiatric, Neurological & Mental Health (e.g. Sodium Valproate, Olanzapine, SSRIs, Antiepileptics)
-    if (/valproat|olanzapin|lithium|bipolar|schizo|depress|psych|neuro|seizure|epilep|antipsychot|anticonvuls|anxiet|insomnia|ssri|snri|haloperidol|quetiapine|risperidone|clonazepam|lorazepam|sertraline|fluoxetine|dementia|parkinson/.test(entityText)) {
-      detectedDomainQueries.push('psychiatric neurological mental health mood seizure antipsychotic anticonvulsant medications')
-    }
+    try {
+      const autoResults = await client.graph.search({
+        userId,
+        query: cleanQuery,
+        scope: 'auto',
+        maxCharacters: 30000,
+        returnRawResults: true,
+      })
 
-    // 2. Renal & Nephrology
-    if (/renal|kidney|gfr|creatinine|bun|dialysis|nephro|urine|proteinuria/.test(entityText)) {
-      detectedDomainQueries.push('renal kidney function eGFR creatinine BUN urine lab trends')
-    }
+      if (autoResults.context && autoResults.context.trim().length > 0) {
+        autoContext = autoResults.context.trim()
+      }
 
-    // 3. Cardiovascular, Hypertension & Cardiac
-    if (/cardio|heart|bp|hypertension|blood pressure|cardiac|ecg|lisinopril|metoprolol|statin|atorvastatin|amlodipine|carvedilol|losartan|chf|arrhythm/.test(entityText)) {
-      detectedDomainQueries.push('cardiovascular heart blood pressure hypertension cardiology cardiac medications')
-    }
+      // Also process raw edges to format explicit bi-temporal invalidation / valid_from tags
+      const rawEdges = autoResults.edges ?? []
+      const edgeMap = new Map<string, string>()
 
-    // 4. Diabetes, Endocrine & Thyroid
-    if (/diabet|glucose|hba1c|sugar|insulin|metformin|endocrine|thyroid|tsh|levothyroxine/.test(entityText)) {
-      detectedDomainQueries.push('diabetes glucose HbA1c endocrine metabolic thyroid medications')
-    }
+      for (const e of rawEdges as any[]) {
+        const fact = (e.fact ?? '').trim()
+        if (!fact) continue
+        const key = e.uuid || fact
 
-    // 5. Pulmonary & Respiratory
-    if (/pulmon|lung|respiratory|dyspnea|sob|asthma|copd|oxygen|inhaler|albuterol|pneumonia/.test(entityText)) {
-      detectedDomainQueries.push('respiratory lung pulmonary shortness of breath asthma COPD oxygen')
-    }
+        const rawValid = e.validAt ?? e.valid_at ?? e.attributes?.valid_at ?? e.attributes?.reference_time
+        const rawInvalid = e.invalidAt ?? e.invalid_at ?? e.attributes?.invalid_at
+        const rawExpired = e.expiredAt ?? e.expired_at ?? e.attributes?.expired_at
 
-    // 6. Hepatic, Liver & GI
-    if (/liver|hepatic|alt|ast|bilirubin|cirrhosis|hepatitis|gastro|gi|reflux|gerd|ppi|omeprazole/.test(entityText)) {
-      detectedDomainQueries.push('liver hepatic function enzymes ALT AST bilirubin gastrointestinal')
-    }
+        const validPart = rawValid ? ` [valid_from: ${String(rawValid).slice(0, 10)}]` : ''
+        const invalidPart = rawInvalid ? ` [SUPERSEDED/INVALIDATED as of: ${String(rawInvalid).slice(0, 10)}]` : ''
+        const expiredPart = rawExpired ? ` [EXPIRED: ${String(rawExpired).slice(0, 10)}]` : ''
+        const fullFact = `${fact}${validPart}${invalidPart}${expiredPart}`
 
-    // 7. Infectious Disease & Antimicrobial
-    if (/infect|antibiot|culture|fever|sepsis|penicillin|amoxicillin|cipro|vancomycin|ceftriaxone/.test(entityText)) {
-      detectedDomainQueries.push('infection infectious disease antibiotics cultures microbiology')
-    }
-
-    // 8. Hematology & Oncology
-    if (/oncology|cancer|tumor|biopsy|chemo|anemia|hemoglobin|platelet|wbc|leukemia|lymphoma/.test(entityText)) {
-      detectedDomainQueries.push('hematology oncology complete blood count hemoglobin platelets cancer')
-    }
-
-    // Execute primary query + all detected domain queries concurrently via Promise.allSettled (capped at top 5 domains)
-    const activeDomainQueries = detectedDomainQueries.slice(0, 5)
-    if (detectedDomainQueries.length > 5) {
-      console.log(`[Zep Multi-Query] Detected ${detectedDomainQueries.length} domains; prioritizing top 5:`, activeDomainQueries)
-    }
-
-    const queriesToRun = [query, ...activeDomainQueries]
-    console.log(`[Zep Multi-Query] Firing ${queriesToRun.length} concurrent searches in parallel for user:`, userId)
-
-    const searchResults = await Promise.allSettled(
-      queriesToRun.map((q) =>
-        client.graph.search({
-          query: q,
-          userId,
-          limit: 35,
-        })
-      )
-    )
-
-    const edgeMap = new Map<string, string>()
-    let loggedSample = false
-
-    for (let i = 0; i < searchResults.length; i++) {
-      const res = searchResults[i]
-      const q = queriesToRun[i]
-      if (res.status === 'fulfilled') {
-        const rawEdges = res.value.edges ?? []
-        if (!loggedSample && rawEdges.length > 0) {
-          const sample = rawEdges[0] as any
-          console.log('[Zep Edge Diagnostics] Sample edge keys:', Object.keys(sample))
-          console.log('[Zep Edge Diagnostics] Sample edge payload:', {
-            fact: sample.fact,
-            validAt: sample.validAt ?? sample.valid_at,
-            invalidAt: sample.invalidAt ?? sample.invalid_at,
-            expiredAt: sample.expiredAt ?? sample.expired_at,
-            sourceNodeName: sample.sourceNodeName,
-            targetNodeName: sample.targetNodeName,
-          })
-          loggedSample = true
+        if (!edgeMap.has(key)) {
+          edgeMap.set(key, fullFact)
         }
+      }
 
+      edgesList = Array.from(edgeMap.values())
+    } catch (searchErr) {
+      console.warn('[Zep Auto-Search] Primary auto search encountered error, falling back to MMR edge search:', searchErr)
+      try {
+        const edgeResults = await client.graph.search({
+          userId,
+          query: cleanQuery,
+          scope: 'edges',
+          limit: 50,
+          reranker: 'mmr',
+          mmrLambda: 0.6,
+        })
+        const rawEdges = edgeResults.edges ?? []
         for (const e of rawEdges as any[]) {
           const fact = (e.fact ?? '').trim()
-          if (!fact) continue
-          const key = e.uuid || fact
-
-          // Format temporal validity, superseding, and invalidation metadata
-          const rawValid = e.validAt ?? e.valid_at ?? e.attributes?.valid_at ?? e.attributes?.reference_time
-          const rawInvalid = e.invalidAt ?? e.invalid_at ?? e.attributes?.invalid_at
-          const rawExpired = e.expiredAt ?? e.expired_at ?? e.attributes?.expired_at
-
-          const validPart = rawValid ? ` [valid_from: ${String(rawValid).slice(0, 10)}]` : ''
-          const invalidPart = rawInvalid ? ` [SUPERSEDED/INVALIDATED as of: ${String(rawInvalid).slice(0, 10)}]` : ''
-          const expiredPart = rawExpired ? ` [EXPIRED: ${String(rawExpired).slice(0, 10)}]` : ''
-          const fullFact = `${fact}${validPart}${invalidPart}${expiredPart}`
-
-          if (!edgeMap.has(key)) {
-            edgeMap.set(key, fullFact)
-          }
+          if (fact) edgesList.push(fact)
         }
-      } else {
-        console.warn(`[Zep Multi-Query] Search failed for query "${q}":`, res.reason)
+      } catch (fallbackErr) {
+        console.warn('[Zep Fallback] Edge search failed:', fallbackErr)
       }
     }
 
-    const edges = Array.from(edgeMap.values())
-
     // If all layers are completely absent, return empty string for self-heal detection
-    if (entitySummaries.length === 0 && episodesContent.length === 0 && edges.length === 0) {
-      console.log('[Zep Retrieval] 0 entity nodes, 0 episodes, and 0 edges found for user:', userId)
+    if (entitySummaries.length === 0 && episodesContent.length === 0 && edgesList.length === 0 && !autoContext) {
+      console.log('[Zep Retrieval] 0 entity nodes, 0 episodes, and 0 search results found for user:', userId)
       return ''
     }
 
-    // ── Build 3 structured memory sections ──
+    // ── Build structured memory sections ──
     const sections: string[] = []
 
     if (entitySummaries.length > 0) {
-      sections.push(`=== LONGITUDINAL PATIENT & ENTITY OVERVIEW (UNCONSTRAINED GRAPH MEMORY) ===\n\n${entitySummaries.join('\n\n')}`)
+      sections.push(`=== LONGITUDINAL PATIENT & ENTITY OVERVIEW (GRAPH MEMORY) ===\n\n${entitySummaries.join('\n\n')}`)
+    }
+
+    if (autoContext) {
+      sections.push(`=== RELEVANT CROSS-SCOPE CLINICAL SYNTHESIS (ZEP AUTO-CONTEXT) ===\n\n${autoContext}`)
     }
 
     sections.push(
@@ -316,20 +273,13 @@ export async function queryPatientMemory(
         : '=== CHRONOLOGICAL CLINICAL EPISODES ===\n\n(No document episodes found)'
     )
 
-    sections.push(
-      edges.length > 0
-        ? `=== EXTRACTED GRAPH FACTS & TEMPORAL RELATIONSHIPS ===\n\n${edges.map((e, idx) => `${idx + 1}. ${e}`).join('\n')}`
-        : '=== EXTRACTED GRAPH FACTS & RELATIONSHIPS ===\n\n(No graph facts found)'
-    )
+    if (edgesList.length > 0) {
+      sections.push(`=== EXTRACTED GRAPH FACTS & TEMPORAL RELATIONSHIPS ===\n\n${edgesList.map((e, idx) => `${idx + 1}. ${e}`).join('\n')}`)
+    }
 
     const context = sections.join('\n\n')
 
-    // Logging metrics
-    console.log('[Zep Retrieval] Entity node summaries retrieved:', entitySummaries.length)
-    console.log('[Zep Retrieval] Chronological episodes retrieved:', episodesContent.length)
-    console.log('[Zep Retrieval] Distinct graph edges retrieved (multi-query):', edges.length)
-    console.log('[Zep Retrieval] Final context character length:', context.length)
-
+    console.log('[Zep Retrieval] Entity nodes:', entitySummaries.length, '| Episodes:', episodesContent.length, '| Edges:', edgesList.length, '| Total Context Chars:', context.length)
     return context
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
