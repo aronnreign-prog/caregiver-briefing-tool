@@ -4,6 +4,19 @@
 
 ---
 
+## ⛔ GATE ZERO — Read Before You Build (MANDATORY)
+
+Before writing ANY custom logic, regex, heuristic, workaround, or multi-step scaffolding:
+
+1. **Check the SDK first.** Open the official documentation or installed skill (`.agents/skills/building-with-zep/SKILL.md`, Vercel AI SDK docs, Next.js docs in `node_modules/next/dist/docs/`) and check whether the SDK already solves this problem natively.
+2. **If the SDK solves it:** Use the native method. Zero custom code.
+3. **If the SDK does NOT solve it:** State explicitly in a code comment WHY the SDK falls short and what gap the custom code fills.
+4. **Never assume based on naming conventions.** Read the actual method signatures, parameters, and return types.
+
+**This gate applies to every task — no exceptions.** Skipping it once created 150 lines of brittle regex heuristics that Zep's `scope="auto"` already handled natively.
+
+---
+
 ## Architecture State (Updated 2026-08-20)
 
 The codebase has been fully migrated twice:
