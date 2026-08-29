@@ -94,14 +94,13 @@ function CitationChip({
   }
 
   if (isDrug) {
-    const label = claim.claim_text?.slice(0, 14) || 'Med Knowledge'
     const title = (Array.isArray(claim.evidence) ? claim.evidence[0]?.entry_text : claim.evidence?.entry_text) || claim.claim_text || ''
     return (
       <span
         className="inline-flex items-center gap-1 font-mono text-[9px] border rounded px-1.5 py-0.5 ml-1.5 align-middle border-warning/40 text-warning bg-warning-dim cursor-default"
         title={title}
       >
-        ⚠ {label}
+        ⚠ Medical Knowledge
       </span>
     )
   }

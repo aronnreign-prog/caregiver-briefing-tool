@@ -185,28 +185,21 @@ export async function queryPatientMemory(
       .map((ep) => ep.content?.trim())
       .filter((c): c is string => Boolean(c && c.length > 0))
 
-    // ── Layer 3: Zep Native Dynamic Auto Search (Cross-Scope RRF & MMR Reranking) ──
-    // Truncate query to under 380 chars per Zep documentation
+    // ── Layer 3: Semantic Graph Search with Temporal Validity (Edges) ──
     const cleanQuery = query.trim().slice(0, 380) || 'longitudinal clinical trajectory medications lab trends'
-    
-    let autoContext = ''
-    let edgesList: string[] = []
+    const edgeList: string[] = []
 
     try {
-      const autoResults = await client.graph.search({
+      const searchResults = await client.graph.search({
         userId,
         query: cleanQuery,
-        scope: 'auto',
-        maxCharacters: 30000,
-        returnRawResults: true,
+        scope: 'edges',
+        limit: 45,
+        reranker: 'mmr',
+        mmrLambda: 0.6,
       })
 
-      if (autoResults.context && autoResults.context.trim().length > 0) {
-        autoContext = autoResults.context.trim()
-      }
-
-      // Also process raw edges to format explicit bi-temporal invalidation / valid_from tags
-      const rawEdges = autoResults.edges ?? []
+      const rawEdges = searchResults.edges ?? []
       const edgeMap = new Map<string, string>()
 
       for (const e of rawEdges as any[]) {
@@ -216,70 +209,45 @@ export async function queryPatientMemory(
 
         const rawValid = e.validAt ?? e.valid_at ?? e.attributes?.valid_at ?? e.attributes?.reference_time
         const rawInvalid = e.invalidAt ?? e.invalid_at ?? e.attributes?.invalid_at
-        const rawExpired = e.expiredAt ?? e.expired_at ?? e.attributes?.expired_at
 
-        const validPart = rawValid ? ` [valid_from: ${String(rawValid).slice(0, 10)}]` : ''
-        const invalidPart = rawInvalid ? ` [SUPERSEDED/INVALIDATED as of: ${String(rawInvalid).slice(0, 10)}]` : ''
-        const expiredPart = rawExpired ? ` [EXPIRED: ${String(rawExpired).slice(0, 10)}]` : ''
-        const fullFact = `${fact}${validPart}${invalidPart}${expiredPart}`
+        const validAt = rawValid ? String(rawValid).slice(0, 10) : 'date unknown'
+        const invalidAt = rawInvalid ? String(rawInvalid).slice(0, 10) : 'present'
+        const status = rawInvalid ? '[SUPERSEDED/INVALIDATED]' : '[ACTIVE]'
 
+        const formattedFact = `- ${fact} (Date range: ${validAt} - ${invalidAt}) ${status}`
         if (!edgeMap.has(key)) {
-          edgeMap.set(key, fullFact)
+          edgeMap.set(key, formattedFact)
         }
       }
 
-      edgesList = Array.from(edgeMap.values())
+      edgeList.push(...Array.from(edgeMap.values()))
     } catch (searchErr) {
-      console.warn('[Zep Auto-Search] Primary auto search encountered error, falling back to MMR edge search:', searchErr)
-      try {
-        const edgeResults = await client.graph.search({
-          userId,
-          query: cleanQuery,
-          scope: 'edges',
-          limit: 50,
-          reranker: 'mmr',
-          mmrLambda: 0.6,
-        })
-        const rawEdges = edgeResults.edges ?? []
-        for (const e of rawEdges as any[]) {
-          const fact = (e.fact ?? '').trim()
-          if (fact) edgesList.push(fact)
-        }
-      } catch (fallbackErr) {
-        console.warn('[Zep Fallback] Edge search failed:', fallbackErr)
-      }
+      console.warn('[Zep] Edge search fallback error:', searchErr)
     }
 
     // If all layers are completely absent, return empty string for self-heal detection
-    if (entitySummaries.length === 0 && episodesContent.length === 0 && edgesList.length === 0 && !autoContext) {
-      console.log('[Zep Retrieval] 0 entity nodes, 0 episodes, and 0 search results found for user:', userId)
+    if (entitySummaries.length === 0 && episodesContent.length === 0 && edgeList.length === 0) {
+      console.log('[Zep Retrieval] 0 entity nodes, 0 episodes, and 0 edges found for user:', userId)
       return ''
     }
 
-    // ── Build structured memory sections ──
+    // ── Build clean XML Context Block following Zep Official Context Recipe ──
     const sections: string[] = []
 
     if (entitySummaries.length > 0) {
-      sections.push(`=== LONGITUDINAL PATIENT & ENTITY OVERVIEW (GRAPH MEMORY) ===\n\n${entitySummaries.join('\n\n')}`)
+      sections.push(`<ENTITIES>\n# Key clinical entities and summaries:\n${entitySummaries.map((s) => `- ${s}`).join('\n')}\n</ENTITIES>`)
     }
 
-    if (autoContext) {
-      sections.push(`=== RELEVANT CROSS-SCOPE CLINICAL SYNTHESIS (ZEP AUTO-CONTEXT) ===\n\n${autoContext}`)
+    if (edgeList.length > 0) {
+      sections.push(`<FACTS>\n# Longitudinal facts and valid date ranges (facts ending in "present" are currently active; past end dates are superseded):\n${edgeList.join('\n')}\n</FACTS>`)
     }
 
-    sections.push(
-      episodesContent.length > 0
-        ? `=== CHRONOLOGICAL CLINICAL EPISODES (EVIDENCE & CITATION SOURCE) ===\n\n${episodesContent.join('\n\n---\n\n')}`
-        : '=== CHRONOLOGICAL CLINICAL EPISODES ===\n\n(No document episodes found)'
-    )
-
-    if (edgesList.length > 0) {
-      sections.push(`=== EXTRACTED GRAPH FACTS & TEMPORAL RELATIONSHIPS ===\n\n${edgesList.map((e, idx) => `${idx + 1}. ${e}`).join('\n')}`)
+    if (episodesContent.length > 0) {
+      sections.push(`<CHRONOLOGICAL_EVIDENCE>\n# Source clinical records with exact [doc_id: <uuid>] and [page: <number>] anchors for citations:\n${episodesContent.join('\n\n---\n\n')}\n</CHRONOLOGICAL_EVIDENCE>`)
     }
 
     const context = sections.join('\n\n')
-
-    console.log('[Zep Retrieval] Entity nodes:', entitySummaries.length, '| Episodes:', episodesContent.length, '| Edges:', edgesList.length, '| Total Context Chars:', context.length)
+    console.log('[Zep Retrieval] Context built — Entities:', entitySummaries.length, '| Facts:', edgeList.length, '| Episodes:', episodesContent.length, '| Chars:', context.length)
     return context
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)

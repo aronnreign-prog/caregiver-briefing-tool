@@ -317,7 +317,8 @@ Clinical Triage & Synthesis Hierarchy:
 PaperTrail Citation Requirement:
 - Embed inline claim markers like [claim:c1], [claim:c2] in the briefing_text immediately after each factual statement, lab value, medication, or concern being asserted.
 - Every [claim:cN] in the text must have a corresponding entry in the 'claims' array with matching claim_id ("cN").
-- In each claim's evidence array, cite EVERY source document and page that supports the claim (extract source_doc_id from [doc_id: <uuid>] and source_page from [page: <number>]). For longitudinal trends spanning multiple dates/visits, include an evidence entry for each supporting document.`
+- In each claim's evidence array, cite EVERY source document and page that supports the claim (extract source_doc_id from [doc_id: <uuid>] and source_page from [page: <number>] found inside <CHRONOLOGICAL_EVIDENCE>). For longitudinal trends spanning multiple dates/visits, include an evidence entry for each supporting document.
+- Narrative Formatting: Synthesize the clinical journey and trends into clean, cohesive clinical paragraphs. Do NOT generate a bloated date-by-date list of every visit unless directly relevant to an acute clinical shift.`
 
     const { object } = await generateObject({
       model,
