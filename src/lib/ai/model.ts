@@ -7,5 +7,5 @@
 import { google } from '@ai-sdk/google'
 
 export function getClinicalModel() {
-  return google(process.env.AI_MODEL || 'gemini-3.6-flash')
+  return google(process.env.AI_MODEL || 'gemini-3.7-flash')
 }
