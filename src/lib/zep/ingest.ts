@@ -101,6 +101,54 @@ function buildFactSummary(
 }
 
 
+function chunkDocumentEpisodes(
+  fullContent: string,
+  contextHeader: string,
+  maxChunkSize = 7500,
+): string[] {
+  if (fullContent.length <= maxChunkSize) {
+    return [fullContent]
+  }
+
+  const paragraphs = fullContent.split(/\n\n+/).filter((p) => p.trim().length > 0)
+  const chunks: string[] = []
+  let currentChunk: string[] = []
+  let currentLength = 0
+
+  for (const paragraph of paragraphs) {
+    if (paragraph.length > maxChunkSize) {
+      // Split large paragraph by lines
+      const lines = paragraph.split('\n')
+      for (const line of lines) {
+        if (currentLength + line.length + 1 > maxChunkSize && currentChunk.length > 0) {
+          const body = currentChunk.join('\n')
+          chunks.push(chunks.length === 0 ? body : `${contextHeader}\n\n${body}`)
+          currentChunk = []
+          currentLength = 0
+        }
+        currentChunk.push(line)
+        currentLength += line.length + 1
+      }
+    } else {
+      if (currentLength + paragraph.length + 2 > maxChunkSize && currentChunk.length > 0) {
+        const body = currentChunk.join('\n\n')
+        chunks.push(chunks.length === 0 ? body : `${contextHeader}\n\n${body}`)
+        currentChunk = []
+        currentLength = 0
+      }
+      currentChunk.push(paragraph)
+      currentLength += paragraph.length + 2
+    }
+  }
+
+  if (currentChunk.length > 0) {
+    const body = currentChunk.join('\n\n')
+    chunks.push(chunks.length === 0 ? body : `${contextHeader}\n\n${body}`)
+  }
+
+  return chunks
+}
+
 export interface IngestResult {
   success: boolean
   error?: string
@@ -119,32 +167,31 @@ export async function ingestDocumentFacts(
     await ensureZepUser(userId)
 
     const content = buildFactSummary(extraction, documentId, filename)
+    const docDate = extraction.documentDate ?? 'Date unknown / not documented'
+    const contextHeader = `CLINICAL DOCUMENT (CONTINUATION): ${filename} (document_id: ${documentId}) | Date: ${docDate}`
 
-    // Build native episode payload
-    const episodePayload: {
-      data: string
-      type: 'text'
-      userId: string
-      documentId: string
-      createdAt?: string
-    } = {
-      data: content,
-      type: 'text',
-      userId,
-      documentId,
-    }
+    const chunks = chunkDocumentEpisodes(content, contextHeader, 7500)
 
     // Only supply created_at if an authentic, verified document date exists in ISO format.
     // If undated/missing, do NOT pass created_at or today's timestamp so it remains strictly undated.
+    let createdAt: string | undefined = undefined
     if (extraction.documentDate && /^\d{4}-\d{2}-\d{2}/.test(extraction.documentDate)) {
       const parsedDate = new Date(extraction.documentDate)
       if (!isNaN(parsedDate.getTime())) {
-        episodePayload.createdAt = parsedDate.toISOString()
+        createdAt = parsedDate.toISOString()
       }
     }
 
-    // Zep Cloud: add text data to user graph
-    await client.graph.add(episodePayload)
+    // Ingest each chunk sharing the same documentId and createdAt per Zep documentation
+    for (const chunk of chunks) {
+      await client.graph.add({
+        data: chunk,
+        type: 'text',
+        userId,
+        createdAt,
+        metadata: { documentId },
+      })
+    }
 
     return { success: true }
   } catch (err) {

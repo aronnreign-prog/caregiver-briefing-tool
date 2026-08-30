@@ -124,28 +124,41 @@ export async function extractClinicalFacts(
   filename: string,
 ): Promise<ClinicalExtraction> {
   const model = getClinicalModel()
+  let lastError: unknown
 
-  const { object } = await generateObject({
-    model,
-    system: SYSTEM_PROMPT,
-    messages: [
-      {
-        role: 'user',
-        content: [
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const { object } = await generateObject({
+        model,
+        system: SYSTEM_PROMPT,
+        messages: [
           {
-            type: 'text',
-            text: `Extract all clinical facts from this medical document (${filename}). Capture dates on every entity where visible.`,
-          },
-          {
-            type: 'file',
-            data: pdfBuffer,
-            mediaType: 'application/pdf',
+            role: 'user',
+            content: [
+              {
+                type: 'text',
+                text: `Extract all clinical facts from this medical document (${filename}). Capture dates on every entity where visible.`,
+              },
+              {
+                type: 'file',
+                data: pdfBuffer,
+                mediaType: 'application/pdf',
+              },
+            ],
           },
         ],
-      },
-    ],
-    schema: ClinicalExtractionSchema,
-  })
+        schema: ClinicalExtractionSchema,
+      })
 
-  return object
+      return object
+    } catch (err) {
+      lastError = err
+      console.warn(`[Extraction] Attempt ${attempt} failed for ${filename}:`, err instanceof Error ? err.message : err)
+      if (attempt < 2) {
+        await new Promise((resolve) => setTimeout(resolve, 1000))
+      }
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error(String(lastError))
 }
