@@ -311,6 +311,14 @@ export default function PatientDetailClient({ patient, initialDocuments, initial
           if (!res.ok) {
             const data = await res.json().catch(() => ({}))
             console.error('[Briefing Stream] Failed:', data.error)
+            return
+          }
+          if (res.body) {
+            const reader = res.body.getReader()
+            while (true) {
+              const { done } = await reader.read()
+              if (done) break
+            }
           }
         })
         .catch(err => console.error('[Briefing Stream] Error:', err))

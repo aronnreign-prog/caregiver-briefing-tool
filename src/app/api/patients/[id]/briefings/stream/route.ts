@@ -99,6 +99,7 @@ PaperTrail Citation Requirement:
       },
     })
 
+    result.consumeStream()
     return result.toTextStreamResponse()
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
