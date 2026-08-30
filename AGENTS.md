@@ -138,8 +138,9 @@ BETTER_AUTH_SECRET=        # openssl rand -base64 32
 BETTER_AUTH_URL=           # https://your-app.vercel.app (or http://localhost:3000)
 NEXT_PUBLIC_APP_URL=       # same as BETTER_AUTH_URL
 
-# Google AI (Gemini 2.5 Flash)
+# Google AI (Gemini)
 GOOGLE_GENERATIVE_AI_API_KEY=
+AI_MODEL=                  # optional: defaults to gemini-2.5-flash (e.g. gemini-2.5-pro)
 
 # Zep Cloud
 ZEP_API_KEY=
