@@ -114,6 +114,26 @@ PaperTrail Citation Requirement:
       },
     })
 
+    result.object
+      .then(async (object) => {
+        if (object) {
+          const cleanedBriefingText = object.briefing_text.replace(/^[0-9]+\s+/, '').trim()
+          await db
+            .update(briefings)
+            .set({
+              status: 'complete',
+              briefing_text: cleanedBriefingText,
+              claims: object.claims,
+              flagged_concerns: object.flagged_concerns,
+              completed_at: new Date(),
+            })
+            .where(and(eq(briefings.id, briefingId), eq(briefings.caregiver_id, caregiver.id)))
+        }
+      })
+      .catch((err) => {
+        console.error('[Briefing Object Promise Error]:', err)
+      })
+
     return result.toTextStreamResponse()
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
