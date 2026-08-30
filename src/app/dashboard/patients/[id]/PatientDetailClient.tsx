@@ -391,6 +391,9 @@ export default function PatientDetailClient({ patient, initialDocuments, initial
 
   const handleRemoveDocument = (id: string) => setDocuments(prev => prev.filter(d => d.id !== id))
   const handleAddDocument = (doc: Document) => setDocuments(prev => [doc, ...prev])
+  const handleDocumentStatusUpdate = (id: string, status: Document['status']) => {
+    setDocuments(prev => prev.map(d => d.id === id ? { ...d, status, error_message: null } : d))
+  }
 
   const concerns: FlaggedConcern[] = (activeBriefing?.flagged_concerns as FlaggedConcern[] | null) ?? []
   const claimsArray: Claim[] = (activeBriefing?.claims as Claim[] | null) ?? []
@@ -460,6 +463,7 @@ export default function PatientDetailClient({ patient, initialDocuments, initial
             onUploadStart={setUploadingFile}
             onDocumentAdded={handleAddDocument}
             onDocumentRemoved={handleRemoveDocument}
+            onDocumentStatusUpdate={handleDocumentStatusUpdate}
             onDocClick={handleDocClick}
           />
 

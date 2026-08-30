@@ -1,9 +1,11 @@
 'use client'
 
+import React, { useState } from 'react'
 import type { Document } from '@/types/database'
 import { deleteDocument } from '@/app/dashboard/actions'
 import { PipelineBar } from './PipelineBar'
 import DocumentUploader from './DocumentUploader'
+import { ingestDocument } from './pipeline-actions'
 
 interface Props {
   patientId: string
@@ -14,14 +16,16 @@ interface Props {
   onUploadStart: (v: boolean) => void
   onDocumentAdded: (doc: Document) => void
   onDocumentRemoved: (id: string) => void
+  onDocumentStatusUpdate?: (id: string, status: Document['status']) => void
   onDocClick: (e: React.MouseEvent, docId: string, page?: number) => void
 }
 
-/** Deep module: one export, renders document list with upload + delete. */
+/** Deep module: one export, renders document list with upload + delete + retry. */
 export default function DocumentList({
   patientId, documents, isDemo, isGuest, uploading,
-  onUploadStart, onDocumentAdded, onDocumentRemoved, onDocClick,
+  onUploadStart, onDocumentAdded, onDocumentRemoved, onDocumentStatusUpdate, onDocClick,
 }: Props) {
+  const [retryingId, setRetryingId] = useState<string | null>(null)
   return (
     <div className="flex-1 overflow-y-auto px-4 py-4">
       <div className="flex items-center justify-between mb-3 px-1">
@@ -95,7 +99,41 @@ export default function DocumentList({
                   </button>
                 )}
               </div>
-              <PipelineBar status={doc.status} />
+              <div className="flex items-center justify-between mt-1.5 gap-2">
+                <PipelineBar status={doc.status} />
+                {doc.status === 'failed' && !isDemo && !isGuest && (
+                  <button
+                    disabled={retryingId === doc.id}
+                    onClick={async (e) => {
+                      e.stopPropagation()
+                      setRetryingId(doc.id)
+                      onDocumentStatusUpdate?.(doc.id, 'extracting')
+                      const res = await ingestDocument(doc.id)
+                      if (res?.error) {
+                        onDocumentStatusUpdate?.(doc.id, 'failed')
+                      }
+                      setRetryingId(null)
+                    }}
+                    title={doc.error_message ? `Error: ${doc.error_message} (Click to retry)` : 'Retry extraction'}
+                    className="font-mono text-[9px] px-1.5 py-0.5 rounded border border-alert/40 text-alert hover:bg-alert/10 hover:border-alert transition-all flex items-center gap-1 shrink-0"
+                  >
+                    <svg
+                      width="9"
+                      height="9"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2.5"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      className={retryingId === doc.id ? 'animate-spin' : ''}
+                    >
+                      <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
+                    </svg>
+                    <span>{retryingId === doc.id ? 'Retrying...' : 'Retry'}</span>
+                  </button>
+                )}
+              </div>
             </div>
           ))}
         </div>
