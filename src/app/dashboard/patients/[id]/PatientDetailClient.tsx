@@ -312,17 +312,49 @@ export default function PatientDetailClient({ patient, initialDocuments, initial
           if (!res.ok) {
             const data = await res.json().catch(() => ({}))
             console.error('[Briefing Stream] Failed:', data.error)
+            setBriefings(prev => prev.map(b => b.id === result.id ? {
+              ...b,
+              status: 'failed',
+              error_message: data.error || 'Failed to generate briefing.',
+            } : b))
             return
           }
           if (res.body) {
             const reader = res.body.getReader()
+            const decoder = new TextDecoder()
+            let accumulated = ''
             while (true) {
-              const { done } = await reader.read()
+              const { done, value } = await reader.read()
               if (done) break
+              if (value) {
+                accumulated += decoder.decode(value, { stream: true })
+              }
+            }
+            try {
+              const parsed = JSON.parse(accumulated)
+              if (parsed?.briefing_text) {
+                setBriefings(prev => prev.map(b => b.id === result.id ? {
+                  ...b,
+                  status: 'complete',
+                  briefing_text: parsed.briefing_text.replace(/^[0-9]+\s+/, '').trim(),
+                  claims: parsed.claims || [],
+                  flagged_concerns: parsed.flagged_concerns || [],
+                  completed_at: new Date().toISOString(),
+                } : b))
+              }
+            } catch {
+              // Non-fatal: if JSON parsing of full stream text is incomplete, background onFinish & polling keep state in sync
             }
           }
         })
-        .catch(err => console.error('[Briefing Stream] Error:', err))
+        .catch(err => {
+          console.error('[Briefing Stream] Error:', err)
+          setBriefings(prev => prev.map(b => b.id === result.id ? {
+            ...b,
+            status: 'failed',
+            error_message: err instanceof Error ? err.message : 'Network stream error',
+          } : b))
+        })
     } catch (err: unknown) {
       alert('Failed to start briefing: ' + (err instanceof Error ? err.message : 'Unknown error'))
     } finally {

@@ -8,7 +8,7 @@ import { eq, and } from 'drizzle-orm'
 import { getCaregiver } from '@/lib/auth-session'
 import { NextResponse } from 'next/server'
 
-export const maxDuration = 60
+export const maxDuration = 300
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -89,52 +89,45 @@ PaperTrail Citation Requirement:
 
         // Store clean, user-friendly message for the UI
         const userFacingMessage = 'Unable to complete briefing synthesis. Please retry in a moment.'
-        await db
-          .update(briefings)
-          .set({
-            status: 'failed',
-            error_message: userFacingMessage,
-          })
-          .where(and(eq(briefings.id, briefingId), eq(briefings.caregiver_id, caregiver.id)))
-      },
-      onFinish: async ({ object }) => {
-        if (object) {
-          const cleanedBriefingText = object.briefing_text.replace(/^[0-9]+\s+/, '').trim()
+        try {
           await db
             .update(briefings)
             .set({
-              status: 'complete',
-              briefing_text: cleanedBriefingText,
-              claims: object.claims,
-              flagged_concerns: object.flagged_concerns,
-              completed_at: new Date(),
+              status: 'failed',
+              error_message: userFacingMessage,
             })
             .where(and(eq(briefings.id, briefingId), eq(briefings.caregiver_id, caregiver.id)))
+        } catch (dbErr) {
+          console.error('[Briefing Stream DB Error on failure update]:', dbErr)
+        }
+      },
+      onFinish: async ({ object }) => {
+        if (object) {
+          try {
+            const cleanedBriefingText = object.briefing_text.replace(/^[0-9]+\s+/, '').trim()
+            await db
+              .update(briefings)
+              .set({
+                status: 'complete',
+                briefing_text: cleanedBriefingText,
+                claims: object.claims,
+                flagged_concerns: object.flagged_concerns,
+                completed_at: new Date(),
+              })
+              .where(and(eq(briefings.id, briefingId), eq(briefings.caregiver_id, caregiver.id)))
+          } catch (dbErr) {
+            console.error('[Briefing Stream DB Error on complete update]:', dbErr)
+          }
         }
       },
     })
 
-    result.object
-      .then(async (object) => {
-        if (object) {
-          const cleanedBriefingText = object.briefing_text.replace(/^[0-9]+\s+/, '').trim()
-          await db
-            .update(briefings)
-            .set({
-              status: 'complete',
-              briefing_text: cleanedBriefingText,
-              claims: object.claims,
-              flagged_concerns: object.flagged_concerns,
-              completed_at: new Date(),
-            })
-            .where(and(eq(briefings.id, briefingId), eq(briefings.caregiver_id, caregiver.id)))
-        }
-      })
-      .catch((err) => {
-        console.error('[Briefing Object Promise Error]:', err)
-      })
-
-    return result.toTextStreamResponse()
+    return result.toTextStreamResponse({
+      headers: {
+        'Transfer-Encoding': 'chunked',
+        'Connection': 'keep-alive',
+      },
+    })
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     console.error('[Briefing Stream API Error]:', message)

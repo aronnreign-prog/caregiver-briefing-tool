@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@ai-sdk/google": "^4.0.45",
+    "@ai-sdk/react": "^4.0.88",
     "@base-ui/react": "^1.6.0",
     "@dotenvx/dotenvx": "^2.19.1",
     "@getzep/zep-cloud": "^3.28.0",

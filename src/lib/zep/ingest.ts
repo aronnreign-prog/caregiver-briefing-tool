@@ -217,13 +217,13 @@ export async function queryPatientMemory(
     const cleanQuery = query.trim().slice(0, 380) || 'longitudinal clinical trajectory medications lab trends'
 
     const [nodesRes, episodesRes, searchRes] = await Promise.allSettled([
-      client.graph.node.getByUserId(userId, { limit: 50 }),
-      client.graph.episode.getByUserId(userId, { lastn: 30 }),
+      client.graph.node.getByUserId(userId, { limit: 30 }),
+      client.graph.episode.getByUserId(userId, { lastn: 15 }),
       client.graph.search({
         userId,
         query: cleanQuery,
         scope: 'edges',
-        limit: 45,
+        limit: 30,
         reranker: 'mmr',
         mmrLambda: 0.6,
       }),

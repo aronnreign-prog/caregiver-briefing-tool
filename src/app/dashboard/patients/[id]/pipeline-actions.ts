@@ -219,7 +219,7 @@ PaperTrail Citation Requirement:
         content: `${patientHeader}\n\nExtracted clinical facts:\n\n${context}\n\nGenerate a comprehensive specialist briefing with inline [claim:cN] citations.`,
       }],
       schema: BriefingOutputSchema,
-      abortSignal: AbortSignal.timeout(45000),
+      abortSignal: AbortSignal.timeout(120000),
     })
 
     const cleanedBriefingText = object.briefing_text.replace(/^[0-9]+\s+/, '').trim()
