@@ -485,10 +485,14 @@ export default function PatientDetailClient({ patient, initialDocuments, initial
             <div className="border-t border-border p-4 shrink-0">
               <button
                 onClick={handleGenerateBriefing}
-                disabled={generating || documents.length === 0}
+                disabled={generating || documents.length === 0 || documents.some(d => d.status === 'uploaded' || d.status === 'extracting')}
                 className="w-full bg-accent text-background font-mono text-[11px] font-semibold py-2 px-3 rounded hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
               >
-                {generating ? 'Generating briefing...' : 'Generate Specialist Briefing'}
+                {generating
+                  ? 'Generating briefing...'
+                  : documents.some(d => d.status === 'uploaded' || d.status === 'extracting')
+                  ? 'Extracting records...'
+                  : 'Generate Specialist Briefing'}
               </button>
             </div>
           )}

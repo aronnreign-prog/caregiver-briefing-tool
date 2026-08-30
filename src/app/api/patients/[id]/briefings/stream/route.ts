@@ -82,6 +82,17 @@ PaperTrail Citation Requirement:
         },
       ],
       schema: BriefingOutputSchema,
+      onError: async ({ error }) => {
+        const errMsg = error instanceof Error ? error.message : String(error)
+        console.error('[Briefing Stream Generation Error]:', errMsg)
+        await db
+          .update(briefings)
+          .set({
+            status: 'failed',
+            error_message: errMsg,
+          })
+          .where(and(eq(briefings.id, briefingId), eq(briefings.caregiver_id, caregiver.id)))
+      },
       onFinish: async ({ object }) => {
         if (object) {
           const cleanedBriefingText = object.briefing_text.replace(/^[0-9]+\s+/, '').trim()
@@ -99,7 +110,6 @@ PaperTrail Citation Requirement:
       },
     })
 
-    result.consumeStream()
     return result.toTextStreamResponse()
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
