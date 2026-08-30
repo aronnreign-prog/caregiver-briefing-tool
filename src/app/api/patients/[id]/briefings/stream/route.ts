@@ -83,13 +83,17 @@ PaperTrail Citation Requirement:
       ],
       schema: BriefingOutputSchema,
       onError: async ({ error }) => {
-        const errMsg = error instanceof Error ? error.message : String(error)
-        console.error('[Briefing Stream Generation Error]:', errMsg)
+        // Log full technical stack trace to server logs for developers
+        const technicalError = error instanceof Error ? (error.stack || error.message) : String(error)
+        console.error('[Briefing Stream Generation Error - Developer Log]:', technicalError)
+
+        // Store clean, user-friendly message for the UI
+        const userFacingMessage = 'Unable to complete briefing synthesis. Please retry in a moment.'
         await db
           .update(briefings)
           .set({
             status: 'failed',
-            error_message: errMsg,
+            error_message: userFacingMessage,
           })
           .where(and(eq(briefings.id, briefingId), eq(briefings.caregiver_id, caregiver.id)))
       },
