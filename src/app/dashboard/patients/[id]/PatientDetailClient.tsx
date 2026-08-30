@@ -8,6 +8,7 @@ import ReactMarkdown from 'react-markdown'
 import DocumentList from './DocumentList'
 import { PipelineBar } from './PipelineBar'
 import { generateBriefing, createBriefingRecord, askPatientClinicalQuery } from './pipeline-actions'
+import { deleteBriefing } from '@/app/dashboard/actions'
 
 // Demo data
 const DEMO_DOCUMENTS: Document[] = [
@@ -326,6 +327,27 @@ export default function PatientDetailClient({ patient, initialDocuments, initial
       alert('Failed to start briefing: ' + (err instanceof Error ? err.message : 'Unknown error'))
     } finally {
       setGenerating(false)
+    }
+  }
+
+  const handleDeleteBriefing = async (briefingId: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation()
+    if (isDemo) return
+    if (!confirm('Are you sure you want to delete this briefing?')) return
+
+    try {
+      const res = await deleteBriefing(patient.id, briefingId)
+      if (res.error) {
+        alert('Failed to delete briefing: ' + res.error)
+        return
+      }
+      setBriefings(prev => prev.filter(b => b.id !== briefingId))
+      if (activeBriefingId === briefingId) {
+        const remaining = briefings.filter(b => b.id !== briefingId)
+        setActiveBriefingId(remaining[0]?.id ?? null)
+      }
+    } catch (err) {
+      alert('Error deleting briefing: ' + (err instanceof Error ? err.message : 'Unknown error'))
     }
   }
 
@@ -694,10 +716,34 @@ export default function PatientDetailClient({ patient, initialDocuments, initial
               {briefings.length > 1 && (
                 <div className="border-b border-border px-6 py-2 flex items-center gap-2 overflow-x-auto">
                   {briefings.map(b => (
-                    <button key={b.id} onClick={() => setActiveBriefingId(b.id)}
-                      className={`font-mono text-[10px] px-3 py-1.5 rounded border whitespace-nowrap transition-colors ${b.id === activeBriefingId ? 'bg-accent-dim border-accent/40 text-accent' : 'border-border text-muted-foreground hover:border-foreground/30 hover:text-foreground'}`}>
-                      {b.audience?.toUpperCase() === 'SPECIALIST' ? 'SPECIALIST' : (b.audience?.toUpperCase() || 'BRIEFING')} · {new Date(b.created_at).toLocaleDateString()}
-                    </button>
+                    <div
+                      key={b.id}
+                      onClick={() => setActiveBriefingId(b.id)}
+                      className={`font-mono text-[10px] px-2.5 py-1.5 rounded border whitespace-nowrap transition-colors cursor-pointer flex items-center gap-1.5 ${
+                        b.id === activeBriefingId
+                          ? 'bg-accent-dim border-accent/40 text-accent'
+                          : 'border-border text-muted-foreground hover:border-foreground/30 hover:text-foreground'
+                      }`}
+                    >
+                      {b.status === 'complete' && <span className="w-1.5 h-1.5 rounded-full bg-success shrink-0" />}
+                      {b.status === 'failed' && <span className="w-1.5 h-1.5 rounded-full bg-alert shrink-0" />}
+                      {(b.status === 'processing' || b.status === 'queued') && (
+                        <span className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse shrink-0" />
+                      )}
+                      <span>
+                        {b.audience?.toUpperCase() === 'SPECIALIST' ? 'SPECIALIST' : (b.audience?.toUpperCase() || 'BRIEFING')} · {new Date(b.created_at).toLocaleDateString()}
+                      </span>
+                      {!isDemo && (
+                        <button
+                          type="button"
+                          onClick={(e) => handleDeleteBriefing(b.id, e)}
+                          title="Delete Briefing"
+                          className="text-muted-foreground hover:text-alert p-0.5 ml-1 transition-colors text-[10px]"
+                        >
+                          ✕
+                        </button>
+                      )}
+                    </div>
                   ))}
                 </div>
               )}
@@ -711,12 +757,24 @@ export default function PatientDetailClient({ patient, initialDocuments, initial
                       </h2>
                       <p className="font-mono text-[10px] text-muted-foreground mt-1">Generated {new Date(activeBriefing.created_at).toLocaleString()}</p>
                     </div>
-                    <span className={`font-mono text-[9px] px-2 py-1 rounded border ${
-                      activeBriefing.status === 'complete' ? 'text-success border-success/30 bg-success-dim' :
-                      activeBriefing.status === 'processing' || activeBriefing.status === 'queued' ? 'text-accent border-accent/30 bg-accent-dim' :
-                      activeBriefing.status === 'failed' ? 'text-alert border-alert/30 bg-alert-dim' : 'text-muted-foreground border-border'}`}>
-                      {activeBriefing.status?.toUpperCase()}
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className={`font-mono text-[9px] px-2 py-1 rounded border ${
+                        activeBriefing.status === 'complete' ? 'text-success border-success/30 bg-success-dim' :
+                        activeBriefing.status === 'processing' || activeBriefing.status === 'queued' ? 'text-accent border-accent/30 bg-accent-dim' :
+                        activeBriefing.status === 'failed' ? 'text-alert border-alert/30 bg-alert-dim' : 'text-muted-foreground border-border'}`}>
+                        {activeBriefing.status?.toUpperCase()}
+                      </span>
+                      {!isDemo && (
+                        <button
+                          type="button"
+                          onClick={(e) => handleDeleteBriefing(activeBriefing.id, e)}
+                          title="Delete this briefing"
+                          className="font-mono text-[9px] px-2 py-1 rounded border border-border text-muted-foreground hover:text-alert hover:border-alert/40 transition-colors flex items-center gap-1"
+                        >
+                          ✕ Delete
+                        </button>
+                      )}
+                    </div>
                   </div>
 
                   {claimsArray.length > 0 && (
@@ -743,14 +801,34 @@ export default function PatientDetailClient({ patient, initialDocuments, initial
                         <div className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" style={{animationDelay: '0.4s'}} />
                       </div>
                       <p className="font-mono text-[11px] text-accent">Analysing documents and building briefing...</p>
-                      <p className="text-[11px] text-muted-foreground mt-1">This takes 30–90 seconds. Results appear automatically.</p>
+                      <p className="text-[11px] text-muted-foreground mt-1 mb-4">This takes 30–60 seconds. Results appear automatically.</p>
+                      {!isDemo && (
+                        <button
+                          type="button"
+                          onClick={(e) => handleDeleteBriefing(activeBriefing.id, e)}
+                          className="font-mono text-[10px] px-2.5 py-1 rounded border border-border text-muted-foreground hover:text-alert hover:border-alert/40 transition-colors inline-flex items-center gap-1"
+                        >
+                          ✕ Cancel / Remove Stuck Briefing
+                        </button>
+                      )}
                     </div>
                   )}
 
-                  {activeBriefing.status === 'failed' && activeBriefing.error_message && (
-                    <div className="border border-alert/30 bg-alert-dim rounded-md px-4 py-3 mb-6">
-                      <p className="font-mono text-[10px] text-alert mb-1">BRIEFING FAILED</p>
-                      <p className="text-[12px] text-foreground">{activeBriefing.error_message}</p>
+                  {activeBriefing.status === 'failed' && (
+                    <div className="border border-alert/30 bg-alert-dim rounded-md px-4 py-3 mb-6 flex items-start justify-between gap-4">
+                      <div>
+                        <p className="font-mono text-[10px] text-alert font-semibold mb-1">BRIEFING FAILED</p>
+                        <p className="text-[12px] text-foreground">{activeBriefing.error_message || 'Briefing generation encountered an issue. Please retry or delete this briefing.'}</p>
+                      </div>
+                      {!isDemo && (
+                        <button
+                          type="button"
+                          onClick={(e) => handleDeleteBriefing(activeBriefing.id, e)}
+                          className="font-mono text-[10px] px-2.5 py-1 rounded bg-alert text-background font-semibold hover:opacity-90 transition-opacity shrink-0"
+                        >
+                          Delete
+                        </button>
+                      )}
                     </div>
                   )}
 

@@ -1,7 +1,7 @@
 'use server'
 
 import { db } from '@/lib/db'
-import { patients, documents } from '@/lib/db/schema'
+import { patients, documents, briefings } from '@/lib/db/schema'
 import { eq, and } from 'drizzle-orm'
 import { revalidatePath } from 'next/cache'
 import { deletePatientMemory } from '@/lib/zep/ingest'
@@ -75,4 +75,20 @@ export async function deleteDocument(patientId: string, documentId: string): Pro
 
   revalidatePath(`/dashboard/patients/${patientId}`)
   return {}
+}
+
+export async function deleteBriefing(patientId: string, briefingId: string): Promise<{ error?: string }> {
+  const caregiver = await getCaregiver()
+  if (!caregiver) return { error: 'Unauthorized' }
+
+  try {
+    await db
+      .delete(briefings)
+      .where(and(eq(briefings.id, briefingId), eq(briefings.caregiver_id, caregiver.id)))
+
+    revalidatePath(`/dashboard/patients/${patientId}`)
+    return {}
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : 'Failed to delete briefing' }
+  }
 }
