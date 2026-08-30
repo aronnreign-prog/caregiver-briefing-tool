@@ -148,6 +148,7 @@ export async function extractClinicalFacts(
           },
         ],
         schema: ClinicalExtractionSchema,
+        abortSignal: AbortSignal.timeout(35000),
       })
 
       return object
