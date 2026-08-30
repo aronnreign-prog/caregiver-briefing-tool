@@ -6,6 +6,7 @@ import { eq, and } from 'drizzle-orm'
 import { extractClinicalFacts } from '@/lib/ai/extract'
 import { ingestDocumentFacts, queryPatientMemory } from '@/lib/zep/ingest'
 import { getClinicalModel } from '@/lib/ai/model'
+import { BriefingOutputSchema, ClinicalQueryOutputSchema } from '@/lib/ai/schemas'
 import { generateObject } from 'ai'
 import { z } from 'zod'
 import { revalidatePath } from 'next/cache'
@@ -89,53 +90,6 @@ export async function ingestDocument(documentId: string): Promise<{ error?: stri
   }
 }
 
-const BriefingOutputSchema = z.object({
-  briefing_text: z.string().describe('The clinical briefing markdown text. Embed inline claim markers like [claim:c1], [claim:c2] immediately after each fact, statement, or concern being asserted.'),
-  claims: z.array(z.object({
-    claim_id: z.string().describe('Matching identifier used in briefing_text, e.g. "c1", "c2".'),
-    claim_text: z.string().describe('The specific factual assertion, trend, notable absence, or clinical statement.'),
-    claim_type: z.enum(['source_document', 'medical_knowledge', 'reasoning', 'notable_absence']).describe('source_document for facts directly from records, medical_knowledge for general clinical pharmacology/pathology rules, reasoning for synthesized inferences, notable_absence when a critical expected test/medication/history is missing from the record.'),
-    flag: z.enum(['SUPPORTED', 'PARTIALLY SUPPORTED', 'UNSUPPORTED', 'MEDICAL_KNOWLEDGE', 'UNVERIFIED', 'CONFLICTING']).optional().describe('SUPPORTED if backed by records; CONFLICTING if contradictory findings exist across visits/docs; MEDICAL_KNOWLEDGE if general medical science; UNVERIFIED if uncertain.'),
-    evidence: z.array(z.object({
-      source_doc_id: z.string().optional().describe('UUID of the source document from [doc_id: <uuid>] in context.'),
-      source_page: z.number().optional().describe('1-indexed page number from [page: <number>] in context.'),
-      source_quote: z.string().optional().describe('Verbatim quote or short excerpt from the source document.'),
-      entry_text: z.string().optional().describe('Context or clinical rationale note.'),
-    })).optional().describe('Array of citations supporting this claim. For multi-point trends or corroborating records, cite EVERY source document and page that supports the claim.'),
-  })),
-  flagged_concerns: z.array(z.object({
-    concern: z.string(),
-    severity: z.enum(['high', 'medium', 'low']),
-    related_claims: z.array(z.string()),
-  })),
-})
-
-const ClinicalQueryOutputSchema = z.object({
-  answer: z.string().describe('The clinical answer in markdown with inline [claim:c1], [claim:c2] citations.'),
-  claims: z.array(
-    z.object({
-      claim_id: z.string(),
-      claim_text: z.string(),
-      flag: z.enum([
-        'SUPPORTED',
-        'PARTIALLY SUPPORTED',
-        'UNSUPPORTED',
-        'MEDICAL_KNOWLEDGE',
-        'UNVERIFIED',
-        'CONFLICTING',
-      ]).optional(),
-      evidence: z.array(
-        z.object({
-          source_doc_id: z.string().optional(),
-          source_page: z.number().optional(),
-          source_quote: z.string().optional(),
-          entry_text: z.string().optional(),
-        }),
-      ).optional(),
-    }),
-  ),
-})
-
 export type ClinicalQueryResult = {
   answer?: string
   claims?: z.infer<typeof ClinicalQueryOutputSchema>['claims']
@@ -213,58 +167,13 @@ export async function generateBriefing(
   try {
     // 1. Query Zep with clinical intent query — the single source of truth for clinical memory
     const zepQuery = buildZepQuery()
-    let context = await queryPatientMemory(caregiver.id, patientId, zepQuery)
+    const context = await queryPatientMemory(caregiver.id, patientId, zepQuery)
 
-    // 2. If Zep is empty (deleted, never ingested, or any other reason),
-    //    rebuild from Vercel Blob PDFs — regardless of Neon document status.
-    //    Neon only holds metadata; Zep is the memory.
-    if (!context || context.trim().length === 0) {
-      console.log('[Briefing] Zep memory empty — rebuilding from Blob PDFs...')
-
-      const patientDocs = await db
-        .select()
-        .from(documents)
-        .where(and(eq(documents.patient_id, patientId), eq(documents.caregiver_id, caregiver.id)))
-
-      const docsWithBlob = patientDocs.filter((d) => d.blob_url)
-
-      if (docsWithBlob.length === 0) {
-        await db.update(briefings).set({
-          status: 'failed',
-          error_message: 'No documents uploaded for this patient yet.',
-        }).where(and(eq(briefings.id, briefingId), eq(briefings.caregiver_id, caregiver.id)))
-        return { error: 'No documents found.' }
-      }
-
-      for (const doc of docsWithBlob) {
-        try {
-          console.log('[Briefing] Rebuilding Zep from:', doc.filename)
-          const response = await fetch(doc.blob_url!)
-          if (!response.ok) throw new Error(`Blob fetch failed: ${response.status}`)
-          const buf = Buffer.from(await response.arrayBuffer())
-          const extraction = await extractClinicalFacts(buf, doc.filename)
-          await ingestDocumentFacts(caregiver.id, patientId, doc.id, doc.filename, extraction)
-          await db.update(documents).set({
-            status: 'extracted',
-            document_date: extraction.documentDate ?? null,
-            document_type: extraction.documentType ?? null,
-            processed_at: new Date(),
-            error_message: null,
-          }).where(and(eq(documents.id, doc.id), eq(documents.caregiver_id, caregiver.id)))
-        } catch (e) {
-          console.error('[Briefing] Rebuild error for doc:', doc.id, e)
-        }
-      }
-
-      // Re-query Zep after rebuild
-      context = await queryPatientMemory(caregiver.id, patientId, zepQuery)
-    }
-
-    // 3. If still empty after rebuild attempt, fail with a clear message
+    // 2. If memory is empty, fail with a clear message
     if (!context || context.trim().length === 0) {
       await db.update(briefings).set({
         status: 'failed',
-        error_message: 'Could not retrieve clinical memory even after rebuilding from documents. Check document contents.',
+        error_message: 'No clinical facts found in graph memory. Please ensure documents are extracted.',
       }).where(and(eq(briefings.id, briefingId), eq(briefings.caregiver_id, caregiver.id)))
       return { error: 'Clinical memory unavailable.' }
     }
@@ -310,6 +219,7 @@ PaperTrail Citation Requirement:
         content: `${patientHeader}\n\nExtracted clinical facts:\n\n${context}\n\nGenerate a comprehensive specialist briefing with inline [claim:cN] citations.`,
       }],
       schema: BriefingOutputSchema,
+      abortSignal: AbortSignal.timeout(45000),
     })
 
     const cleanedBriefingText = object.briefing_text.replace(/^[0-9]+\s+/, '').trim()
@@ -419,6 +329,7 @@ Guidelines:
         },
       ],
       schema: ClinicalQueryOutputSchema,
+      abortSignal: AbortSignal.timeout(45000),
     })
 
     return {

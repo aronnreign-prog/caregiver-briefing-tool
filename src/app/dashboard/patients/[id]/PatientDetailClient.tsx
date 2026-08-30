@@ -302,12 +302,18 @@ export default function PatientDetailClient({ patient, initialDocuments, initial
       setBriefings(prev => [newBriefing as Briefing, ...prev])
       setActiveBriefingId(result.id)
 
-      generateBriefing(patient.id, result.id, 'specialist')
-        .then(res => {
-          if (res?.error) console.error('[Briefing] Failed:', res.error)
-          router.refresh()
+      fetch(`/api/patients/${patient.id}/briefings/stream`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ briefingId: result.id }),
+      })
+        .then(async (res) => {
+          if (!res.ok) {
+            const data = await res.json().catch(() => ({}))
+            console.error('[Briefing Stream] Failed:', data.error)
+          }
         })
-        .catch(err => console.error('[Briefing] Unexpected error:', err))
+        .catch(err => console.error('[Briefing Stream] Error:', err))
     } catch (err: unknown) {
       alert('Failed to start briefing: ' + (err instanceof Error ? err.message : 'Unknown error'))
     } finally {

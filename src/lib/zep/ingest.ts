@@ -213,62 +213,55 @@ export async function queryPatientMemory(
     // Ensure user exists before querying
     await ensureZepUser(userId)
 
-    // ── Layer 1: Longitudinal Entity Summaries (Uncapped holistic knowledge graph) ──
-    let rawNodes: any[] = []
-    let entitySummaries: string[] = []
-    try {
-      const nodes = await client.graph.node.getByUserId(userId, { limit: 50 })
-      if (Array.isArray(nodes)) {
-        rawNodes = nodes
-        entitySummaries = nodes
-          .filter((n) => n.summary && n.summary.trim().length > 0)
-          .map((n) => {
-            const labels = n.labels && n.labels.length > 0 ? ` (${n.labels.join(', ')})` : ''
-            return `[Entity: ${n.name}${labels}] ${n.summary.trim()}`
-          })
-      }
-    } catch (nodeErr) {
-      console.warn('[Zep] Entity node summaries fetch skipped or unavailable:', nodeErr)
-    }
-
-    // ── Layer 2: Chronological Document Episodes (Citable ground truth with doc/page tags) ──
-    let rawEpisodes: { content?: string; createdAt?: string }[] = []
-    try {
-      const episodeResponse = await client.graph.episode.getByUserId(userId, { lastn: 30 })
-      rawEpisodes = episodeResponse.episodes ?? []
-    } catch (epErr) {
-      console.warn('[Zep] Could not fetch episodes via getByUserId:', epErr)
-    }
-
-    // Preserve chronological order (ascending by creation date)
-    const sortedEpisodes = [...rawEpisodes].sort((a, b) => {
-      const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0
-      const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0
-      return timeA - timeB
-    })
-
-    const episodesContent = sortedEpisodes
-      .map((ep) => ep.content?.trim())
-      .filter((c): c is string => Boolean(c && c.length > 0))
-
-    // ── Layer 3: Semantic Graph Search with Temporal Validity (Edges) ──
+    // ── Concurrent Multi-Layer Retrieval ──
     const cleanQuery = query.trim().slice(0, 380) || 'longitudinal clinical trajectory medications lab trends'
-    const edgeList: string[] = []
 
-    try {
-      const searchResults = await client.graph.search({
+    const [nodesRes, episodesRes, searchRes] = await Promise.allSettled([
+      client.graph.node.getByUserId(userId, { limit: 50 }),
+      client.graph.episode.getByUserId(userId, { lastn: 30 }),
+      client.graph.search({
         userId,
         query: cleanQuery,
         scope: 'edges',
         limit: 45,
         reranker: 'mmr',
         mmrLambda: 0.6,
+      }),
+    ])
+
+    // Layer 1: Entity Summaries
+    let entitySummaries: string[] = []
+    if (nodesRes.status === 'fulfilled' && Array.isArray(nodesRes.value)) {
+      entitySummaries = nodesRes.value
+        .filter((n) => n.summary && n.summary.trim().length > 0)
+        .map((n) => {
+          const labels = n.labels && n.labels.length > 0 ? ` (${n.labels.join(', ')})` : ''
+          return `[Entity: ${n.name}${labels}] ${n.summary.trim()}`
+        })
+    } else if (nodesRes.status === 'rejected') {
+      console.warn('[Zep] Entity node fetch skipped:', nodesRes.reason)
+    }
+
+    // Layer 2: Chronological Episodes
+    let episodesContent: string[] = []
+    if (episodesRes.status === 'fulfilled' && episodesRes.value?.episodes) {
+      const sortedEpisodes = [...episodesRes.value.episodes].sort((a, b) => {
+        const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0
+        const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0
+        return timeA - timeB
       })
+      episodesContent = sortedEpisodes
+        .map((ep) => ep.content?.trim())
+        .filter((c): c is string => Boolean(c && c.length > 0))
+    } else if (episodesRes.status === 'rejected') {
+      console.warn('[Zep] Episodes fetch skipped:', episodesRes.reason)
+    }
 
-      const rawEdges = searchResults.edges ?? []
+    // Layer 3: Temporal Edges
+    const edgeList: string[] = []
+    if (searchRes.status === 'fulfilled' && searchRes.value?.edges) {
       const edgeMap = new Map<string, string>()
-
-      for (const e of rawEdges as any[]) {
+      for (const e of searchRes.value.edges as any[]) {
         const fact = (e.fact ?? '').trim()
         if (!fact) continue
         const key = e.uuid || fact
@@ -285,10 +278,9 @@ export async function queryPatientMemory(
           edgeMap.set(key, formattedFact)
         }
       }
-
       edgeList.push(...Array.from(edgeMap.values()))
-    } catch (searchErr) {
-      console.warn('[Zep] Edge search fallback error:', searchErr)
+    } else if (searchRes.status === 'rejected') {
+      console.warn('[Zep] Edge search skipped:', searchRes.reason)
     }
 
     // If all layers are completely absent, return empty string for self-heal detection
