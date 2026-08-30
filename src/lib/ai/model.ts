@@ -7,6 +7,6 @@
 import { google } from '@ai-sdk/google'
 
 export function getClinicalModel() {
-  const modelName = process.env.AI_MODEL || 'gemini-3-flash'
+  const modelName = process.env.AI_MODEL || 'gemini-3-flash-preview'
   return google(modelName)
 }
