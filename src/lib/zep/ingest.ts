@@ -37,7 +37,7 @@ function buildFactSummary(
   documentId: string,
   filename: string,
 ): string {
-  const docDate = extraction.documentDate ?? 'date unknown'
+  const docDate = extraction.documentDate ?? 'Date unknown / not documented'
   const lines: string[] = []
 
   // ── Document context header ───────────────────────────────────────────────
@@ -52,12 +52,12 @@ function buildFactSummary(
   if (extraction.lab_values.length > 0) {
     lines.push('\nLAB RESULTS:')
     for (const lab of extraction.lab_values) {
-      const onDate = lab.date ? lab.date : docDate
+      const onDate = lab.date ? `On ${lab.date}` : (extraction.documentDate ? `On ${extraction.documentDate}` : 'Date unknown')
       const val = lab.unit ? `${lab.value} ${lab.unit}` : lab.value
       const range = lab.referenceRange ? ` (ref: ${lab.referenceRange})` : ''
       const flag = lab.flag ? ` [${lab.flag}]` : ''
       const page = lab.pageNumber ? ` [page: ${lab.pageNumber}]` : ''
-      lines.push(`  On ${onDate}, ${lab.name} was ${val}${range}${flag}.${page} [doc_id: ${documentId}]`)
+      lines.push(`  ${onDate}, ${lab.name} was ${val}${range}${flag}.${page} [doc_id: ${documentId}]`)
     }
   }
 
@@ -65,13 +65,13 @@ function buildFactSummary(
   if (extraction.medications.length > 0) {
     lines.push('\nMEDICATIONS:')
     for (const med of extraction.medications) {
-      const onDate = med.prescribedDate ? med.prescribedDate : docDate
+      const onDate = med.prescribedDate ? `On ${med.prescribedDate}` : (extraction.documentDate ? `On ${extraction.documentDate}` : 'Date unknown')
       const parts: string[] = [med.name]
       if (med.dose) parts.push(med.dose)
       if (med.frequency) parts.push(med.frequency)
       if (med.route) parts.push(`(${med.route})`)
       const page = med.pageNumber ? ` [page: ${med.pageNumber}]` : ''
-      lines.push(`  On ${onDate}, ${parts.join(' ')} documented as ${med.status}.${page} [doc_id: ${documentId}]`)
+      lines.push(`  ${onDate}, ${parts.join(' ')} documented as ${med.status}.${page} [doc_id: ${documentId}]`)
     }
   }
 
@@ -79,10 +79,10 @@ function buildFactSummary(
   if (extraction.conditions.length > 0) {
     lines.push('\nCONDITIONS / DIAGNOSES:')
     for (const cond of extraction.conditions) {
-      const onDate = cond.onsetDate ? cond.onsetDate : docDate
+      const onDate = cond.onsetDate ? `As of ${cond.onsetDate}` : (extraction.documentDate ? `As of ${extraction.documentDate}` : 'Date unknown')
       const status = cond.status ? ` (${cond.status})` : ''
       const page = cond.pageNumber ? ` [page: ${cond.pageNumber}]` : ''
-      lines.push(`  As of ${onDate}, ${cond.name}${status}.${page} [doc_id: ${documentId}]`)
+      lines.push(`  ${onDate}, ${cond.name}${status}.${page} [doc_id: ${documentId}]`)
     }
   }
 
@@ -120,12 +120,31 @@ export async function ingestDocumentFacts(
 
     const content = buildFactSummary(extraction, documentId, filename)
 
-    // Zep Cloud v2: add text data to user graph
-    await client.graph.add({
+    // Build native episode payload
+    const episodePayload: {
+      data: string
+      type: 'text'
+      userId: string
+      documentId: string
+      createdAt?: string
+    } = {
       data: content,
       type: 'text',
       userId,
-    })
+      documentId,
+    }
+
+    // Only supply created_at if an authentic, verified document date exists in ISO format.
+    // If undated/missing, do NOT pass created_at or today's timestamp so it remains strictly undated.
+    if (extraction.documentDate && /^\d{4}-\d{2}-\d{2}/.test(extraction.documentDate)) {
+      const parsedDate = new Date(extraction.documentDate)
+      if (!isNaN(parsedDate.getTime())) {
+        episodePayload.createdAt = parsedDate.toISOString()
+      }
+    }
+
+    // Zep Cloud: add text data to user graph
+    await client.graph.add(episodePayload)
 
     return { success: true }
   } catch (err) {

@@ -351,9 +351,9 @@ export async function askPatientClinicalQuery(
   if (!trimmedQuestion) return { error: 'Please enter a clinical question.' }
 
   try {
-    // 1. Query Zep graph memory: if a previous turn exists, enrich search query with prior context so anaphoric questions (e.g. "and what about now?") find relevant entities
+    // 1. Query Zep graph memory: if a previous turn exists, combine prior question context for anaphoric resolution
     const retrievalQuery = previousTurn?.question
-      ? `${previousTurn.question.slice(0, 150)} ${trimmedQuestion}`
+      ? `${previousTurn.question} ${trimmedQuestion}`
       : trimmedQuestion
 
     let context = await queryPatientMemory(caregiver.id, patientId, retrievalQuery)
