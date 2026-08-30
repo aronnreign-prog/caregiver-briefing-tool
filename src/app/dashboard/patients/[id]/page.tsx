@@ -1,3 +1,5 @@
+export const maxDuration = 60
+
 import { getPatientSafely } from '@/lib/data/patient'
 import { isValidUUID } from '@/lib/validators'
 import PatientDetailClient from './PatientDetailClient'

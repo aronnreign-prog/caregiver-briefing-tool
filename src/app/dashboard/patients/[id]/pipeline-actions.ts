@@ -1,7 +1,5 @@
 'use server'
 
-export const maxDuration = 60
-
 import { db } from '@/lib/db'
 import { documents, briefings, patients } from '@/lib/db/schema'
 import { eq, and } from 'drizzle-orm'
