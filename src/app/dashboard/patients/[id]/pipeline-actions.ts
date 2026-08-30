@@ -142,7 +142,7 @@ export type ClinicalQueryResult = {
   error?: string
 }
 
-export type BriefingAudience = 'specialist' | 'gp' | 'family' | 'general' | 'er_visit' | 'second_opinion'
+export type BriefingAudience = 'specialist' | 'general'
 
 function buildZepQuery(): string {
   return 'comprehensive longitudinal clinical trajectory medications diagnoses lab results vitals and safety flags'
@@ -180,7 +180,7 @@ export async function createBriefingRecord(
 export async function generateBriefing(
   patientId: string,
   briefingId: string,
-  audience: BriefingAudience,
+  audience: string = 'specialist',
 ): Promise<{ error?: string }> {
   const caregiver = await getCaregiver()
   if (!caregiver) return { error: 'Unauthorized' }

@@ -1,7 +1,7 @@
 /**
  * src/lib/zep/ingest.ts
  * Ingest extracted clinical facts into Zep Cloud with bi-temporal valid_from dates.
- * Uses Zep Cloud v2 graph API: client.graph.add / client.graph.search
+ * Uses Zep Cloud V3 graph API: client.graph.add / client.graph.search
  */
 
 import { ZepClient } from '@getzep/zep-cloud'
@@ -17,7 +17,7 @@ function getZepClient(): ZepClient {
   return _client
 }
 
-// In Zep Cloud v2, facts are scoped to a userId (caregiver + patient composite)
+// In Zep Cloud V3, facts are scoped to a userId (caregiver + patient composite)
 // We use a deterministic userId per patient so all their documents accumulate in one graph
 function zepUserId(caregiverId: string, patientId: string): string {
   return 'caregiver-' + caregiverId + '-patient-' + patientId

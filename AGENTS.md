@@ -45,7 +45,7 @@ Browser (React 19) → Next.js 16.2 Server Actions → Drizzle ORM + Neon (Postg
 | DB Client | `src/lib/db/index.ts` | Neon serverless + Drizzle client |
 | Drizzle Config | `drizzle.config.ts` | Drizzle Kit config (push schema to Neon) |
 | AI Extraction | `src/lib/ai/extract.ts` | `extractClinicalFacts(buffer, filename)` — Gemini 2.5 Flash + Zod |
-| Zep Memory | `src/lib/zep/ingest.ts` | `ingestDocumentFacts()`, `queryPatientMemory()` — Zep Cloud v2 graph API |
+| Zep Memory | `src/lib/zep/ingest.ts` | `ingestDocumentFacts()`, `queryPatientMemory()` — Zep Cloud V3 graph API |
 | Middleware | `src/proxy.ts` | Better Auth session check + redirect |
 | Error Boundary | `src/app/error.tsx` | Root error UI |
 | Types | `src/types/database.ts` | Patient, Document, Briefing, ExtractedEntities |
