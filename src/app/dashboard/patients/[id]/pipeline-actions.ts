@@ -5,7 +5,7 @@ import { documents, briefings, patients } from '@/lib/db/schema'
 import { eq, and } from 'drizzle-orm'
 import { extractClinicalFacts } from '@/lib/ai/extract'
 import { ingestDocumentFacts, queryPatientMemory } from '@/lib/zep/ingest'
-import { google } from '@ai-sdk/google'
+import { getClinicalModel } from '@/lib/ai/model'
 import { generateObject } from 'ai'
 import { z } from 'zod'
 import { revalidatePath } from 'next/cache'
@@ -271,7 +271,7 @@ export async function generateBriefing(
 
     const patientHeader = `Patient: ${patient.name}, DOB: ${patient.date_of_birth}, Relationship: ${patient.relationship}`
 
-    const model = google(process.env.AI_MODEL || 'gemini-2.5-flash')
+    const model = getClinicalModel()
 
     // ── Diagnostics Context ────────────────────────────────────────────────
     console.log('=== [ZEP RETRIEVAL CONTEXT TO GEMINI] ===')
@@ -388,7 +388,7 @@ export async function askPatientClinicalQuery(
     }
 
     const patientHeader = `Patient: ${patient.name}, DOB: ${patient.date_of_birth}, Relationship: ${patient.relationship}`
-    const model = google(process.env.AI_MODEL || 'gemini-2.5-flash')
+    const model = getClinicalModel()
 
     const conversationContext = previousTurn
       ? `Prior Conversation Turn:\nUser asked: "${previousTurn.question}"\nAssistant answered: "${previousTurn.answer}"\n\n`

@@ -7,9 +7,9 @@
  * Temporal dates are captured per-entity so Zep can build time-aware graph edges.
  */
 
-import { google } from '@ai-sdk/google'
 import { generateObject } from 'ai'
 import { z } from 'zod'
+import { getClinicalModel } from './model'
 
 export const ClinicalExtractionSchema = z.object({
   // ── Document identity ──────────────────────────────────────────────────────
@@ -123,7 +123,7 @@ export async function extractClinicalFacts(
   pdfBuffer: Buffer,
   filename: string,
 ): Promise<ClinicalExtraction> {
-  const model = google(process.env.AI_MODEL || 'gemini-2.5-flash')
+  const model = getClinicalModel()
 
   const { object } = await generateObject({
     model,
