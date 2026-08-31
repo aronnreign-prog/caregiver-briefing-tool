@@ -245,7 +245,30 @@ export default function PatientDetailClient({ patient, initialDocuments, initial
     timestamp: string
   }>>([])
 
+  const [contextMenu, setContextMenu] = useState<{
+    x: number
+    y: number
+    briefingId: string
+  } | null>(null)
+
   const activeBriefing = briefings.find(b => b.id === activeBriefingId) ?? briefings[0] ?? null
+
+  // Dismiss context menu on outside click, scroll, or Escape key
+  useEffect(() => {
+    if (!contextMenu) return
+    const handleClose = () => setContextMenu(null)
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setContextMenu(null)
+    }
+    window.addEventListener('click', handleClose)
+    window.addEventListener('scroll', handleClose, true)
+    window.addEventListener('keydown', handleKeyDown)
+    return () => {
+      window.removeEventListener('click', handleClose)
+      window.removeEventListener('scroll', handleClose, true)
+      window.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [contextMenu])
 
   // Adaptive polling for in-progress documents
   useEffect(() => {
@@ -744,16 +767,55 @@ export default function PatientDetailClient({ patient, initialDocuments, initial
               )}
             </div>
           ) : (
-            <div className="flex-1">
-              {briefings.length > 1 && (
+            <div className="flex-1 relative">
+              {/* Context Menu for Tab Right-Click */}
+              {contextMenu && (
+                <div
+                  style={{
+                    position: 'fixed',
+                    top: contextMenu.y,
+                    left: contextMenu.x,
+                    zIndex: 100,
+                  }}
+                  className="bg-surface-raised border border-border rounded-md shadow-xl py-1 min-w-[140px] animate-in fade-in-0 zoom-in-95 duration-100"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const id = contextMenu.briefingId
+                      setContextMenu(null)
+                      handleDeleteBriefing(id)
+                    }}
+                    className="w-full text-left px-3 py-1.5 text-[11px] font-mono text-alert hover:bg-alert-dim hover:text-alert flex items-center gap-2 transition-colors cursor-pointer"
+                  >
+                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                      <path d="M1.5 3h9M4.5 3V2h3v1M3 3l.5 7.5h5L9 3" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
+                    Delete Briefing
+                  </button>
+                </div>
+              )}
+
+              {briefings.length > 0 && (
                 <div className="border-b border-border px-6 py-2 flex items-center gap-2 overflow-x-auto">
                   {briefings.map(b => (
                     <div
                       key={b.id}
                       onClick={() => setActiveBriefingId(b.id)}
-                      className={`font-mono text-[10px] px-2.5 py-1.5 rounded border whitespace-nowrap transition-colors cursor-pointer flex items-center gap-1.5 ${
+                      onContextMenu={(e) => {
+                        e.preventDefault()
+                        if (isDemo) return
+                        setContextMenu({
+                          x: e.clientX,
+                          y: e.clientY,
+                          briefingId: b.id,
+                        })
+                      }}
+                      title={isDemo ? undefined : 'Right-click for options'}
+                      className={`font-mono text-[10px] px-3 py-1.5 rounded border whitespace-nowrap transition-colors cursor-pointer select-none flex items-center gap-1.5 ${
                         b.id === activeBriefingId
-                          ? 'bg-accent-dim border-accent/40 text-accent'
+                          ? 'bg-accent-dim border-accent/40 text-accent font-semibold'
                           : 'border-border text-muted-foreground hover:border-foreground/30 hover:text-foreground'
                       }`}
                     >
@@ -765,16 +827,6 @@ export default function PatientDetailClient({ patient, initialDocuments, initial
                       <span>
                         {b.audience?.toUpperCase() === 'SPECIALIST' ? 'SPECIALIST' : (b.audience?.toUpperCase() || 'BRIEFING')} · {new Date(b.created_at).toLocaleDateString()}
                       </span>
-                      {!isDemo && (
-                        <button
-                          type="button"
-                          onClick={(e) => handleDeleteBriefing(b.id, e)}
-                          title="Delete Briefing"
-                          className="text-muted-foreground hover:text-alert p-0.5 ml-1 transition-colors text-[10px]"
-                        >
-                          ✕
-                        </button>
-                      )}
                     </div>
                   ))}
                 </div>
@@ -796,16 +848,6 @@ export default function PatientDetailClient({ patient, initialDocuments, initial
                         activeBriefing.status === 'failed' ? 'text-alert border-alert/30 bg-alert-dim' : 'text-muted-foreground border-border'}`}>
                         {activeBriefing.status?.toUpperCase()}
                       </span>
-                      {!isDemo && (
-                        <button
-                          type="button"
-                          onClick={(e) => handleDeleteBriefing(activeBriefing.id, e)}
-                          title="Delete this briefing"
-                          className="font-mono text-[9px] px-2 py-1 rounded border border-border text-muted-foreground hover:text-alert hover:border-alert/40 transition-colors flex items-center gap-1"
-                        >
-                          ✕ Delete
-                        </button>
-                      )}
                     </div>
                   </div>
 
@@ -833,16 +875,7 @@ export default function PatientDetailClient({ patient, initialDocuments, initial
                         <div className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" style={{animationDelay: '0.4s'}} />
                       </div>
                       <p className="font-mono text-[11px] text-accent">Analysing documents and building briefing...</p>
-                      <p className="text-[11px] text-muted-foreground mt-1 mb-4">This takes 30–60 seconds. Results appear automatically.</p>
-                      {!isDemo && (
-                        <button
-                          type="button"
-                          onClick={(e) => handleDeleteBriefing(activeBriefing.id, e)}
-                          className="font-mono text-[10px] px-2.5 py-1 rounded border border-border text-muted-foreground hover:text-alert hover:border-alert/40 transition-colors inline-flex items-center gap-1"
-                        >
-                          ✕ Cancel / Remove Stuck Briefing
-                        </button>
-                      )}
+                      <p className="text-[11px] text-muted-foreground mt-1">This takes 15–30 seconds. Results appear automatically.</p>
                     </div>
                   )}
 
