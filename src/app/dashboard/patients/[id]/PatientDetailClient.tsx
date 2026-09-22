@@ -232,7 +232,7 @@ export default function PatientDetailClient({ patient, initialDocuments, initial
   const [generating, setGenerating] = useState(false)
   const [uploadingFile, setUploadingFile] = useState(false)
   const [activeView, setActiveView] = useState<'briefing' | 'query'>('briefing')
-  const [mobileTab, setMobileTab] = useState<'briefing' | 'documents' | 'query'>('briefing')
+  const [isRecordsDrawerOpen, setIsRecordsDrawerOpen] = useState(false)
 
   // On-demand clinical query state
   const [queryInput, setQueryInput] = useState('')
@@ -514,6 +514,17 @@ export default function PatientDetailClient({ patient, initialDocuments, initial
           )}
         </div>
         <div className="flex items-center gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={() => setIsRecordsDrawerOpen(true)}
+            className="md:hidden inline-flex items-center gap-1.5 font-mono text-[10px] px-2.5 py-1.5 rounded border border-border bg-surface-raised text-muted-foreground hover:text-foreground hover:border-accent/40 transition-colors shrink-0 touch-manipulation"
+            aria-label="Open records drawer"
+          >
+            <span>📄 Records</span>
+            <span className="bg-accent/20 text-accent text-[9px] px-1.5 py-0.2 rounded-full font-bold">
+              {documents.length}
+            </span>
+          </button>
           {isDemo && <span className="font-mono text-[9px] border border-border text-muted-foreground px-2 py-0.5 rounded">DEMO RECORD</span>}
           {(isGuest || isDemo) && (
             <Link href="/signup" className="font-mono text-[10px] bg-accent text-background px-2.5 py-1 rounded hover:opacity-90 transition-opacity font-semibold">Save record</Link>
@@ -521,41 +532,75 @@ export default function PatientDetailClient({ patient, initialDocuments, initial
         </div>
       </header>
 
-      {/* Mobile Tab Switcher */}
-      <div className="flex md:hidden border-b border-border bg-surface-raised/40 p-1.5 gap-1 shrink-0">
-        <button
-          type="button"
-          onClick={() => { setMobileTab('briefing'); setActiveView('briefing') }}
-          className={`flex-1 py-1.5 px-2 rounded font-mono text-[11px] font-semibold text-center transition-colors flex items-center justify-center gap-1.5 touch-manipulation ${
-            mobileTab === 'briefing'
-              ? 'bg-accent text-background shadow-sm'
-              : 'text-muted-foreground hover:text-foreground'
-          }`}
-        >
-          <span>📋</span> Briefing
-        </button>
-        <button
-          type="button"
-          onClick={() => setMobileTab('documents')}
-          className={`flex-1 py-1.5 px-2 rounded font-mono text-[11px] font-semibold text-center transition-colors flex items-center justify-center gap-1.5 touch-manipulation ${
-            mobileTab === 'documents'
-              ? 'bg-accent text-background shadow-sm'
-              : 'text-muted-foreground hover:text-foreground'
-          }`}
-        >
-          <span>📄</span> Records ({documents.length})
-        </button>
-        <button
-          type="button"
-          onClick={() => { setMobileTab('query'); setActiveView('query') }}
-          className={`flex-1 py-1.5 px-2 rounded font-mono text-[11px] font-semibold text-center transition-colors flex items-center justify-center gap-1.5 touch-manipulation ${
-            mobileTab === 'query'
-              ? 'bg-accent text-background shadow-sm'
-              : 'text-muted-foreground hover:text-foreground'
-          }`}
-        >
-          <span>🔍</span> Query {queryHistory.length > 0 && `(${queryHistory.length})`}
-        </button>
+      {/* Mobile Records Drawer (Vercel Sheet / Drawer Pattern) */}
+      {isRecordsDrawerOpen && (
+        <div
+          className="fixed inset-0 z-40 bg-black/60 backdrop-blur-xs transition-opacity md:hidden"
+          onClick={() => setIsRecordsDrawerOpen(false)}
+        />
+      )}
+      <div
+        className={`fixed inset-y-0 left-0 z-50 w-[85vw] max-w-sm bg-surface border-r border-border shadow-2xl flex flex-col transform transition-transform duration-300 ease-in-out md:hidden ${
+          isRecordsDrawerOpen ? 'translate-x-0' : '-translate-x-full'
+        }`}
+      >
+        <div className="px-4 py-3.5 border-b border-border flex items-center justify-between bg-surface-raised/40 shrink-0">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="w-8 h-8 rounded-lg bg-accent-dim border border-accent/20 flex items-center justify-center shrink-0 font-mono text-xs font-bold text-accent">
+              {patient.name.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase()}
+            </div>
+            <div className="min-w-0">
+              <h2 className="text-[13px] font-semibold text-foreground truncate">{patient.name}</h2>
+              <p className="font-mono text-[9px] text-muted-foreground">{patient.relationship} · {age}y · DOB {patient.date_of_birth}</p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setIsRecordsDrawerOpen(false)}
+            className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-surface-raised transition-colors shrink-0 font-mono text-xs px-2 border border-border"
+            aria-label="Close drawer"
+          >
+            ✕
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto">
+          <DocumentList
+            patientId={patient.id}
+            documents={documents}
+            isDemo={isDemo}
+            isGuest={isGuest}
+            uploading={uploadingFile}
+            onUploadStart={setUploadingFile}
+            onDocumentAdded={handleAddDocument}
+            onDocumentRemoved={handleRemoveDocument}
+            onDocumentStatusUpdate={handleDocumentStatusUpdate}
+            onDocClick={(e, id, page) => {
+              setIsRecordsDrawerOpen(false)
+              handleDocClick(e, id, page)
+            }}
+          />
+        </div>
+
+        {!isDemo && !isGuest && (
+          <div className="border-t border-border p-3 shrink-0 bg-surface-raised/40">
+            <button
+              onClick={() => {
+                setIsRecordsDrawerOpen(false)
+                handleGenerateBriefing()
+                setActiveView('briefing')
+              }}
+              disabled={generating || documents.length === 0 || documents.some(d => d.status === 'uploaded' || d.status === 'extracting')}
+              className="w-full bg-accent text-background font-mono text-[11px] font-semibold py-2.5 px-3 rounded hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5 cursor-pointer touch-manipulation"
+            >
+              {generating
+                ? 'Generating briefing...'
+                : documents.some(d => d.status === 'uploaded' || d.status === 'extracting')
+                ? 'Extracting records...'
+                : 'Generate Specialist Briefing'}
+            </button>
+          </div>
+        )}
       </div>
 
       {concerns.length > 0 && (
@@ -575,15 +620,16 @@ export default function PatientDetailClient({ patient, initialDocuments, initial
       )}
 
       <div className="flex flex-1 flex-col md:flex-row overflow-hidden">
-        <aside className={`${mobileTab === 'documents' ? 'flex' : 'hidden md:flex'} w-full md:w-72 shrink-0 border-b md:border-b-0 md:border-r border-border bg-surface flex-col overflow-hidden`}>
-          <div className="px-4 sm:px-5 py-3 sm:py-4 border-b border-border">
-            <div className="flex items-center gap-3 mb-2 sm:mb-3">
-              <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-lg bg-accent-dim border border-accent/20 flex items-center justify-center shrink-0 font-mono text-[13px] sm:text-[14px] font-bold text-accent">
+        {/* Desktop Sidebar (Persistent) */}
+        <aside className="hidden md:flex w-72 shrink-0 border-r border-border bg-surface flex-col overflow-hidden">
+          <div className="px-5 py-4 border-b border-border">
+            <div className="flex items-center gap-3 mb-3">
+              <div className="w-10 h-10 rounded-lg bg-accent-dim border border-accent/20 flex items-center justify-center shrink-0 font-mono text-[14px] font-bold text-accent">
                 {patient.name.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase()}
               </div>
               <div>
-                <h1 className="text-[13px] sm:text-[14px] font-semibold text-foreground leading-tight">{patient.name}</h1>
-                <p className="font-mono text-[9px] sm:text-[10px] text-muted-foreground">{patient.relationship} · {age}y · DOB {patient.date_of_birth}</p>
+                <h1 className="text-[14px] font-semibold text-foreground leading-tight">{patient.name}</h1>
+                <p className="font-mono text-[10px] text-muted-foreground">{patient.relationship} · {age}y · DOB {patient.date_of_birth}</p>
               </div>
             </div>
           </div>
@@ -599,11 +645,10 @@ export default function PatientDetailClient({ patient, initialDocuments, initial
           />
 
           {!isDemo && !isGuest && (
-            <div className="border-t border-border p-3 sm:p-4 shrink-0">
+            <div className="border-t border-border p-4 shrink-0">
               <button
                 onClick={() => {
                   handleGenerateBriefing()
-                  setMobileTab('briefing')
                   setActiveView('briefing')
                 }}
                 disabled={generating || documents.length === 0 || documents.some(d => d.status === 'uploaded' || d.status === 'extracting')}
@@ -619,13 +664,14 @@ export default function PatientDetailClient({ patient, initialDocuments, initial
           )}
         </aside>
 
-        <main className={`${mobileTab === 'documents' ? 'hidden md:flex' : 'flex'} flex-1 overflow-y-auto flex-col`}>
+        {/* Main Canvas */}
+        <main className="flex flex-1 overflow-y-auto flex-col min-w-0">
           {/* Mode Switcher Bar */}
-          <div className="hidden md:flex border-b border-border px-8 py-2.5 items-center justify-between bg-surface sticky top-0 z-10 shrink-0">
-            <div className="flex items-center gap-2">
+          <div className="flex border-b border-border px-3 sm:px-8 py-2 sm:py-2.5 items-center justify-between bg-surface sticky top-0 z-10 shrink-0 gap-2">
+            <div className="flex items-center gap-1.5 sm:gap-2 flex-1 sm:flex-initial">
               <button
                 onClick={() => setActiveView('briefing')}
-                className={`font-mono text-[11px] px-3.5 py-1.5 rounded font-semibold transition-colors flex items-center gap-1.5 ${
+                className={`flex-1 sm:flex-initial font-mono text-[11px] px-3 sm:px-3.5 py-1.5 rounded font-semibold transition-colors flex items-center justify-center gap-1.5 touch-manipulation ${
                   activeView === 'briefing'
                     ? 'bg-accent text-background'
                     : 'text-muted-foreground hover:text-foreground hover:bg-surface-raised border border-border'
@@ -635,13 +681,13 @@ export default function PatientDetailClient({ patient, initialDocuments, initial
               </button>
               <button
                 onClick={() => setActiveView('query')}
-                className={`font-mono text-[11px] px-3.5 py-1.5 rounded font-semibold transition-colors flex items-center gap-1.5 ${
+                className={`flex-1 sm:flex-initial font-mono text-[11px] px-3 sm:px-3.5 py-1.5 rounded font-semibold transition-colors flex items-center justify-center gap-1.5 touch-manipulation ${
                   activeView === 'query'
                     ? 'bg-accent text-background'
                     : 'text-muted-foreground hover:text-foreground hover:bg-surface-raised border border-border'
                 }`}
               >
-                <span>🔍</span> On-Demand Record Query
+                <span>🔍</span> <span className="hidden sm:inline">On-Demand Record</span> Query
                 {queryHistory.length > 0 && (
                   <span className="ml-1 text-[9px] bg-background/20 px-1.5 py-0.2 rounded-full">
                     {queryHistory.length}
@@ -649,6 +695,18 @@ export default function PatientDetailClient({ patient, initialDocuments, initial
                 )}
               </button>
             </div>
+
+            <button
+              type="button"
+              onClick={() => setIsRecordsDrawerOpen(true)}
+              className="md:hidden inline-flex items-center gap-1 font-mono text-[10px] px-2 py-1.5 rounded border border-border bg-surface-raised text-muted-foreground hover:text-foreground shrink-0 touch-manipulation"
+              title="Open medical records drawer"
+            >
+              <span>📄 Records</span>
+              <span className="bg-accent/20 text-accent text-[9px] px-1.5 py-0.2 rounded-full font-bold">
+                {documents.length}
+              </span>
+            </button>
           </div>
 
           {activeView === 'query' ? (
@@ -683,7 +741,7 @@ export default function PatientDetailClient({ patient, initialDocuments, initial
                     />
                   </div>
 
-                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <div className="flex items-center justify-between gap-3 flex-wrap">
                     <div className="flex items-center gap-1.5 flex-wrap">
                       <span className="font-mono text-[9px] text-muted-foreground uppercase mr-1">Quick Prompts:</span>
                       {[
@@ -700,7 +758,7 @@ export default function PatientDetailClient({ patient, initialDocuments, initial
                             handleRunQuery(promptText)
                           }}
                           disabled={queryRunning}
-                          className="font-mono text-[9px] border border-border bg-surface px-2 py-1 rounded text-muted-foreground hover:text-foreground hover:border-accent/40 transition-colors disabled:opacity-50"
+                          className="font-mono text-[9px] border border-border bg-surface px-2 py-1 rounded text-muted-foreground hover:text-foreground hover:border-accent/40 transition-colors disabled:opacity-50 touch-manipulation"
                         >
                           {promptText}
                         </button>
@@ -710,7 +768,7 @@ export default function PatientDetailClient({ patient, initialDocuments, initial
                     <button
                       type="submit"
                       disabled={queryRunning || !queryInput.trim()}
-                      className="bg-accent text-background font-mono text-[11px] font-semibold px-4 py-2 rounded hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed shrink-0 ml-auto flex items-center gap-1.5"
+                      className="bg-accent text-background font-mono text-[11px] font-semibold px-4 py-2.5 sm:py-2 rounded hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed shrink-0 w-full sm:w-auto ml-auto flex items-center justify-center gap-1.5 touch-manipulation"
                     >
                       {queryRunning ? (
                         <>
@@ -981,6 +1039,15 @@ export default function PatientDetailClient({ patient, initialDocuments, initial
                   <div className="text-center max-w-sm">
                     <p className="font-mono text-[9px] tracking-widest text-muted-foreground uppercase mb-3">No briefing yet</p>
                     <p className="text-[13px] text-muted-foreground leading-relaxed mb-4">Upload at least one document, then generate a briefing.</p>
+                    {documents.length === 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setIsRecordsDrawerOpen(true)}
+                        className="md:hidden border border-border bg-surface-raised font-mono text-[11px] px-3.5 py-2 rounded text-foreground hover:border-accent/40 transition-colors mb-3 inline-flex items-center gap-1.5 touch-manipulation"
+                      >
+                        <span>📄</span> Open Records to Upload
+                      </button>
+                    )}
                     {!isGuest && documents.length > 0 && (
                       <button onClick={handleGenerateBriefing} disabled={generating} className="bg-accent text-background font-mono text-[11px] font-semibold px-4 py-2 rounded hover:opacity-90 transition-opacity disabled:opacity-50">
                         {generating ? 'Starting...' : 'Generate Specialist Briefing'}
