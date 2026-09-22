@@ -78,10 +78,10 @@ export default async function DashboardPage() {
   }
 
   return (
-    <div className="h-screen bg-background flex overflow-hidden">
+    <div className="min-h-[100dvh] md:h-screen bg-background flex flex-col md:flex-row overflow-x-hidden md:overflow-hidden">
 
-      {/* Sidebar */}
-      <aside className="w-64 shrink-0 border-r border-border bg-surface flex flex-col">
+      {/* Desktop Sidebar (hidden on mobile) */}
+      <aside className="hidden md:flex w-64 shrink-0 border-r border-border bg-surface flex-col">
 
         <div className="px-5 py-4 border-b border-border flex items-center gap-2.5">
           <div className="w-5 h-5 bg-accent rounded-sm flex items-center justify-center shrink-0">
@@ -139,36 +139,46 @@ export default async function DashboardPage() {
         </div>
       </aside>
 
-      {/* Main */}
-      <div className="flex-1 flex flex-col overflow-hidden">
+      {/* Main Content Area */}
+      <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
 
-        <header className="shrink-0 border-b border-border bg-surface/60 backdrop-blur flex items-center justify-between px-6 py-3">
-          <div>
-            <h1 className="text-[13px] font-semibold text-foreground">
-              {isGuest ? 'Demo workspace' : caregiver?.name ?? 'My workspace'}
-            </h1>
-            <p className="font-mono text-[10px] text-muted-foreground mt-0.5">
-              {isGuest ? 'Sample records — sign in to manage your own' : `${patients.length} patient${patients.length !== 1 ? 's' : ''}`}
-            </p>
+        <header className="shrink-0 border-b border-border bg-surface/80 backdrop-blur flex items-center justify-between px-4 sm:px-6 py-3 sticky top-0 z-20">
+          <div className="flex items-center gap-3">
+            <div className="md:hidden flex items-center gap-2">
+              <div className="w-5 h-5 bg-accent rounded-sm flex items-center justify-center shrink-0">
+                <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
+                  <path d="M1.5 2.5h8M1.5 5.5h5.5M1.5 8.5h3.5" stroke="#0A0E14" strokeWidth="1.4" strokeLinecap="round"/>
+                </svg>
+              </div>
+              <span className="font-mono text-[11px] font-bold tracking-widest text-foreground uppercase">CareNote</span>
+            </div>
+            <div>
+              <h1 className="text-[12px] sm:text-[13px] font-semibold text-foreground">
+                {isGuest ? 'Demo workspace' : caregiver?.name ?? 'My workspace'}
+              </h1>
+              <p className="font-mono text-[9px] sm:text-[10px] text-muted-foreground mt-0.5">
+                {isGuest ? 'Sample records — sign in to manage your own' : `${patients.length} patient${patients.length !== 1 ? 's' : ''}`}
+              </p>
+            </div>
           </div>
           {!isGuest ? (
             <SignOutButton />
           ) : (
-            <div className="flex items-center gap-2">
-              <Link href="/login" className="font-mono text-[11px] text-muted-foreground border border-border px-3 py-1.5 rounded hover:text-foreground hover:border-foreground/30 transition-colors">
+            <div className="flex items-center gap-1.5 sm:gap-2">
+              <Link href="/login" className="font-mono text-[10px] sm:text-[11px] text-muted-foreground border border-border px-2.5 sm:px-3 py-1 sm:py-1.5 rounded hover:text-foreground hover:border-foreground/30 transition-colors">
                 Sign in
               </Link>
-              <Link href="/signup" className="font-mono text-[11px] bg-accent text-background px-3 py-1.5 rounded hover:opacity-90 transition-opacity">
+              <Link href="/signup" className="font-mono text-[10px] sm:text-[11px] bg-accent text-background px-2.5 sm:px-3 py-1 sm:py-1.5 rounded hover:opacity-90 transition-opacity font-semibold">
                 Create account
               </Link>
             </div>
           )}
         </header>
 
-        <main className="flex-1 overflow-y-auto px-6 py-6">
+        <main className="flex-1 overflow-y-auto px-4 sm:px-6 py-5 sm:py-6">
 
           {isGuest && (
-            <div className="mb-5 flex items-center gap-3 bg-warning-dim border border-warning/25 rounded-md px-4 py-3">
+            <div className="mb-5 flex items-center gap-3 bg-warning-dim border border-warning/25 rounded-md p-3 sm:px-4 sm:py-3">
               <div className="w-1.5 h-1.5 rounded-full bg-warning shrink-0" />
               <p className="text-[12px] text-muted-foreground">
                 <span className="text-warning-foreground font-mono text-[10px] tracking-widest uppercase mr-2">Demo mode</span>
@@ -250,26 +260,33 @@ export default async function DashboardPage() {
             ))}
 
             {patients.length === 0 && (
-              <div className="col-span-full border border-dashed border-border rounded-lg p-12 text-center">
+              <div className="col-span-full border border-dashed border-border rounded-lg p-8 sm:p-12 text-center">
                 <p className="font-mono text-[9px] tracking-widest text-muted-foreground uppercase mb-2">No patients yet</p>
-                <p className="text-[12px] text-muted-foreground">Add your first patient using the panel on the left.</p>
+                <p className="text-[12px] text-muted-foreground">Add your first patient using the form below or on the left.</p>
               </div>
             )}
           </div>
 
+          {/* Mobile Add Patient Form */}
+          {!isGuest && (
+            <div className="md:hidden border border-border rounded-lg bg-surface p-4 mb-8">
+              <AddPatientForm />
+            </div>
+          )}
+
           {/* How it works */}
           <div className="border-t border-border pt-6">
             <p className="font-mono text-[9px] tracking-widest text-muted-foreground uppercase mb-4">How it works</p>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-px bg-border rounded-lg overflow-hidden border border-border">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2 sm:gap-px bg-border rounded-lg overflow-hidden border border-border">
               {[
                 { n: '01', title: 'Upload', body: 'Lab reports, discharge summaries, prescriptions — any PDF from any provider.' },
                 { n: '02', title: 'Extract', body: 'AI reads every page. Every fact is dated and tagged to its exact source quote.' },
                 { n: '03', title: 'Analyse', body: 'Trends detected across months. Contraindications & drug interactions flagged.' },
                 { n: '04', title: 'Briefing', body: 'One document. Every claim cited to source, page number, and date.' },
               ].map(s => (
-                <div key={s.n} className="bg-surface px-5 py-4">
-                  <p className="font-mono text-[10px] text-accent mb-2.5">{s.n}</p>
-                  <p className="text-[12px] font-semibold text-foreground mb-1.5">{s.title}</p>
+                <div key={s.n} className="bg-surface px-4 sm:px-5 py-3.5 sm:py-4">
+                  <p className="font-mono text-[10px] text-accent mb-2">{s.n}</p>
+                  <p className="text-[12px] font-semibold text-foreground mb-1">{s.title}</p>
                   <p className="text-[11px] text-muted-foreground leading-relaxed">{s.body}</p>
                 </div>
               ))}

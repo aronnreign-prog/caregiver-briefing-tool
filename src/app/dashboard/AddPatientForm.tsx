@@ -54,15 +54,15 @@ export default function AddPatientForm() {
         onChange={(e) => setName(e.target.value)}
         placeholder="Full name"
         required
-        className="w-full bg-background border border-border rounded px-3 py-2 text-[12px] text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-accent"
+        className="w-full bg-background border border-border rounded px-3 py-2 text-[16px] sm:text-[12px] text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-accent"
       />
       <input
         name="relationship"
         value={relationship}
         onChange={(e) => setRelationship(e.target.value)}
-        placeholder="Relationship"
+        placeholder="Relationship (e.g. Mother, Father)"
         required
-        className="w-full bg-background border border-border rounded px-3 py-2 text-[12px] text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-accent"
+        className="w-full bg-background border border-border rounded px-3 py-2 text-[16px] sm:text-[12px] text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-accent"
       />
       <input
         name="date_of_birth"
@@ -70,12 +70,12 @@ export default function AddPatientForm() {
         value={dob}
         onChange={(e) => setDob(e.target.value)}
         required
-        className="w-full bg-background border border-border rounded px-3 py-2 text-[12px] text-foreground font-mono focus:outline-none focus:border-accent"
+        className="w-full bg-background border border-border rounded px-3 py-2 text-[16px] sm:text-[12px] text-foreground font-mono focus:outline-none focus:border-accent"
       />
       <button
         type="submit"
         disabled={loading}
-        className="w-full bg-accent text-background font-mono text-[11px] font-semibold py-2 rounded hover:opacity-90 transition-opacity disabled:opacity-50 cursor-pointer"
+        className="w-full bg-accent text-background font-mono text-[11px] font-semibold py-2.5 rounded hover:opacity-90 transition-opacity disabled:opacity-50 cursor-pointer touch-manipulation"
       >
         {loading ? 'Adding…' : 'Add patient'}
       </button>

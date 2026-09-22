@@ -101,35 +101,35 @@ export default async function PatientPage({ params }: { params: Promise<{ id: st
   }
 
   return (
-    <div className="min-h-screen bg-background p-8">
-      <div className="max-w-4xl mx-auto space-y-6">
+    <div className="min-h-[100dvh] bg-background p-3 sm:p-6 md:p-8">
+      <div className="max-w-4xl mx-auto space-y-4 sm:space-y-6">
 
         {isGuest && (
-          <div className="flex items-center justify-between rounded-lg border border-border bg-surface px-4 py-3 text-xs text-muted-foreground">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between rounded-lg border border-border bg-surface p-3 sm:px-4 sm:py-3 text-xs text-muted-foreground gap-3">
             <span>Guest mode - this is a demo patient. Sign in to work with your own records.</span>
-            <div className="flex gap-2 ml-4 shrink-0 font-mono text-[11px]">
-              <Link href="/login" className="border border-border px-3 py-1 rounded hover:text-foreground transition-colors">
+            <div className="flex gap-2 shrink-0 font-mono text-[11px] w-full sm:w-auto">
+              <Link href="/login" className="flex-1 sm:flex-initial text-center border border-border px-3 py-1.5 sm:py-1 rounded hover:text-foreground transition-colors">
                 Sign in
               </Link>
-              <Link href="/signup" className="bg-accent text-background px-3 py-1 rounded hover:opacity-90 font-semibold transition-opacity">
+              <Link href="/signup" className="flex-1 sm:flex-initial text-center bg-accent text-background px-3 py-1.5 sm:py-1 rounded hover:opacity-90 font-semibold transition-opacity">
                 Create account
               </Link>
             </div>
           </div>
         )}
 
-        <div className="flex items-center space-x-4 mb-6">
+        <div className="flex items-center space-x-4 mb-2 sm:mb-6">
           <Link href="/dashboard" className="inline-flex items-center gap-1.5 font-mono text-xs text-muted-foreground border border-border px-3 py-1.5 rounded hover:text-foreground hover:border-foreground/30 transition-colors">
-            Back to Dashboard
+            ← Back to Dashboard
           </Link>
         </div>
 
         <header>
-          <h1 className="text-3xl font-bold tracking-tight text-foreground">
+          <h1 className="text-xl sm:text-2xl md:text-3xl font-bold tracking-tight text-foreground">
             {patient.name}
           </h1>
-          <p className="text-sm text-muted-foreground mt-2 font-mono">
-            DOB: {new Date(patient.date_of_birth).toLocaleDateString()}   {patient.relationship}
+          <p className="text-xs sm:text-sm text-muted-foreground mt-1 font-mono">
+            DOB: {new Date(patient.date_of_birth).toLocaleDateString()} · {patient.relationship}
           </p>
         </header>
 

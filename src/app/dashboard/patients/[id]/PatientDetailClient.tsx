@@ -75,7 +75,7 @@ function CitationChip({
   if (isConflicting) {
     return (
       <span
-        className="inline-flex items-center gap-1 font-mono text-[9px] border rounded px-1.5 py-0.5 ml-1.5 align-middle border-amber-500/50 text-amber-400 bg-amber-500/10 cursor-help"
+        className="inline-flex items-center gap-1 font-mono text-[10px] sm:text-[9px] border rounded px-2 py-0.5 sm:px-1.5 sm:py-0.5 ml-1 sm:ml-1.5 align-middle border-amber-500/50 text-amber-400 bg-amber-500/10 cursor-help"
         title={claim.claim_text || 'Conflicting findings across records'}
       >
         ⚡ Conflicting
@@ -86,7 +86,7 @@ function CitationChip({
   if (isAbsence) {
     return (
       <span
-        className="inline-flex items-center gap-1 font-mono text-[9px] border rounded px-1.5 py-0.5 ml-1.5 align-middle border-purple-500/50 text-purple-300 bg-purple-500/10 cursor-help"
+        className="inline-flex items-center gap-1 font-mono text-[10px] sm:text-[9px] border rounded px-2 py-0.5 sm:px-1.5 sm:py-0.5 ml-1 sm:ml-1.5 align-middle border-purple-500/50 text-purple-300 bg-purple-500/10 cursor-help"
         title={claim.claim_text || 'Notable absence in medical documentation'}
       >
         ∅ Not Documented
@@ -98,7 +98,7 @@ function CitationChip({
     const title = (Array.isArray(claim.evidence) ? claim.evidence[0]?.entry_text : claim.evidence?.entry_text) || claim.claim_text || ''
     return (
       <span
-        className="inline-flex items-center gap-1 font-mono text-[9px] border rounded px-1.5 py-0.5 ml-1.5 align-middle border-warning/40 text-warning bg-warning-dim cursor-default"
+        className="inline-flex items-center gap-1 font-mono text-[10px] sm:text-[9px] border rounded px-2 py-0.5 sm:px-1.5 sm:py-0.5 ml-1 sm:ml-1.5 align-middle border-warning/40 text-warning bg-warning-dim cursor-default"
         title={title}
       >
         ⚠ Medical Knowledge
@@ -113,7 +113,7 @@ function CitationChip({
   if (evidenceList.length === 0) {
     return (
       <span
-        className="inline-flex items-center gap-1 font-mono text-[9px] border rounded px-1.5 py-0.5 ml-1.5 align-middle border-muted text-muted-foreground bg-muted/20 cursor-default"
+        className="inline-flex items-center gap-1 font-mono text-[10px] sm:text-[9px] border rounded px-2 py-0.5 sm:px-1.5 sm:py-0.5 ml-1 sm:ml-1.5 align-middle border-muted text-muted-foreground bg-muted/20 cursor-default"
         title={claim.claim_text}
       >
         ? Unverified
@@ -133,7 +133,7 @@ function CitationChip({
           return (
             <span
               key={idx}
-              className="inline-flex items-center gap-1 font-mono text-[9px] border rounded px-1.5 py-0.5 ml-1 align-middle border-muted text-muted-foreground bg-muted/20 cursor-default"
+              className="inline-flex items-center gap-1 font-mono text-[10px] sm:text-[9px] border rounded px-2 py-0.5 sm:px-1.5 sm:py-0.5 ml-1 align-middle border-muted text-muted-foreground bg-muted/20 cursor-default"
               title={ev.source_quote || ev.entry_text || claim.claim_text || 'Source record not found in documents'}
             >
               ? Unverified
@@ -151,7 +151,7 @@ function CitationChip({
           <button
             key={idx}
             onClick={(e) => onDocClick(e, docId, page ?? 1)}
-            className="inline-flex items-center gap-1 font-mono text-[9px] border rounded px-1.5 py-0.5 ml-1 align-middle transition-colors border-accent/40 text-accent bg-accent-dim hover:border-accent hover:bg-accent/20 cursor-pointer"
+            className="inline-flex items-center gap-1 font-mono text-[10px] sm:text-[9px] border rounded px-2 py-1 sm:px-1.5 sm:py-0.5 ml-1 align-middle transition-colors border-accent/40 text-accent bg-accent-dim hover:border-accent hover:bg-accent/20 cursor-pointer touch-manipulation my-0.5"
             title={title}
           >
             ↗ {label}
@@ -232,6 +232,7 @@ export default function PatientDetailClient({ patient, initialDocuments, initial
   const [generating, setGenerating] = useState(false)
   const [uploadingFile, setUploadingFile] = useState(false)
   const [activeView, setActiveView] = useState<'briefing' | 'query'>('briefing')
+  const [mobileTab, setMobileTab] = useState<'briefing' | 'documents' | 'query'>('briefing')
 
   // On-demand clinical query state
   const [queryInput, setQueryInput] = useState('')
@@ -497,29 +498,68 @@ export default function PatientDetailClient({ patient, initialDocuments, initial
 
   return (
     <div className="border border-border rounded-lg bg-surface overflow-hidden flex flex-col min-h-[600px]">
-      <header className="shrink-0 border-b border-border bg-surface flex items-center px-5 py-3 gap-4">
-        <Link href="/dashboard" className="flex items-center gap-1.5 text-muted-foreground hover:text-foreground transition-colors">
-          <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M9.5 6H2.5M5 3L2 6l3 3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/></svg>
-          <span className="font-mono text-[10px]">Dashboard</span>
-        </Link>
-        <span className="text-border">/</span>
-        <span className="font-mono text-[10px] text-foreground font-semibold">{patient.name}</span>
-        {concerns.length > 0 && (
-          <div className="flex items-center gap-1.5 bg-alert-dim border border-alert/30 rounded px-2 py-0.5">
-            <div className="w-1.5 h-1.5 rounded-full bg-alert" />
-            <span className="font-mono text-[10px] text-alert">{concerns.length} flag{concerns.length !== 1 ? 's' : ''}</span>
-          </div>
-        )}
-        <div className="ml-auto flex items-center gap-2">
-          {isDemo && <span className="font-mono text-[9px] border border-border text-muted-foreground px-2 py-1 rounded">DEMO RECORD</span>}
+      <header className="shrink-0 border-b border-border bg-surface flex flex-wrap items-center justify-between px-3.5 sm:px-5 py-2.5 sm:py-3 gap-2">
+        <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
+          <Link href="/dashboard" className="flex items-center gap-1 text-muted-foreground hover:text-foreground transition-colors shrink-0">
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M9.5 6H2.5M5 3L2 6l3 3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/></svg>
+            <span className="font-mono text-[10px]">Dashboard</span>
+          </Link>
+          <span className="text-border">/</span>
+          <span className="font-mono text-[10px] sm:text-[11px] text-foreground font-semibold truncate">{patient.name}</span>
+          {concerns.length > 0 && (
+            <div className="flex items-center gap-1 bg-alert-dim border border-alert/30 rounded px-1.5 py-0.5 shrink-0">
+              <div className="w-1.5 h-1.5 rounded-full bg-alert" />
+              <span className="font-mono text-[9px] text-alert">{concerns.length} flag{concerns.length !== 1 ? 's' : ''}</span>
+            </div>
+          )}
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          {isDemo && <span className="font-mono text-[9px] border border-border text-muted-foreground px-2 py-0.5 rounded">DEMO RECORD</span>}
           {(isGuest || isDemo) && (
-            <Link href="/signup" className="font-mono text-[10px] bg-accent text-background px-3 py-1.5 rounded hover:opacity-90 transition-opacity font-semibold">Create account to save</Link>
+            <Link href="/signup" className="font-mono text-[10px] bg-accent text-background px-2.5 py-1 rounded hover:opacity-90 transition-opacity font-semibold">Save record</Link>
           )}
         </div>
       </header>
 
+      {/* Mobile Tab Switcher */}
+      <div className="flex md:hidden border-b border-border bg-surface-raised/40 p-1.5 gap-1 shrink-0">
+        <button
+          type="button"
+          onClick={() => { setMobileTab('briefing'); setActiveView('briefing') }}
+          className={`flex-1 py-1.5 px-2 rounded font-mono text-[11px] font-semibold text-center transition-colors flex items-center justify-center gap-1.5 touch-manipulation ${
+            mobileTab === 'briefing'
+              ? 'bg-accent text-background shadow-sm'
+              : 'text-muted-foreground hover:text-foreground'
+          }`}
+        >
+          <span>📋</span> Briefing
+        </button>
+        <button
+          type="button"
+          onClick={() => setMobileTab('documents')}
+          className={`flex-1 py-1.5 px-2 rounded font-mono text-[11px] font-semibold text-center transition-colors flex items-center justify-center gap-1.5 touch-manipulation ${
+            mobileTab === 'documents'
+              ? 'bg-accent text-background shadow-sm'
+              : 'text-muted-foreground hover:text-foreground'
+          }`}
+        >
+          <span>📄</span> Records ({documents.length})
+        </button>
+        <button
+          type="button"
+          onClick={() => { setMobileTab('query'); setActiveView('query') }}
+          className={`flex-1 py-1.5 px-2 rounded font-mono text-[11px] font-semibold text-center transition-colors flex items-center justify-center gap-1.5 touch-manipulation ${
+            mobileTab === 'query'
+              ? 'bg-accent text-background shadow-sm'
+              : 'text-muted-foreground hover:text-foreground'
+          }`}
+        >
+          <span>🔍</span> Query {queryHistory.length > 0 && `(${queryHistory.length})`}
+        </button>
+      </div>
+
       {concerns.length > 0 && (
-        <div className="shrink-0 border-b border-alert/30 bg-alert-dim px-5 py-3">
+        <div className="shrink-0 border-b border-alert/30 bg-alert-dim px-4 sm:px-5 py-2.5 sm:py-3">
           <div className="flex items-start gap-3">
             <div className="shrink-0 mt-0.5"><span className="font-mono text-[9px] text-alert border border-alert/40 px-1.5 py-0.5 rounded tracking-widest">FLAGGED — RAISE WITH DOCTOR</span></div>
             <div className="flex-1 space-y-1">
@@ -534,16 +574,16 @@ export default function PatientDetailClient({ patient, initialDocuments, initial
         </div>
       )}
 
-      <div className="flex flex-1 overflow-hidden">
-        <aside className="w-72 shrink-0 border-r border-border bg-surface flex flex-col overflow-hidden">
-          <div className="px-5 py-4 border-b border-border">
-            <div className="flex items-center gap-3 mb-3">
-              <div className="w-10 h-10 rounded-lg bg-accent-dim border border-accent/20 flex items-center justify-center shrink-0 font-mono text-[14px] font-bold text-accent">
+      <div className="flex flex-1 flex-col md:flex-row overflow-hidden">
+        <aside className={`${mobileTab === 'documents' ? 'flex' : 'hidden md:flex'} w-full md:w-72 shrink-0 border-b md:border-b-0 md:border-r border-border bg-surface flex-col overflow-hidden`}>
+          <div className="px-4 sm:px-5 py-3 sm:py-4 border-b border-border">
+            <div className="flex items-center gap-3 mb-2 sm:mb-3">
+              <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-lg bg-accent-dim border border-accent/20 flex items-center justify-center shrink-0 font-mono text-[13px] sm:text-[14px] font-bold text-accent">
                 {patient.name.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase()}
               </div>
               <div>
-                <h1 className="text-[14px] font-semibold text-foreground leading-tight">{patient.name}</h1>
-                <p className="font-mono text-[10px] text-muted-foreground">{patient.relationship} · {age}y · DOB {patient.date_of_birth}</p>
+                <h1 className="text-[13px] sm:text-[14px] font-semibold text-foreground leading-tight">{patient.name}</h1>
+                <p className="font-mono text-[9px] sm:text-[10px] text-muted-foreground">{patient.relationship} · {age}y · DOB {patient.date_of_birth}</p>
               </div>
             </div>
           </div>
@@ -559,11 +599,15 @@ export default function PatientDetailClient({ patient, initialDocuments, initial
           />
 
           {!isDemo && !isGuest && (
-            <div className="border-t border-border p-4 shrink-0">
+            <div className="border-t border-border p-3 sm:p-4 shrink-0">
               <button
-                onClick={handleGenerateBriefing}
+                onClick={() => {
+                  handleGenerateBriefing()
+                  setMobileTab('briefing')
+                  setActiveView('briefing')
+                }}
                 disabled={generating || documents.length === 0 || documents.some(d => d.status === 'uploaded' || d.status === 'extracting')}
-                className="w-full bg-accent text-background font-mono text-[11px] font-semibold py-2 px-3 rounded hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+                className="w-full bg-accent text-background font-mono text-[11px] font-semibold py-2.5 px-3 rounded hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5 cursor-pointer touch-manipulation"
               >
                 {generating
                   ? 'Generating briefing...'
@@ -575,9 +619,9 @@ export default function PatientDetailClient({ patient, initialDocuments, initial
           )}
         </aside>
 
-        <main className="flex-1 overflow-y-auto flex flex-col">
+        <main className={`${mobileTab === 'documents' ? 'hidden md:flex' : 'flex'} flex-1 overflow-y-auto flex-col`}>
           {/* Mode Switcher Bar */}
-          <div className="border-b border-border px-8 py-2.5 flex items-center justify-between bg-surface sticky top-0 z-10 shrink-0">
+          <div className="hidden md:flex border-b border-border px-8 py-2.5 items-center justify-between bg-surface sticky top-0 z-10 shrink-0">
             <div className="flex items-center gap-2">
               <button
                 onClick={() => setActiveView('briefing')}
@@ -608,10 +652,10 @@ export default function PatientDetailClient({ patient, initialDocuments, initial
           </div>
 
           {activeView === 'query' ? (
-            <div className="px-8 py-6 max-w-3xl flex-1">
+            <div className="px-4 sm:px-8 py-5 sm:py-6 max-w-3xl flex-1">
               <div className="mb-6">
                 <div className="flex items-center gap-2">
-                  <h2 className="text-[16px] font-semibold text-foreground">On-Demand Clinical Query</h2>
+                  <h2 className="text-[15px] sm:text-[16px] font-semibold text-foreground">On-Demand Clinical Query</h2>
                   <span className="font-mono text-[9px] border border-accent/40 text-accent bg-accent-dim px-2 py-0.5 rounded">ZEP GRAPH MEMORY</span>
                 </div>
                 <p className="text-[12px] text-muted-foreground mt-1">
@@ -620,7 +664,7 @@ export default function PatientDetailClient({ patient, initialDocuments, initial
               </div>
 
               {/* Query Input Box */}
-              <div className="border border-border rounded-lg bg-surface-raised p-4 mb-6 shadow-sm">
+              <div className="border border-border rounded-lg bg-surface-raised p-3.5 sm:p-4 mb-6 shadow-sm">
                 <form
                   onSubmit={(e) => {
                     e.preventDefault()
@@ -635,7 +679,7 @@ export default function PatientDetailClient({ patient, initialDocuments, initial
                       onChange={(e) => setQueryInput(e.target.value)}
                       placeholder={`Ask a question (e.g., "What was the Olanzapine dosage change in 2025?", "List all kidney lab values")`}
                       disabled={queryRunning}
-                      className="w-full bg-background border border-border rounded-md px-3.5 py-2.5 text-[13px] text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-accent disabled:opacity-50"
+                      className="w-full bg-background border border-border rounded-md px-3.5 py-2.5 text-[16px] sm:text-[13px] text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-accent disabled:opacity-50"
                     />
                   </div>
 
@@ -833,16 +877,16 @@ export default function PatientDetailClient({ patient, initialDocuments, initial
               )}
 
               {activeBriefing ? (
-                <div className="px-8 py-6 max-w-3xl">
-                  <div className="flex items-start justify-between mb-5">
+                <div className="px-4 sm:px-8 py-5 sm:py-6 max-w-3xl">
+                  <div className="flex items-start justify-between mb-5 gap-2">
                     <div>
-                      <h2 className="text-[16px] font-semibold text-foreground">
+                      <h2 className="text-[15px] sm:text-[16px] font-semibold text-foreground">
                         Specialist Briefing
                       </h2>
-                      <p className="font-mono text-[10px] text-muted-foreground mt-1">Generated {new Date(activeBriefing.created_at).toLocaleString()}</p>
+                      <p className="font-mono text-[9px] sm:text-[10px] text-muted-foreground mt-0.5">Generated {new Date(activeBriefing.created_at).toLocaleString()}</p>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <span className={`font-mono text-[9px] px-2 py-1 rounded border ${
+                    <div className="flex items-center gap-2 shrink-0">
+                      <span className={`font-mono text-[9px] px-2 py-0.5 sm:py-1 rounded border ${
                         activeBriefing.status === 'complete' ? 'text-success border-success/30 bg-success-dim' :
                         activeBriefing.status === 'processing' || activeBriefing.status === 'queued' ? 'text-accent border-accent/30 bg-accent-dim' :
                         activeBriefing.status === 'failed' ? 'text-alert border-alert/30 bg-alert-dim' : 'text-muted-foreground border-border'}`}>
@@ -852,17 +896,17 @@ export default function PatientDetailClient({ patient, initialDocuments, initial
                   </div>
 
                   {claimsArray.length > 0 && (
-                    <div className="border border-border rounded-md bg-surface-raised px-4 py-3 mb-6 flex items-center gap-6">
+                    <div className="border border-border rounded-md bg-surface-raised p-3 sm:px-4 sm:py-3 mb-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
                       <div>
                         <p className="font-mono text-[10px] text-accent tracking-widest uppercase mb-0.5">PaperTrail</p>
                         <p className="font-mono text-[9px] text-muted-foreground">Every claim traced to source</p>
                       </div>
-                      <div className="flex items-center gap-4 ml-auto flex-wrap justify-end">
-                        {supported > 0 && <div className="flex items-center gap-1.5"><div className="w-1.5 h-1.5 rounded-full bg-success" /><span className="font-mono text-[10px] text-muted-foreground">{supported} supported</span></div>}
-                        {conflicting > 0 && <div className="flex items-center gap-1.5"><div className="w-1.5 h-1.5 rounded-full bg-amber-400" /><span className="font-mono text-[10px] text-muted-foreground">{conflicting} conflicting</span></div>}
-                        {absences > 0 && <div className="flex items-center gap-1.5"><div className="w-1.5 h-1.5 rounded-full bg-purple-400" /><span className="font-mono text-[10px] text-muted-foreground">{absences} not documented</span></div>}
-                        {partial > 0 && <div className="flex items-center gap-1.5"><div className="w-1.5 h-1.5 rounded-full bg-warning" /><span className="font-mono text-[10px] text-muted-foreground">{partial} partial</span></div>}
-                        {unsupported > 0 && <div className="flex items-center gap-1.5"><div className="w-1.5 h-1.5 rounded-full bg-alert" /><span className="font-mono text-[10px] text-muted-foreground">{unsupported} unsupported</span></div>}
+                      <div className="flex items-center gap-2 sm:gap-4 flex-wrap sm:justify-end w-full sm:w-auto">
+                        {supported > 0 && <div className="flex items-center gap-1.5"><div className="w-1.5 h-1.5 rounded-full bg-success" /><span className="font-mono text-[9px] sm:text-[10px] text-muted-foreground">{supported} supported</span></div>}
+                        {conflicting > 0 && <div className="flex items-center gap-1.5"><div className="w-1.5 h-1.5 rounded-full bg-amber-400" /><span className="font-mono text-[9px] sm:text-[10px] text-muted-foreground">{conflicting} conflicting</span></div>}
+                        {absences > 0 && <div className="flex items-center gap-1.5"><div className="w-1.5 h-1.5 rounded-full bg-purple-400" /><span className="font-mono text-[9px] sm:text-[10px] text-muted-foreground">{absences} not documented</span></div>}
+                        {partial > 0 && <div className="flex items-center gap-1.5"><div className="w-1.5 h-1.5 rounded-full bg-warning" /><span className="font-mono text-[9px] sm:text-[10px] text-muted-foreground">{partial} partial</span></div>}
+                        {unsupported > 0 && <div className="flex items-center gap-1.5"><div className="w-1.5 h-1.5 rounded-full bg-alert" /><span className="font-mono text-[9px] sm:text-[10px] text-muted-foreground">{unsupported} unsupported</span></div>}
                       </div>
                     </div>
                   )}
