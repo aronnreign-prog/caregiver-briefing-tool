@@ -36,7 +36,7 @@ export default function DeletePatientButton({ patientId, patientName }: DeletePa
         setErr(result.error)
         setConfirming(false)
       }
-      // On success the server revalidates /dashboard — card disappears automatically
+      // On success the server revalidates /dashboard: card disappears automatically
     })
   }
 

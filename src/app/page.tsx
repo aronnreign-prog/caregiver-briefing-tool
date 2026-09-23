@@ -4,7 +4,7 @@ import { HeroClinicalProof } from '@/components/clinical'
 import { DemoRequestModal, DemoRequestTrigger } from '@/components/marketing/DemoRequestModal'
 
 export const metadata: Metadata = {
-  title: 'CareNote — Graph Memory & Verifiable PaperTrail for Medical Records',
+  title: 'CareNote: Graph Memory & Verifiable PaperTrail for Medical Records',
   description:
     'Medical records are an interconnected timeline, not disconnected text chunks. CareNote builds a persistent patient knowledge graph with an instant PaperTrail linking every claim to its original PDF page.',
 }
@@ -55,7 +55,7 @@ export default function LandingPage() {
             </h1>
 
             <p className="text-[17px] sm:text-[19px] text-white/65 leading-relaxed max-w-2xl mb-8">
-              Standard AI tools chop PDFs into isolated paragraphs and forget what happened last month. CareNote connects every lab, prescription, and specialist note into a persistent patient graph — with a clickable PaperTrail linking every claim to its source page.
+              Standard AI tools chop PDFs into isolated paragraphs and forget what happened last month. CareNote connects every lab, prescription, and specialist note into a persistent patient graph with a clickable PaperTrail linking every claim to its source page.
             </p>
 
             <div className="flex items-center gap-3">
@@ -88,7 +88,7 @@ export default function LandingPage() {
               Vector databases have clinical amnesia.
             </h2>
             <p className="text-[15px] sm:text-[16px] text-white/65 leading-[1.65] max-w-[65ch]">
-              Standard AI summarizers chop a 30-page PDF into 500-token text chunks and do semantic search. When you ask about medications, the system finds matching keywords — but it has no concept of timeline, dosages changing over time, or doctors countermanding each other.
+              Standard AI summarizers chop a 30-page PDF into 500-token text chunks and do semantic search. When you ask about medications, the system finds matching keywords, but has no concept of timeline, dosages changing over time, or doctors countermanding each other.
             </p>
           </div>
 
@@ -100,13 +100,13 @@ export default function LandingPage() {
                   How Standard AI Tools Store Records (Vector Chunks)
                 </h3>
                 <p className="text-[13px] text-white/60 leading-[1.6] mb-6">
-                  Documents are broken into fragments and indexed by cosine similarity. When you ask a question, it retrieves fragments that sound relevant — even if they are 3 years out of date.
+                  Documents are broken into fragments and indexed by cosine similarity. When you ask a question, it retrieves fragments that sound relevant, even if they are 3 years out of date.
                 </p>
 
                 <div className="p-3.5 rounded-lg bg-red-500/[0.03] border border-red-500/20 space-y-2 text-[12px] font-mono text-white/60 tabular-nums">
-                  <p className="text-red-300">× Chunk 14: &quot;Discontinue Lisinopril due to cough (2023)&quot;</p>
-                  <p className="text-red-300">× Chunk 82: &quot;Restart Lisinopril 10mg daily (2024)&quot;</p>
-                  <p className="text-red-300">× Chunk 105: &quot;Increase to Lisinopril 20mg daily (2025)&quot;</p>
+                  <p className="text-red-300">&times; Chunk 14: &quot;Discontinue Lisinopril due to cough (2023)&quot;</p>
+                  <p className="text-red-300">&times; Chunk 82: &quot;Restart Lisinopril 10mg daily (2024)&quot;</p>
+                  <p className="text-red-300">&times; Chunk 105: &quot;Increase to Lisinopril 20mg daily (2025)&quot;</p>
                 </div>
               </div>
 
@@ -122,7 +122,7 @@ export default function LandingPage() {
                   How CareNote Stores Records (Patient Knowledge Graph)
                 </h3>
                 <p className="text-[13px] text-white/70 leading-[1.6] mb-6">
-                  Extracts clinical entities — medications, doses, lab trends, and doctors — and connects them across time in a persistent temporal graph. When a drug is changed, old entries are marked superseded.
+                  Extracts clinical entities (medications, doses, lab trends, and doctors) and connects them across time in a persistent temporal graph. When a drug is changed, old entries are marked superseded.
                 </p>
 
                 <div className="p-3.5 rounded-lg bg-emerald-500/[0.03] border border-emerald-500/20 space-y-2 text-[12px] font-mono tabular-nums">
@@ -156,7 +156,7 @@ export default function LandingPage() {
               <div className="space-y-2">
                 <div className="text-[14px] font-semibold text-white">1. Fact Extraction</div>
                 <p className="text-[13px] text-white/60 leading-[1.6]">
-                  Gemini reads the PDF visually — extracting values, units, reference intervals, and physical page numbers directly from the document.
+                  Multimodal AI reads the PDF visually, extracting values, units, reference intervals, and physical page numbers directly from the document.
                 </p>
               </div>
 
@@ -265,7 +265,6 @@ export default function LandingPage() {
           <div className="flex items-center gap-2">
             <Logo size={14} />
             <span className="font-semibold text-white/80">CareNote</span>
-            <span className="text-[10px] border border-white/[0.1] px-1.5 py-0.5 rounded">v0.1</span>
           </div>
 
           <div className="flex items-center gap-5 text-white/40">

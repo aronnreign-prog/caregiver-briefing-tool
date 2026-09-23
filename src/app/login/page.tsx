@@ -64,7 +64,7 @@ export default function LoginPage() {
             Medical records<br />your doctor can<br />actually use.
           </h1>
           <p className="text-[13px] text-white/60 leading-relaxed mb-12">
-            Upload your parent&apos;s documents. Get a verified briefing with every claim traced to its exact source — ready for any appointment.
+            Upload your parent&apos;s documents. Get a verified briefing with every claim traced to its exact source, ready for any appointment.
           </p>
 
           <div className="space-y-6">
@@ -97,14 +97,14 @@ export default function LoginPage() {
         </div>
 
         <div className="border-t border-[#1F2937] pt-6 flex items-center justify-between">
-          <span className="font-mono text-[10px] text-white/40 tracking-wider">v0.1 · Curated Access</span>
+          <span className="font-mono text-[10px] text-white/40 tracking-wider">Curated Access</span>
           <Link href="/" className="font-mono text-[10px] text-white/50 hover:text-white transition-colors">
             ← Product Overview
           </Link>
         </div>
       </div>
 
-      {/* Right panel — form */}
+      {/* Right panel: form */}
       <div className="flex-1 flex flex-col justify-center items-center px-6 py-12">
         <div className="w-full max-w-sm">
 

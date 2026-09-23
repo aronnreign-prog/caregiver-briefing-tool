@@ -96,7 +96,6 @@ export default async function DashboardPage() {
             <Logo size={18} />
             <span className="text-[13px] font-semibold tracking-tight text-white">CareNote</span>
           </Link>
-          <span className="font-mono text-[9px] text-white/40 border border-white/10 px-1.5 py-0.5 rounded">v0.1</span>
         </div>
 
         {isUserAdmin && (

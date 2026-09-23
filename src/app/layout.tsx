@@ -21,7 +21,7 @@ export const viewport: Viewport = {
 };
 
 export const metadata: Metadata = {
-  title: "CareNote — AI Briefing for Caregivers",
+  title: "CareNote: AI Briefing for Caregivers",
   description: "Upload your parent's medical documents. Get a verified, source-cited briefing ready for their next appointment.",
 };
 

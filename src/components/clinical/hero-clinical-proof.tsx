@@ -118,20 +118,20 @@ export function HeroClinicalProof() {
   }
 
   return (
-    <div className="border border-white/[0.1] rounded-xl bg-surface shadow-2xl overflow-hidden text-left">
+    <div className="border border-[#1F2937] rounded-xl bg-[#0D1117] shadow-2xl overflow-hidden text-left">
       {/* Dossier Bar */}
-      <div className="border-b border-border bg-surface-raised px-4 py-3 flex items-center justify-between text-[11px] text-muted-foreground flex-wrap gap-2">
+      <div className="border-b border-[#1F2937] bg-[#0A0E14] px-4 py-3 flex items-center justify-between text-[11px] text-slate-400 flex-wrap gap-2">
         <div className="flex items-center gap-2.5">
-          <div className="w-6 h-6 rounded-md bg-accent-dim border border-accent/30 flex items-center justify-center font-mono text-[10px] font-bold text-accent">
+          <div className="w-7 h-7 rounded-md bg-white/[0.06] border border-white/10 flex items-center justify-center font-mono text-[11px] font-semibold text-white">
             MT
           </div>
           <div>
-            <span className="text-foreground font-semibold">Margaret Thompson</span>
-            <span className="font-mono text-[10px] text-muted-foreground ml-2">79y · DOB 1945-03-12 · 3 Records Indexed</span>
+            <span className="text-white font-semibold">Margaret Thompson</span>
+            <span className="font-mono text-[10px] text-slate-400 ml-2">79y · DOB 1945-03-12 · 3 Records Indexed</span>
           </div>
         </div>
         <div className="flex items-center gap-3">
-          <span className="font-mono text-[10px] text-accent bg-accent-dim px-2 py-0.5 rounded border border-accent/30">
+          <span className="font-mono text-[10px] text-white/70 bg-white/[0.06] px-2.5 py-0.5 rounded border border-white/10 tracking-wider">
             INTERACTIVE CLINICAL PROOF
           </span>
         </div>
@@ -141,29 +141,29 @@ export function HeroClinicalProof() {
       <FlaggedBanner concerns={MARGARET_CONCERNS} />
 
       {/* Main Verification Canvas */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 divide-y lg:divide-y-0 lg:divide-x divide-border">
+      <div className="grid grid-cols-1 lg:grid-cols-12 divide-y lg:divide-y-0 lg:divide-x divide-[#1F2937]">
         {/* Left Column: Briefing Narrative & Regimen */}
-        <div className="lg:col-span-7 p-5 sm:p-6 space-y-6">
+        <div className="lg:col-span-7 p-5 sm:p-6 space-y-6 bg-[#0D1117]">
           <div>
             <div className="flex items-center justify-between mb-2">
-              <h3 className="font-mono text-[10px] tracking-widest text-muted-foreground uppercase">
+              <h3 className="font-mono text-[10px] tracking-widest text-slate-400 uppercase">
                 Clinical Synthesis · Generated Briefing
               </h3>
-              <span className="font-mono text-[9px] text-muted-foreground">
+              <span className="font-mono text-[9px] text-slate-500">
                 Click any citation to verify
               </span>
             </div>
 
-            <p className="text-[13px] text-foreground leading-relaxed mb-3">
+            <p className="text-[13px] text-slate-200 leading-relaxed mb-3">
               Margaret Thompson presents with active renal compromise documented across serial lab draws, with kidney filtration declining to{' '}
-              <strong className="text-foreground font-medium">eGFR 47 mL/min</strong>{' '}
+              <strong className="text-white font-medium">eGFR 47 mL/min</strong>{' '}
               <button
                 type="button"
                 onClick={() => handleSelectClaim('c1')}
-                className={`inline-flex items-center gap-1 font-mono text-[10px] border rounded px-1.5 py-0.5 transition-all cursor-pointer outline-none focus-visible:ring-1 focus-visible:ring-accent ${
+                className={`inline-flex items-center gap-1 font-mono text-[10px] border rounded px-1.5 py-0.5 transition-all cursor-pointer outline-none focus-visible:ring-1 focus-visible:ring-teal-400 ${
                   selectedClaimId === 'c1'
-                    ? 'border-accent text-accent bg-accent/20 ring-1 ring-accent'
-                    : 'border-accent/40 text-accent bg-accent-dim hover:border-accent hover:bg-accent/20'
+                    ? 'border-teal-400 text-teal-300 bg-teal-500/20 ring-1 ring-teal-400'
+                    : 'border-teal-500/40 text-teal-400 bg-teal-500/10 hover:border-teal-400 hover:bg-teal-500/20'
                 }`}
                 title="Click to view lab report source"
               >
@@ -172,16 +172,16 @@ export function HeroClinicalProof() {
               .
             </p>
 
-            <p className="text-[13px] text-foreground leading-relaxed">
+            <p className="text-[13px] text-slate-200 leading-relaxed">
               Her outpatient cardiologist initiated{' '}
-              <strong className="text-foreground font-medium">Lisinopril 10 mg daily</strong>{' '}
+              <strong className="text-white font-medium">Lisinopril 10 mg daily</strong>{' '}
               <button
                 type="button"
                 onClick={() => handleSelectClaim('c2')}
-                className={`inline-flex items-center gap-1 font-mono text-[10px] border rounded px-1.5 py-0.5 transition-all cursor-pointer outline-none focus-visible:ring-1 focus-visible:ring-accent ${
+                className={`inline-flex items-center gap-1 font-mono text-[10px] border rounded px-1.5 py-0.5 transition-all cursor-pointer outline-none focus-visible:ring-1 focus-visible:ring-teal-400 ${
                   selectedClaimId === 'c2'
-                    ? 'border-accent text-accent bg-accent/20 ring-1 ring-accent'
-                    : 'border-accent/40 text-accent bg-accent-dim hover:border-accent hover:bg-accent/20'
+                    ? 'border-teal-400 text-teal-300 bg-teal-500/20 ring-1 ring-teal-400'
+                    : 'border-teal-500/40 text-teal-400 bg-teal-500/10 hover:border-teal-400 hover:bg-teal-500/20'
                 }`}
                 title="Click to view cardiology clinic note source"
               >
@@ -191,10 +191,10 @@ export function HeroClinicalProof() {
               <button
                 type="button"
                 onClick={() => handleSelectClaim('c3')}
-                className={`inline-flex items-center gap-1 font-mono text-[10px] border rounded px-1.5 py-0.5 transition-all cursor-pointer outline-none focus-visible:ring-1 focus-visible:ring-warning ${
+                className={`inline-flex items-center gap-1 font-mono text-[10px] border rounded px-1.5 py-0.5 transition-all cursor-pointer outline-none focus-visible:ring-1 focus-visible:ring-amber-400 ${
                   selectedClaimId === 'c3'
-                    ? 'border-warning text-warning bg-warning/20 ring-1 ring-warning'
-                    : 'border-warning/40 text-warning bg-warning-dim hover:border-warning'
+                    ? 'border-amber-400 text-amber-300 bg-amber-500/20 ring-1 ring-amber-400'
+                    : 'border-amber-500/40 text-amber-400 bg-amber-500/10 hover:border-amber-400 hover:bg-amber-500/20'
                 }`}
                 title="Click to view pharmacology rationale"
               >
@@ -207,29 +207,29 @@ export function HeroClinicalProof() {
           {/* Active Medication Regimen (State Machine Display) */}
           <div>
             <div className="flex items-center justify-between mb-2">
-              <h4 className="font-mono text-[10px] tracking-widest text-muted-foreground uppercase">
+              <h4 className="font-mono text-[10px] tracking-widest text-slate-400 uppercase">
                 Reconciled Active Regimen (State Machine)
               </h4>
-              <span className="font-mono text-[9px] text-accent">Status Aware</span>
+              <span className="font-mono text-[9px] text-teal-400 bg-teal-500/10 border border-teal-500/20 px-1.5 py-0.5 rounded">Status Aware</span>
             </div>
 
             <div className="space-y-2">
               <button
                 type="button"
                 onClick={() => handleSelectClaim('c2')}
-                className={`w-full text-left flex items-center justify-between p-2.5 rounded border transition-colors cursor-pointer outline-none focus-visible:ring-1 focus-visible:ring-accent ${
+                className={`w-full text-left flex items-center justify-between p-2.5 rounded border transition-colors cursor-pointer outline-none focus-visible:ring-1 focus-visible:ring-teal-400 ${
                   selectedClaimId === 'c2'
-                    ? 'bg-accent-dim/40 border-accent/50'
-                    : 'bg-surface-raised/40 border-border hover:border-border-subtle'
+                    ? 'bg-teal-500/10 border-teal-500/40'
+                    : 'bg-[#0A0E14] border-[#1F2937] hover:border-white/20'
                 }`}
               >
                 <div className="flex items-center gap-2 min-w-0">
-                  <span className="font-mono text-[9px] px-1.5 py-0.5 rounded bg-accent/20 text-accent font-semibold border border-accent/30">
+                  <span className="font-mono text-[9px] px-1.5 py-0.5 rounded bg-teal-500/20 text-teal-300 font-semibold border border-teal-500/30">
                     NEW
                   </span>
-                  <span className="text-[12px] text-foreground truncate">Lisinopril 10 mg daily</span>
+                  <span className="text-[12px] text-white truncate">Lisinopril 10 mg daily</span>
                 </div>
-                <span className="font-mono text-[10px] text-accent shrink-0">
+                <span className="font-mono text-[10px] text-teal-400 shrink-0">
                   ↗ Clinic Note · p.2
                 </span>
               </button>
@@ -237,19 +237,19 @@ export function HeroClinicalProof() {
               <button
                 type="button"
                 onClick={() => handleSelectClaim('c4')}
-                className={`w-full text-left flex items-center justify-between p-2.5 rounded border transition-colors cursor-pointer outline-none focus-visible:ring-1 focus-visible:ring-accent ${
+                className={`w-full text-left flex items-center justify-between p-2.5 rounded border transition-colors cursor-pointer outline-none focus-visible:ring-1 focus-visible:ring-teal-400 ${
                   selectedClaimId === 'c4'
-                    ? 'bg-accent-dim/40 border-accent/50'
-                    : 'bg-surface-raised/40 border-border hover:border-border-subtle'
+                    ? 'bg-teal-500/10 border-teal-500/40'
+                    : 'bg-[#0A0E14] border-[#1F2937] hover:border-white/20'
                 }`}
               >
                 <div className="flex items-center gap-2 min-w-0">
-                  <span className="font-mono text-[9px] px-1.5 py-0.5 rounded bg-muted/30 text-muted-foreground border border-border">
+                  <span className="font-mono text-[9px] px-1.5 py-0.5 rounded bg-white/[0.05] text-slate-400 border border-white/10">
                     ONGOING
                   </span>
-                  <span className="text-[12px] text-foreground truncate">Atorvastatin 40 mg nightly</span>
+                  <span className="text-[12px] text-white truncate">Atorvastatin 40 mg nightly</span>
                 </div>
-                <span className="font-mono text-[10px] text-accent shrink-0">
+                <span className="font-mono text-[10px] text-teal-400 shrink-0">
                   ↗ Clinic Note · p.1
                 </span>
               </button>
@@ -257,19 +257,19 @@ export function HeroClinicalProof() {
               <button
                 type="button"
                 onClick={() => handleSelectClaim('c5')}
-                className={`w-full text-left flex items-center justify-between p-2.5 rounded border transition-colors cursor-pointer outline-none focus-visible:ring-1 focus-visible:ring-accent ${
+                className={`w-full text-left flex items-center justify-between p-2.5 rounded border transition-colors cursor-pointer outline-none focus-visible:ring-1 focus-visible:ring-teal-400 ${
                   selectedClaimId === 'c5'
-                    ? 'bg-accent-dim/40 border-accent/50'
-                    : 'bg-surface-raised/40 border-border hover:border-border-subtle'
+                    ? 'bg-teal-500/10 border-teal-500/40'
+                    : 'bg-[#0A0E14] border-[#1F2937] hover:border-white/20'
                 }`}
               >
                 <div className="flex items-center gap-2 min-w-0">
-                  <span className="font-mono text-[9px] px-1.5 py-0.5 rounded bg-muted/30 text-muted-foreground border border-border">
+                  <span className="font-mono text-[9px] px-1.5 py-0.5 rounded bg-white/[0.05] text-slate-400 border border-white/10">
                     ONGOING
                   </span>
-                  <span className="text-[12px] text-foreground truncate">Metoprolol succinate 25 mg daily</span>
+                  <span className="text-[12px] text-white truncate">Metoprolol succinate 25 mg daily</span>
                 </div>
-                <span className="font-mono text-[10px] text-accent shrink-0">
+                <span className="font-mono text-[10px] text-teal-400 shrink-0">
                   ↗ Clinic Note · p.1
                 </span>
               </button>
@@ -278,80 +278,80 @@ export function HeroClinicalProof() {
         </div>
 
         {/* Right Column: The PaperTrail Inspector */}
-        <div className="lg:col-span-5 p-5 sm:p-6 bg-surface-raised/20 flex flex-col justify-between space-y-4">
+        <div className="lg:col-span-5 p-5 sm:p-6 bg-[#0A0E14] flex flex-col justify-between space-y-4">
           <div>
-            <div className="flex items-center justify-between pb-3 border-b border-border mb-3.5">
+            <div className="flex items-center justify-between pb-3 border-b border-[#1F2937] mb-3.5">
               <div>
-                <p className="font-mono text-[10px] tracking-widest text-accent uppercase">
+                <p className="font-mono text-[10px] tracking-widest text-teal-400 uppercase">
                   PaperTrail Inspector
                 </p>
-                <p className="font-mono text-[9px] text-muted-foreground">
+                <p className="font-mono text-[9px] text-slate-400">
                   Zero blind trust · Exact source anchor
                 </p>
               </div>
-              <span className="font-mono text-[10px] px-2 py-0.5 rounded border border-border bg-surface text-muted-foreground">
+              <span className="font-mono text-[10px] px-2 py-0.5 rounded border border-[#1F2937] bg-[#0D1117] text-slate-300">
                 Claim #{selectedClaimId}
               </span>
             </div>
 
             {sourceDoc ? (
-              <div className="border border-border rounded-lg bg-surface p-4 space-y-3.5 shadow-sm">
-                <div className="border-b border-border pb-2.5 flex items-center justify-between">
+              <div className="border border-[#1F2937] rounded-lg bg-[#0D1117] p-4 space-y-3.5 shadow-sm">
+                <div className="border-b border-[#1F2937] pb-2.5 flex items-center justify-between">
                   <div className="min-w-0">
-                    <p className="text-[12px] font-semibold text-foreground truncate">
+                    <p className="text-[12px] font-semibold text-white truncate">
                       {sourceDoc.filename}
                     </p>
-                    <p className="font-mono text-[10px] text-muted-foreground">
+                    <p className="font-mono text-[10px] text-slate-400">
                       {sourceDoc.document_type} · {sourceDoc.document_date}
                     </p>
                   </div>
                   {evidence?.source_page && (
-                    <span className="font-mono text-[10px] px-2 py-0.5 rounded bg-accent-dim text-accent border border-accent/30 shrink-0">
+                    <span className="font-mono text-[10px] px-2 py-0.5 rounded bg-teal-500/10 text-teal-300 border border-teal-500/30 shrink-0">
                       Page {evidence.source_page}
                     </span>
                   )}
                 </div>
 
                 <div>
-                  <p className="font-mono text-[9px] text-muted-foreground uppercase tracking-wider mb-1">
+                  <p className="font-mono text-[9px] text-slate-400 uppercase tracking-wider mb-1">
                     Verbatim Document Excerpt:
                   </p>
-                  <blockquote className="p-3 rounded-md border border-accent/30 bg-accent-dim/10 font-mono text-[11px] text-foreground/90">
+                  <blockquote className="p-3 rounded-md border border-teal-500/30 bg-teal-500/5 font-mono text-[11px] text-slate-200">
                     &ldquo;{evidence?.source_quote || selectedClaim.claim_text}&rdquo;
                   </blockquote>
                 </div>
 
-                <div className="pt-2 border-t border-border flex items-center justify-between text-[10px] font-mono">
-                  <span className="text-muted-foreground">Verification Status:</span>
-                  <span className="text-success flex items-center gap-1 font-medium">
-                    <span className="w-1.5 h-1.5 rounded-full bg-success" />
+                <div className="pt-2 border-t border-[#1F2937] flex items-center justify-between text-[10px] font-mono">
+                  <span className="text-slate-400">Verification Status:</span>
+                  <span className="text-emerald-400 flex items-center gap-1 font-medium">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
                     SUPPORTED
                   </span>
                 </div>
               </div>
             ) : (
-              <div className="border border-warning/30 rounded-lg bg-warning-dim/20 p-4 space-y-3 shadow-sm">
-                <div className="border-b border-warning/20 pb-2">
-                  <p className="text-[12px] font-semibold text-warning">
+              <div className="border border-amber-500/30 rounded-lg bg-[#0D1117] p-4 space-y-3 shadow-sm">
+                <div className="border-b border-amber-500/20 pb-2">
+                  <p className="text-[12px] font-semibold text-amber-300">
                     Pharmacological Principle
                   </p>
-                  <p className="font-mono text-[10px] text-muted-foreground">
+                  <p className="font-mono text-[10px] text-slate-400">
                     Cross-Reference Standard: Clinical Pharmacology
                   </p>
                 </div>
-                <blockquote className="p-3 rounded-md border border-warning/30 bg-warning-dim/10 text-[12px] text-foreground/90 leading-relaxed">
+                <blockquote className="p-3 rounded-md border border-amber-500/30 bg-amber-500/10 text-[12px] text-slate-200 leading-relaxed font-sans">
                   {evidence?.entry_text || selectedClaim.claim_text}
                 </blockquote>
-                <div className="pt-2 border-t border-warning/20 flex items-center justify-between text-[10px] font-mono">
-                  <span className="text-muted-foreground">Classification:</span>
-                  <span className="text-warning font-medium">MEDICAL_KNOWLEDGE</span>
+                <div className="pt-2 border-t border-amber-500/20 flex items-center justify-between text-[10px] font-mono">
+                  <span className="text-slate-400">Classification:</span>
+                  <span className="text-amber-300 font-medium">MEDICAL_KNOWLEDGE</span>
                 </div>
               </div>
             )}
           </div>
 
-          <div className="p-3 rounded-lg border border-border bg-surface text-[11px] text-muted-foreground leading-relaxed">
-            <span className="font-semibold text-foreground">Why this matters:</span> In a standard vector database, an AI would match keywords and list Lisinopril without knowing whether it was active, stopped, or contraindicated by the lab test. The graph links the medication to the renal panel, and the PaperTrail proves it with a page number.
+          <div className="p-3.5 rounded-lg border border-[#1F2937] bg-[#0D1117] text-[11px] text-slate-400 leading-relaxed">
+            <span className="font-semibold text-white">Why this matters:</span> In a standard vector database, an AI would match keywords and list Lisinopril without knowing whether it was active, stopped, or contraindicated by the lab test. The graph links the medication to the renal panel, and the PaperTrail proves it with a page number.
           </div>
         </div>
       </div>

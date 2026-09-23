@@ -9,7 +9,7 @@ export function FlaggedBanner({ concerns }: { concerns: FlaggedConcern[] }) {
       <div className="flex items-start gap-3">
         <div className="shrink-0 mt-0.5">
           <span className="font-mono text-[9px] text-alert border border-alert/40 px-1.5 py-0.5 rounded tracking-widest uppercase">
-            FLAGGED — RAISE WITH DOCTOR
+            FLAGGED: RAISE WITH DOCTOR
           </span>
         </div>
         <div className="flex-1 space-y-1">
