@@ -1,16 +1,12 @@
 import Link from 'next/link'
+import { redirect } from 'next/navigation'
 import AddPatientForm from './AddPatientForm'
 import SignOutButton from './SignOutButton'
 import DeletePatientButton from './DeletePatientButton'
 import { db } from '@/lib/db'
-import { patients as patientsTable, documents as documentsTable, briefings as briefingsTable, caregivers } from '@/lib/db/schema'
+import { patients as patientsTable, documents as documentsTable, briefings as briefingsTable } from '@/lib/db/schema'
 import { eq } from 'drizzle-orm'
 import { getSession, getCaregiver } from '@/lib/auth-session'
-
-const DEMO_PATIENTS = [
-  { id: 'demo-1', name: 'Margaret Thompson', relationship: 'Mother', date_of_birth: '1945-03-12', flagCount: 1, docCount: 3, briefingStatus: 'complete' },
-  { id: 'demo-2', name: 'Robert Chen', relationship: 'Father', date_of_birth: '1948-07-24', flagCount: 0, docCount: 1, briefingStatus: 'pending' },
-]
 
 function calcAge(dob: string) {
   const diff = Date.now() - new Date(dob).getTime()
@@ -25,57 +21,54 @@ export default async function DashboardPage() {
   const session = await getSession()
   const user = session?.user
 
-  let caregiver: { id: string; name: string } | null = null
-  let patients: { id: string; name: string; relationship: string; date_of_birth: string; flagCount?: number; docCount?: number; briefingStatus?: string }[] = []
-  const isGuest = !user
-
-  if (user) {
-    const cgData = await getCaregiver()
-    caregiver = cgData
-    if (caregiver?.id) {
-      const [patientRows, docRows, briefingRows] = await Promise.all([
-        db.select({
-          id: patientsTable.id,
-          name: patientsTable.name,
-          relationship: patientsTable.relationship,
-          date_of_birth: patientsTable.date_of_birth,
-        }).from(patientsTable).where(eq(patientsTable.caregiver_id, caregiver.id)).orderBy(patientsTable.created_at),
-
-        db.select({
-          id: documentsTable.id,
-          patient_id: documentsTable.patient_id,
-        }).from(documentsTable).where(eq(documentsTable.caregiver_id, caregiver.id)),
-
-        db.select({
-          id: briefingsTable.id,
-          patient_id: briefingsTable.patient_id,
-          status: briefingsTable.status,
-          flagged_concerns: briefingsTable.flagged_concerns,
-          created_at: briefingsTable.created_at,
-        }).from(briefingsTable).where(eq(briefingsTable.caregiver_id, caregiver.id)).orderBy(briefingsTable.created_at),
-      ])
-
-      patients = (patientRows || []).map((p) => {
-        const pDocs = (docRows || []).filter((d) => d.patient_id === p.id)
-        const pBriefings = (briefingRows || []).filter((b) => b.patient_id === p.id)
-        const latestBriefing = pBriefings[pBriefings.length - 1]
-
-        let flagCount = 0
-        if (latestBriefing?.flagged_concerns && Array.isArray(latestBriefing.flagged_concerns)) {
-          flagCount = latestBriefing.flagged_concerns.length
-        }
-
-        return {
-          ...p,
-          docCount: pDocs.length,
-          flagCount,
-          briefingStatus: latestBriefing?.status,
-        }
-      })
-    }
-  } else {
-    patients = DEMO_PATIENTS
+  if (!user) {
+    redirect('/login')
   }
+
+  const caregiver = await getCaregiver()
+  if (!caregiver?.id) {
+    redirect('/login')
+  }
+
+  const [patientRows, docRows, briefingRows] = await Promise.all([
+    db.select({
+      id: patientsTable.id,
+      name: patientsTable.name,
+      relationship: patientsTable.relationship,
+      date_of_birth: patientsTable.date_of_birth,
+    }).from(patientsTable).where(eq(patientsTable.caregiver_id, caregiver.id)).orderBy(patientsTable.created_at),
+
+    db.select({
+      id: documentsTable.id,
+      patient_id: documentsTable.patient_id,
+    }).from(documentsTable).where(eq(documentsTable.caregiver_id, caregiver.id)),
+
+    db.select({
+      id: briefingsTable.id,
+      patient_id: briefingsTable.patient_id,
+      status: briefingsTable.status,
+      flagged_concerns: briefingsTable.flagged_concerns,
+      created_at: briefingsTable.created_at,
+    }).from(briefingsTable).where(eq(briefingsTable.caregiver_id, caregiver.id)).orderBy(briefingsTable.created_at),
+  ])
+
+  const patients = (patientRows || []).map((p) => {
+    const pDocs = (docRows || []).filter((d) => d.patient_id === p.id)
+    const pBriefings = (briefingRows || []).filter((b) => b.patient_id === p.id)
+    const latestBriefing = pBriefings[pBriefings.length - 1]
+
+    let flagCount = 0
+    if (latestBriefing?.flagged_concerns && Array.isArray(latestBriefing.flagged_concerns)) {
+      flagCount = latestBriefing.flagged_concerns.length
+    }
+
+    return {
+      ...p,
+      docCount: pDocs.length,
+      flagCount,
+      briefingStatus: latestBriefing?.status,
+    }
+  })
 
   return (
     <div className="min-h-[100dvh] md:h-screen bg-background flex flex-col md:flex-row overflow-x-hidden md:overflow-hidden">
@@ -110,11 +103,9 @@ export default async function DashboardPage() {
                   <div className="w-1.5 h-1.5 rounded-full bg-alert shrink-0" />
                 )}
               </Link>
-              {!isGuest && (
-                <div className="pr-2">
-                  <DeletePatientButton patientId={p.id} patientName={p.name} />
-                </div>
-              )}
+              <div className="pr-2">
+                <DeletePatientButton patientId={p.id} patientName={p.name} />
+              </div>
             </div>
           ))}
           {patients.length === 0 && (
@@ -123,19 +114,7 @@ export default async function DashboardPage() {
         </div>
 
         <div className="border-t border-border p-4">
-          {isGuest ? (
-            <div>
-              <p className="text-[11px] text-muted-foreground leading-relaxed mb-3">Sign in to add patient records and upload documents.</p>
-              <Link href="/signup" className="flex items-center justify-center w-full bg-accent text-background font-mono text-[11px] font-semibold py-2 rounded hover:opacity-90 transition-opacity">
-                Create free account
-              </Link>
-              <Link href="/login" className="flex items-center justify-center w-full border border-border text-muted-foreground font-mono text-[11px] py-2 rounded hover:border-accent hover:text-foreground transition-colors mt-2">
-                Sign in
-              </Link>
-            </div>
-          ) : (
-            <AddPatientForm />
-          )}
+          <AddPatientForm />
         </div>
       </aside>
 
@@ -154,41 +133,17 @@ export default async function DashboardPage() {
             </div>
             <div>
               <h1 className="text-[12px] sm:text-[13px] font-semibold text-foreground">
-                {isGuest ? 'Demo workspace' : caregiver?.name ?? 'My workspace'}
+                {caregiver?.name ?? 'My workspace'}
               </h1>
               <p className="font-mono text-[9px] sm:text-[10px] text-muted-foreground mt-0.5">
-                {isGuest ? 'Sample records — sign in to manage your own' : `${patients.length} patient${patients.length !== 1 ? 's' : ''}`}
+                {`${patients.length} patient${patients.length !== 1 ? 's' : ''}`}
               </p>
             </div>
           </div>
-          {!isGuest ? (
-            <SignOutButton />
-          ) : (
-            <div className="flex items-center gap-1.5 sm:gap-2">
-              <Link href="/login" className="font-mono text-[10px] sm:text-[11px] text-muted-foreground border border-border px-2.5 sm:px-3 py-1 sm:py-1.5 rounded hover:text-foreground hover:border-foreground/30 transition-colors">
-                Sign in
-              </Link>
-              <Link href="/signup" className="font-mono text-[10px] sm:text-[11px] bg-accent text-background px-2.5 sm:px-3 py-1 sm:py-1.5 rounded hover:opacity-90 transition-opacity font-semibold">
-                Create account
-              </Link>
-            </div>
-          )}
+          <SignOutButton />
         </header>
 
         <main className="flex-1 overflow-y-auto px-4 sm:px-6 py-5 sm:py-6">
-
-          {isGuest && (
-            <div className="mb-5 flex items-center gap-3 bg-warning-dim border border-warning/25 rounded-md p-3 sm:px-4 sm:py-3">
-              <div className="w-1.5 h-1.5 rounded-full bg-warning shrink-0" />
-              <p className="text-[12px] text-muted-foreground">
-                <span className="text-warning-foreground font-mono text-[10px] tracking-widest uppercase mr-2">Demo mode</span>
-                Viewing sample data.{' '}
-                <Link href="/signup" className="text-accent hover:underline">Create an account</Link>{' '}
-                to manage real patient records.
-              </p>
-            </div>
-          )}
-
           {/* Patient cards */}
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 mb-8">
             {patients.map((p) => (
@@ -202,10 +157,7 @@ export default async function DashboardPage() {
                           {initials(p.name)}
                         </div>
                         <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2">
-                            <h2 className="text-[13px] font-semibold text-foreground truncate">{p.name}</h2>
-                            {isGuest && <span className="font-mono text-[9px] border border-border text-muted-foreground px-1.5 py-0.5 rounded-sm shrink-0">DEMO</span>}
-                          </div>
+                          <h2 className="text-[13px] font-semibold text-foreground truncate">{p.name}</h2>
                           <p className="font-mono text-[10px] text-muted-foreground mt-0.5">
                             {p.relationship} · DOB {p.date_of_birth} · Age {calcAge(p.date_of_birth)}
                           </p>
@@ -250,12 +202,10 @@ export default async function DashboardPage() {
                     </div>
                   </article>
                 </Link>
-                {/* Delete button — only for authenticated users, appears on card hover */}
-                {!isGuest && (
-                  <div className="absolute top-2.5 right-2.5 z-10">
-                    <DeletePatientButton patientId={p.id} patientName={p.name} />
-                  </div>
-                )}
+                {/* Delete button appears on card hover */}
+                <div className="absolute top-2.5 right-2.5 z-10">
+                  <DeletePatientButton patientId={p.id} patientName={p.name} />
+                </div>
               </div>
             ))}
 
@@ -268,11 +218,9 @@ export default async function DashboardPage() {
           </div>
 
           {/* Mobile Add Patient Form */}
-          {!isGuest && (
-            <div className="md:hidden border border-border rounded-lg bg-surface p-4 mb-8">
-              <AddPatientForm />
-            </div>
-          )}
+          <div className="md:hidden border border-border rounded-lg bg-surface p-4 mb-8">
+            <AddPatientForm />
+          </div>
 
           {/* How it works */}
           <div className="border-t border-border pt-6">

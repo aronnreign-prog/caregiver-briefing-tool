@@ -36,14 +36,8 @@ export default function LandingPage() {
 
           <div className="flex items-center gap-4">
             <Link
-              href="/dashboard"
-              className="text-[12px] text-white/60 hover:text-white transition-colors"
-            >
-              Demo Workspace
-            </Link>
-            <Link
               href="/login"
-              className="text-[12px] text-white/60 hover:text-white transition-colors hidden sm:inline-block"
+              className="text-[12px] text-white/60 hover:text-white transition-colors"
             >
               Sign in
             </Link>
@@ -51,7 +45,7 @@ export default function LandingPage() {
               href="#demo"
               className="text-[12px] font-medium bg-white text-black px-3.5 py-1.5 rounded hover:bg-white/90 transition-colors"
             >
-              Book a Demo
+              Register for Demo
             </Link>
           </div>
         </div>
@@ -75,19 +69,21 @@ export default function LandingPage() {
                 href="#demo"
                 className="text-[13px] font-medium bg-white text-black px-5 py-2.5 rounded hover:bg-white/90 transition-colors"
               >
-                Book a Demo
+                Register for Demo Access
               </Link>
-              <Link
-                href="/dashboard"
+              <a
+                href="#proof"
                 className="text-[13px] text-white/70 border border-white/[0.12] bg-white/[0.02] px-5 py-2.5 rounded hover:text-white hover:border-white/30 transition-colors"
               >
-                Explore Workspace Demo →
-              </Link>
+                Explore Live Proof ↓
+              </a>
             </div>
           </div>
 
           {/* ━━━ Product Proof: Grounded Clinical Briefing + PaperTrail Inspector ━━━ */}
-          <HeroClinicalProof />
+          <div id="proof">
+            <HeroClinicalProof />
+          </div>
         </div>
       </section>
 
@@ -253,7 +249,7 @@ export default function LandingPage() {
       <section id="demo" className="py-24 border-t border-white/[0.08]">
         <div className="mx-auto max-w-5xl px-6 text-center">
           <h2 className="text-[28px] sm:text-[42px] font-semibold tracking-[-0.03em] text-white mb-4">
-            See the graph run on your records.
+            Register for Demo Access
           </h2>
 
           <p className="text-[15px] sm:text-[16px] text-white/60 max-w-md mx-auto mb-8">
@@ -265,14 +261,8 @@ export default function LandingPage() {
               href="mailto:contact@carenote.health?subject=CareNote%20Demo%20Request"
               className="w-full sm:w-auto text-[13px] font-medium bg-white text-black px-6 py-3 rounded hover:bg-white/90 transition-colors"
             >
-              Book a Demo
+              Request Demo Access
             </a>
-            <Link
-              href="/dashboard"
-              className="w-full sm:w-auto text-[13px] text-white/70 border border-white/[0.12] bg-white/[0.02] px-6 py-3 rounded hover:text-white hover:border-white/30 transition-colors"
-            >
-              Launch Demo Workspace
-            </Link>
           </div>
         </div>
       </section>
@@ -287,9 +277,6 @@ export default function LandingPage() {
           </div>
 
           <div className="flex items-center gap-5">
-            <Link href="/dashboard" className="hover:text-white transition-colors">
-              Workspace
-            </Link>
             <Link href="/login" className="hover:text-white transition-colors">
               Sign In
             </Link>

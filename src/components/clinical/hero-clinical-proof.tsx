@@ -1,7 +1,6 @@
 'use client'
 
 import React, { useState } from 'react'
-import Link from 'next/link'
 import type { Document } from '@/types/database'
 import type { Claim, FlaggedConcern } from './types'
 import { FlaggedBanner } from './flagged-banner'
@@ -132,15 +131,9 @@ export function HeroClinicalProof() {
           </div>
         </div>
         <div className="flex items-center gap-3">
-          <span className="font-mono text-[10px] text-accent bg-accent-dim px-2 py-0.5 rounded border border-accent/30 hidden sm:inline-block">
-            LIVE CLINICAL PROOF
+          <span className="font-mono text-[10px] text-accent bg-accent-dim px-2 py-0.5 rounded border border-accent/30">
+            INTERACTIVE CLINICAL PROOF
           </span>
-          <Link
-            href="/dashboard/patients/demo-1"
-            className="text-[11px] font-mono text-white/70 hover:text-white transition-colors underline decoration-white/30 underline-offset-4"
-          >
-            Open in Workspace →
-          </Link>
         </div>
       </div>
 
