@@ -2,11 +2,12 @@
 
 import { auth } from '@/lib/auth'
 import { db } from '@/lib/db'
-import { caregivers } from '@/lib/db/schema'
+import { caregivers, demoRequests } from '@/lib/db/schema'
 import { eq } from 'drizzle-orm'
 import { headers } from 'next/headers'
 import { revalidatePath } from 'next/cache'
 import { getSession, isAdmin } from '@/lib/auth-session'
+import { randomBytes } from 'crypto'
 
 /**
  * Official Better Auth Admin Plugin User Creation
@@ -140,6 +141,140 @@ export async function unbanDemoUser(userId: string) {
     return { success: true }
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : 'Failed to unban user'
+    return { error: msg }
+  }
+}
+
+function generateCleanTempPassword(): string {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789'
+  const bytes = randomBytes(6)
+  let code = ''
+  for (let i = 0; i < 6; i++) {
+    code += chars[bytes[i] % chars.length]
+  }
+  return `CareNote-${code}`
+}
+
+/**
+ * Approve a demo request, create Better Auth user, link caregiver record, and update status.
+ */
+export async function approveDemoRequest(requestId: string) {
+  const authorized = await isAdmin()
+  if (!authorized) {
+    return { error: 'Unauthorized' }
+  }
+
+  if (!requestId) {
+    return { error: 'Request ID is required' }
+  }
+
+  try {
+    const [req] = await db
+      .select()
+      .from(demoRequests)
+      .where(eq(demoRequests.id, requestId))
+      .limit(1)
+
+    if (!req) {
+      return { error: 'Demo request not found' }
+    }
+
+    if (req.status === 'approved') {
+      return { error: 'Demo request is already approved' }
+    }
+
+    const tempPassword = generateCleanTempPassword()
+
+    // Call Better Auth official Admin API: createUser
+    const result = await auth.api.createUser({
+      body: {
+        name: req.name,
+        email: req.email,
+        password: tempPassword,
+        role: 'user',
+      },
+      headers: await headers(),
+    })
+
+    if (!result?.user?.id) {
+      return { error: 'Failed to create user in authentication system.' }
+    }
+
+    // Insert linked caregivers record in Neon
+    const existingCaregiver = await db
+      .select({ id: caregivers.id })
+      .from(caregivers)
+      .where(eq(caregivers.user_id, result.user.id))
+      .limit(1)
+
+    if (existingCaregiver.length === 0) {
+      await db.insert(caregivers).values({
+        user_id: result.user.id,
+        email: result.user.email,
+        name: req.name,
+      })
+    }
+
+    // Update demoRequests table for this requestId
+    await db
+      .update(demoRequests)
+      .set({
+        status: 'approved',
+        approved_at: new Date(),
+        created_user_id: result.user.id,
+      })
+      .where(eq(demoRequests.id, requestId))
+
+    revalidatePath('/admin')
+
+    return {
+      success: true,
+      email: req.email,
+      password: tempPassword,
+      name: req.name,
+    }
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : 'Failed to approve demo request'
+    return { error: msg }
+  }
+}
+
+/**
+ * Reject a demo request and update status in Neon.
+ */
+export async function rejectDemoRequest(requestId: string) {
+  const authorized = await isAdmin()
+  if (!authorized) {
+    return { error: 'Unauthorized' }
+  }
+
+  if (!requestId) {
+    return { error: 'Request ID is required' }
+  }
+
+  try {
+    const [req] = await db
+      .select()
+      .from(demoRequests)
+      .where(eq(demoRequests.id, requestId))
+      .limit(1)
+
+    if (!req) {
+      return { error: 'Demo request not found' }
+    }
+
+    await db
+      .update(demoRequests)
+      .set({
+        status: 'rejected',
+      })
+      .where(eq(demoRequests.id, requestId))
+
+    revalidatePath('/admin')
+
+    return { success: true }
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : 'Failed to reject demo request'
     return { error: msg }
   }
 }

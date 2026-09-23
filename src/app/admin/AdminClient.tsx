@@ -2,7 +2,14 @@
 
 import React, { useState } from 'react'
 import Link from 'next/link'
-import { createDemoUser, deleteDemoUser, banDemoUser, unbanDemoUser } from './actions'
+import {
+  createDemoUser,
+  deleteDemoUser,
+  banDemoUser,
+  unbanDemoUser,
+  approveDemoRequest,
+  rejectDemoRequest,
+} from './actions'
 
 interface UserItem {
   id: string
@@ -16,21 +23,35 @@ interface UserItem {
   documentCount: number
 }
 
+export interface PendingRequestItem {
+  id: string
+  name: string
+  email: string
+  organization: string | null
+  role: string | null
+  useCase: string | null
+  createdAt: string
+}
+
 interface Props {
   currentUserEmail: string
   users: UserItem[]
+  pendingRequests?: PendingRequestItem[]
 }
 
-export function AdminClient({ currentUserEmail, users }: Props) {
+export function AdminClient({ currentUserEmail, users, pendingRequests = [] }: Props) {
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [creating, setCreating] = useState(false)
   const [actionUserId, setActionUserId] = useState<string | null>(null)
+  const [approvingId, setApprovingId] = useState<string | null>(null)
+  const [rejectingId, setRejectingId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [createdCredentials, setCreatedCredentials] = useState<{
     email: string
     password: string
+    name?: string
   } | null>(null)
   const [copied, setCopied] = useState(false)
 
@@ -121,6 +142,50 @@ export function AdminClient({ currentUserEmail, users }: Props) {
     }
   }
 
+  async function handleApproveRequest(req: PendingRequestItem) {
+    if (approvingId) return
+    setApprovingId(req.id)
+    setError(null)
+    setCreatedCredentials(null)
+
+    try {
+      const res = await approveDemoRequest(req.id)
+      if (res?.error) {
+        setError(res.error)
+      } else if (res?.success && res.email && res.password) {
+        setCreatedCredentials({
+          email: res.email,
+          password: res.password,
+          name: res.name,
+        })
+      }
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to approve demo request')
+    } finally {
+      setApprovingId(null)
+    }
+  }
+
+  async function handleRejectRequest(id: string) {
+    if (rejectingId) return
+    const confirmed = window.confirm('Dismiss this demo request?')
+    if (!confirmed) return
+
+    setRejectingId(id)
+    setError(null)
+
+    try {
+      const res = await rejectDemoRequest(id)
+      if (res?.error) {
+        setError(res.error)
+      }
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to dismiss request')
+    } finally {
+      setRejectingId(null)
+    }
+  }
+
   function copyToClipboard(text: string) {
     navigator.clipboard.writeText(text)
     setCopied(true)
@@ -205,6 +270,75 @@ export function AdminClient({ currentUserEmail, users }: Props) {
               >
                 {copied ? '✓ Copied' : 'Copy Credentials'}
               </button>
+            </div>
+          </div>
+        )}
+
+        {/* Pending Demo Requests Section */}
+        {pendingRequests.length > 0 && (
+          <div className="bg-amber-500/5 border border-amber-500/20 rounded-xl p-5 sm:p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+                <h2 className="text-base font-medium text-white">Pending Demo Requests</h2>
+                <span className="font-mono text-[10px] bg-amber-500/20 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded-full font-semibold">
+                  {pendingRequests.length} new
+                </span>
+              </div>
+              <p className="text-xs text-white/40 hidden sm:block">
+                Submissions from carenote.in landing page
+              </p>
+            </div>
+
+            <div className="grid gap-3">
+              {pendingRequests.map((req) => (
+                <div
+                  key={req.id}
+                  className="bg-black/40 border border-white/[0.08] hover:border-white/20 p-4 rounded-lg flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition-colors"
+                >
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium text-sm text-white">{req.name}</span>
+                      <span className="font-mono text-xs text-accent">{req.email}</span>
+                      {req.role && (
+                        <span className="text-[10px] font-mono bg-white/[0.06] text-white/70 border border-white/10 px-1.5 py-0.5 rounded">
+                          {req.role}
+                        </span>
+                      )}
+                    </div>
+                    {req.organization && (
+                      <div className="text-xs text-white/50">
+                        Org: <span className="text-white/80">{req.organization}</span>
+                      </div>
+                    )}
+                    {req.useCase && (
+                      <div className="text-xs text-white/60 italic max-w-xl">
+                        "{req.useCase}"
+                      </div>
+                    )}
+                    <div className="text-[10px] font-mono text-white/30">
+                      Requested: {new Date(req.createdAt).toLocaleString()}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 self-start sm:self-center">
+                    <button
+                      onClick={() => handleApproveRequest(req)}
+                      disabled={approvingId === req.id || Boolean(rejectingId)}
+                      className="px-3 py-1.5 rounded bg-white text-black font-medium text-xs hover:bg-white/90 disabled:opacity-50 transition-colors cursor-pointer"
+                    >
+                      {approvingId === req.id ? 'Approving...' : '✓ Approve & Provision'}
+                    </button>
+                    <button
+                      onClick={() => handleRejectRequest(req.id)}
+                      disabled={rejectingId === req.id || Boolean(approvingId)}
+                      className="px-2.5 py-1.5 rounded border border-white/10 text-white/50 hover:text-white/80 text-xs disabled:opacity-50 transition-colors cursor-pointer"
+                    >
+                      {rejectingId === req.id ? 'Dismissing...' : 'Dismiss'}
+                    </button>
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
         )}

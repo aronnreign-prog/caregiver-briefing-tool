@@ -100,3 +100,16 @@ export const briefings = pgTable('briefings', {
   flagged_concerns: jsonb('flagged_concerns'),
   error_message: text('error_message'),
 })
+
+export const demoRequests = pgTable('demo_requests', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  name: text('name').notNull(),
+  email: text('email').notNull(),
+  organization: text('organization'),
+  role: text('role'),
+  use_case: text('use_case'),
+  status: text('status').notNull().default('pending'), // 'pending' | 'approved' | 'rejected'
+  created_at: timestamp('created_at').defaultNow().notNull(),
+  approved_at: timestamp('approved_at'),
+  created_user_id: text('created_user_id'),
+})

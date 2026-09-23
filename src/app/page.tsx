@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import type { Metadata } from 'next'
 import { HeroClinicalProof } from '@/components/clinical'
+import { DemoRequestModal, DemoRequestTrigger } from '@/components/marketing/DemoRequestModal'
 
 export const metadata: Metadata = {
   title: 'CareNote — Graph Memory & Verifiable PaperTrail for Medical Records',
@@ -35,12 +36,11 @@ export default function LandingPage() {
           </Link>
 
           <div className="flex items-center gap-4">
-            <Link
-              href="#demo"
-              className="text-[12px] font-medium bg-white text-black px-3.5 py-1.5 rounded hover:bg-white/90 transition-colors"
+            <DemoRequestTrigger
+              className="text-[12px] font-medium bg-white text-black px-3.5 py-1.5 rounded hover:bg-white/90 transition-colors cursor-pointer"
             >
               Register for Demo
-            </Link>
+            </DemoRequestTrigger>
           </div>
         </div>
       </header>
@@ -59,12 +59,11 @@ export default function LandingPage() {
             </p>
 
             <div className="flex items-center gap-3">
-              <Link
-                href="#demo"
-                className="text-[13px] font-medium bg-white text-black px-5 py-2.5 rounded hover:bg-white/90 transition-colors"
+              <DemoRequestTrigger
+                className="text-[13px] font-medium bg-white text-black px-5 py-2.5 rounded hover:bg-white/90 transition-colors cursor-pointer"
               >
                 Register for Demo Access
-              </Link>
+              </DemoRequestTrigger>
               <a
                 href="#proof"
                 className="text-[13px] text-white/70 border border-white/[0.12] bg-white/[0.02] px-5 py-2.5 rounded hover:text-white hover:border-white/30 transition-colors"
@@ -251,12 +250,11 @@ export default function LandingPage() {
           </p>
 
           <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
-            <a
-              href="mailto:contact@carenote.in?subject=CareNote%20Demo%20Request"
-              className="w-full sm:w-auto text-[13px] font-medium bg-white text-black px-6 py-3 rounded hover:bg-white/90 transition-colors"
+            <DemoRequestTrigger
+              className="w-full sm:w-auto text-[13px] font-medium bg-white text-black px-6 py-3 rounded hover:bg-white/90 transition-colors cursor-pointer"
             >
               Request Demo Access
-            </a>
+            </DemoRequestTrigger>
           </div>
         </div>
       </section>
@@ -271,10 +269,16 @@ export default function LandingPage() {
           </div>
 
           <div className="flex items-center gap-5 text-white/40">
+            <DemoRequestTrigger className="hover:text-white transition-colors cursor-pointer">
+              Request Demo Access
+            </DemoRequestTrigger>
             <span>© {new Date().getFullYear()} CareNote</span>
           </div>
         </div>
       </footer>
+
+      {/* Interactive Demo Request Access Modal */}
+      <DemoRequestModal />
     </div>
   )
 }

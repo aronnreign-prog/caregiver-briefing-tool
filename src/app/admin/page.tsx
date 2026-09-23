@@ -7,7 +7,9 @@ import {
   caregivers as caregiversTable,
   patients as patientsTable,
   documents as documentsTable,
+  demoRequests as demoRequestsTable,
 } from '@/lib/db/schema'
+import { eq, desc } from 'drizzle-orm'
 import { AdminClient } from './AdminClient'
 
 export const dynamic = 'force-dynamic'
@@ -35,8 +37,8 @@ export default async function AdminPage() {
 
   const authUsers = authResponse?.users || []
 
-  // 2. Query workspace usage stats from Neon
-  const [caregivers, patients, documents] = await Promise.all([
+  // 2. Query workspace usage stats and pending demo requests from Neon
+  const [caregivers, patients, documents, pendingRequestsRaw] = await Promise.all([
     db
       .select({
         id: caregiversTable.id,
@@ -57,6 +59,12 @@ export default async function AdminPage() {
         caregiver_id: documentsTable.caregiver_id,
       })
       .from(documentsTable),
+
+    db
+      .select()
+      .from(demoRequestsTable)
+      .where(eq(demoRequestsTable.status, 'pending'))
+      .orderBy(desc(demoRequestsTable.created_at)),
   ])
 
   const userList = authUsers.map((u) => {
@@ -81,10 +89,21 @@ export default async function AdminPage() {
     }
   })
 
+  const pendingRequests = (pendingRequestsRaw || []).map((r) => ({
+    id: r.id,
+    name: r.name,
+    email: r.email,
+    organization: r.organization || null,
+    role: r.role || null,
+    useCase: r.use_case || null,
+    createdAt: r.created_at ? new Date(r.created_at).toISOString() : new Date().toISOString(),
+  }))
+
   return (
     <AdminClient
       currentUserEmail={session.user.email}
       users={userList}
+      pendingRequests={pendingRequests}
     />
   )
 }

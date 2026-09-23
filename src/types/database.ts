@@ -39,3 +39,16 @@ export interface Briefing {
   flagged_concerns?: unknown
   error_message?: string | null
 }
+
+export interface DemoRequest {
+  id: string
+  name: string
+  email: string
+  organization?: string | null
+  role?: string | null
+  use_case?: string | null
+  status: 'pending' | 'approved' | 'rejected' | string
+  created_at: string | Date
+  approved_at?: string | Date | null
+  created_user_id?: string | null
+}
