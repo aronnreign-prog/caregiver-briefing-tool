@@ -61,10 +61,10 @@ export default function LoginPage() {
 
         <div className="flex-1">
           <h1 className="text-[28px] font-semibold text-white leading-tight tracking-tight mb-4">
-            Medical records<br />your doctor can<br />actually use.
+            Medical prescriptions<br />and notes your doctor<br />can actually use.
           </h1>
           <p className="text-[13px] text-white/60 leading-relaxed mb-12">
-            Upload your parent&apos;s documents. Get a verified briefing with every claim traced to its exact source, ready for any appointment.
+            Upload your parent&apos;s medical prescriptions and notes. Get a verified briefing with every claim traced to its exact source, ready for any appointment.
           </p>
 
           <div className="space-y-6">

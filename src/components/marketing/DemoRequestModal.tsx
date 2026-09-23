@@ -407,7 +407,7 @@ export function DemoRequestModal({
                     rows={3}
                     value={useCase}
                     onChange={(e) => setUseCase(e.target.value)}
-                    placeholder="What records are you synthesizing? (e.g. multi-year cardiology labs, discharge summaries)"
+                    placeholder="What prescriptions or notes are you synthesizing? (e.g. multi-year medication regimens, cardiology consult notes, discharge summaries)"
                     className="w-full bg-[#0A0E14] border border-[#1F2937] focus:border-white/40 focus:ring-1 focus:ring-white/30 rounded-lg px-3.5 py-2 text-[13px] text-white placeholder:text-white/30 outline-none transition-colors resize-none leading-relaxed"
                   />
                 </div>

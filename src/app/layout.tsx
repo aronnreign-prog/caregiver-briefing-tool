@@ -22,7 +22,7 @@ export const viewport: Viewport = {
 
 export const metadata: Metadata = {
   title: "CareNote: AI Briefing for Caregivers",
-  description: "Upload your parent's medical documents. Get a verified, source-cited briefing ready for their next appointment.",
+  description: "Upload your parent's medical prescriptions and notes. Get a verified, source-cited briefing ready for their next appointment.",
 };
 
 export default function RootLayout({

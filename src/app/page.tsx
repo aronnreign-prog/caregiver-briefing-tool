@@ -4,9 +4,9 @@ import { HeroClinicalProof } from '@/components/clinical'
 import { DemoRequestModal, DemoRequestTrigger } from '@/components/marketing/DemoRequestModal'
 
 export const metadata: Metadata = {
-  title: 'CareNote: Graph Memory & Verifiable PaperTrail for Medical Records',
+  title: 'CareNote: Graph Memory & Verifiable PaperTrail for Medical Prescriptions and Notes',
   description:
-    'Medical records are an interconnected timeline, not disconnected text chunks. CareNote builds a persistent patient knowledge graph with an instant PaperTrail linking every claim to its original PDF page.',
+    'Medical prescriptions and notes form an interconnected timeline, not disconnected text chunks. CareNote builds a persistent patient knowledge graph with an instant PaperTrail linking every claim to its original PDF page.',
 }
 
 function Logo({ size = 18 }: { size?: number }) {
@@ -97,7 +97,7 @@ export default function LandingPage() {
             <div className="border border-white/[0.08] rounded-xl bg-white/[0.01] p-6 sm:p-8 flex flex-col justify-between">
               <div>
                 <h3 className="text-[15px] font-semibold text-white/90 mb-2">
-                  How Standard AI Tools Store Records (Vector Chunks)
+                  How Standard AI Tools Store Prescriptions and Notes (Vector Chunks)
                 </h3>
                 <p className="text-[13px] text-white/60 leading-[1.6] mb-6">
                   Documents are broken into fragments and indexed by cosine similarity. When you ask a question, it retrieves fragments that sound relevant, even if they are 3 years out of date.
@@ -119,7 +119,7 @@ export default function LandingPage() {
             <div className="border border-emerald-500/30 rounded-xl bg-emerald-500/[0.02] p-6 sm:p-8 flex flex-col justify-between">
               <div>
                 <h3 className="text-[15px] font-semibold text-white mb-2">
-                  How CareNote Stores Records (Patient Knowledge Graph)
+                  How CareNote Stores Prescriptions and Notes (Patient Knowledge Graph)
                 </h3>
                 <p className="text-[13px] text-white/70 leading-[1.6] mb-6">
                   Extracts clinical entities (medications, doses, lab trends, and doctors) and connects them across time in a persistent temporal graph. When a drug is changed, old entries are marked superseded.
@@ -184,10 +184,10 @@ export default function LandingPage() {
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 items-center">
             <div className="lg:col-span-5">
               <h2 className="text-[26px] sm:text-[34px] font-semibold tracking-[-0.025em] text-white mb-3 text-balance">
-                Ask your records anything.
+                Query prescriptions and clinic notes in plain language.
               </h2>
               <p className="text-[15px] sm:text-[16px] text-white/65 leading-[1.65] mb-6 max-w-[50ch]">
-                Query across years of accumulated documents in plain language. Receive grounded answers with direct citations back to the source records.
+                Ask questions across years of accumulated medical prescriptions and notes. Receive grounded answers with direct citations back to the source documents.
               </p>
 
               <div className="space-y-2.5 text-[13px] text-white/80">
@@ -246,7 +246,7 @@ export default function LandingPage() {
           </h2>
 
           <p className="text-[15px] sm:text-[16px] text-white/60 max-w-md mx-auto mb-8">
-            Experience how persistent graph memory and clickable page citations transform scattered medical PDFs.
+            Experience how persistent graph memory and clickable page citations transform scattered medical prescriptions and notes.
           </p>
 
           <div className="flex flex-col sm:flex-row items-center justify-center gap-3">

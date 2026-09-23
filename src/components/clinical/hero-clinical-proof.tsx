@@ -127,7 +127,7 @@ export function HeroClinicalProof() {
           </div>
           <div>
             <span className="text-white font-semibold">Margaret Thompson</span>
-            <span className="font-mono text-[10px] text-slate-400 ml-2">79y · DOB 1945-03-12 · 3 Records Indexed</span>
+            <span className="font-mono text-[10px] text-slate-400 ml-2">79y · DOB 1945-03-12 · 3 Prescriptions &amp; Notes Indexed</span>
           </div>
         </div>
         <div className="flex items-center gap-3">

@@ -689,9 +689,9 @@ export default function PatientDetailClient({ patient, initialDocuments, initial
               type="button"
               onClick={() => setIsRecordsDrawerOpen(true)}
               className="md:hidden inline-flex items-center gap-1 font-mono text-[10px] px-2 py-1.5 rounded border border-border bg-surface-raised text-muted-foreground hover:text-foreground shrink-0 touch-manipulation"
-              title="Open medical records drawer"
+              title="Open prescriptions and notes drawer"
             >
-              <span>📄 Records</span>
+              <span>Prescriptions &amp; Notes</span>
               <span className="bg-accent/20 text-accent text-[9px] px-1.5 py-0.2 rounded-full font-bold">
                 {documents.length}
               </span>

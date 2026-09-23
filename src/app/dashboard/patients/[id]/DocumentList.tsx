@@ -57,7 +57,7 @@ export default function DocumentList({
               onDocumentAdded={onDocumentAdded}
             />
           ) : (
-            <p className="font-mono text-[9px] text-muted-foreground mt-1">Sign in to upload medical records.</p>
+            <p className="font-mono text-[9px] text-muted-foreground mt-1">Sign in to upload medical prescriptions and notes.</p>
           )}
         </div>
       ) : (
