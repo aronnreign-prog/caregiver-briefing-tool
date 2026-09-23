@@ -95,10 +95,10 @@ export default function LandingPage() {
       <section className="py-20 border-t border-white/[0.08]">
         <div className="mx-auto max-w-5xl px-6">
           <div className="max-w-2xl mb-12">
-            <h2 className="text-[28px] sm:text-[38px] font-semibold tracking-[-0.03em] text-white mb-4">
+            <h2 className="text-[26px] sm:text-[34px] font-semibold tracking-[-0.025em] text-white mb-3">
               Vector databases have clinical amnesia.
             </h2>
-            <p className="text-[16px] text-white/65 leading-relaxed">
+            <p className="text-[15px] sm:text-[16px] text-white/65 leading-[1.65] max-w-[65ch]">
               Standard AI summarizers chop a 30-page PDF into 500-token text chunks and do semantic search. When you ask about medications, the system finds matching keywords — but it has no concept of timeline, dosages changing over time, or doctors countermanding each other.
             </p>
           </div>
@@ -107,21 +107,21 @@ export default function LandingPage() {
             {/* The Old Way */}
             <div className="border border-white/[0.08] rounded-xl bg-white/[0.01] p-6 sm:p-8 flex flex-col justify-between">
               <div>
-                <h3 className="text-[16px] font-semibold text-white/80 mb-3">
+                <h3 className="text-[15px] font-semibold text-white/90 mb-2">
                   How Standard AI Tools Store Records (Vector Chunks)
                 </h3>
-                <p className="text-[13px] text-white/60 leading-relaxed mb-6">
+                <p className="text-[13px] text-white/60 leading-[1.6] mb-6">
                   Documents are broken into fragments and indexed by cosine similarity. When you ask a question, it retrieves fragments that sound relevant — even if they are 3 years out of date.
                 </p>
 
-                <div className="space-y-2 text-[12px] font-mono text-white/50 border-l border-red-500/40 pl-3">
-                  <p className="text-red-400">× Chunk 14: &quot;Discontinue Lisinopril due to cough (2023)&quot;</p>
-                  <p className="text-red-400">× Chunk 82: &quot;Restart Lisinopril 10mg daily (2024)&quot;</p>
-                  <p className="text-red-400">× Chunk 105: &quot;Increase to Lisinopril 20mg daily (2025)&quot;</p>
+                <div className="p-3.5 rounded-lg bg-red-500/[0.03] border border-red-500/20 space-y-2 text-[12px] font-mono text-white/60 tabular-nums">
+                  <p className="text-red-300">× Chunk 14: &quot;Discontinue Lisinopril due to cough (2023)&quot;</p>
+                  <p className="text-red-300">× Chunk 82: &quot;Restart Lisinopril 10mg daily (2024)&quot;</p>
+                  <p className="text-red-300">× Chunk 105: &quot;Increase to Lisinopril 20mg daily (2025)&quot;</p>
                 </div>
               </div>
 
-              <div className="mt-8 pt-4 border-t border-white/[0.06] text-[12px] text-red-300">
+              <div className="mt-8 pt-4 border-t border-white/[0.06] text-[12px] text-red-300/90 leading-relaxed">
                 Result: Hallucinates contradictory drug lists because it cannot reason about time.
               </div>
             </div>
@@ -129,20 +129,20 @@ export default function LandingPage() {
             {/* CareNote Way */}
             <div className="border border-emerald-500/30 rounded-xl bg-emerald-500/[0.02] p-6 sm:p-8 flex flex-col justify-between">
               <div>
-                <h3 className="text-[16px] font-semibold text-white mb-3">
+                <h3 className="text-[15px] font-semibold text-white mb-2">
                   How CareNote Stores Records (Patient Knowledge Graph)
                 </h3>
-                <p className="text-[13px] text-white/70 leading-relaxed mb-6">
+                <p className="text-[13px] text-white/70 leading-[1.6] mb-6">
                   Extracts clinical entities — medications, doses, lab trends, and doctors — and connects them across time in a persistent temporal graph. When a drug is changed, old entries are marked superseded.
                 </p>
 
-                <div className="space-y-2 text-[12px] font-mono border-l border-emerald-500/50 pl-3">
-                  <p className="text-white/40">Lisinopril 10mg (2024) → <span className="text-amber-400">[SUPERSEDED]</span></p>
-                  <p className="text-white font-medium">Lisinopril 20mg (2025) → <span className="text-emerald-400">[CURRENT REGIMEN]</span></p>
+                <div className="p-3.5 rounded-lg bg-emerald-500/[0.03] border border-emerald-500/20 space-y-2 text-[12px] font-mono tabular-nums">
+                  <p className="text-white/40">Lisinopril 10mg (2024) → <span className="text-amber-300 font-medium">[SUPERSEDED]</span></p>
+                  <p className="text-white font-medium">Lisinopril 20mg (2025) → <span className="text-emerald-300 font-medium">[CURRENT REGIMEN]</span></p>
                 </div>
               </div>
 
-              <div className="mt-8 pt-4 border-t border-emerald-500/20 text-[12px] text-emerald-300">
+              <div className="mt-8 pt-4 border-t border-emerald-500/20 text-[12px] text-emerald-300/90 leading-relaxed">
                 Result: Maintains the true current state across years of visits and separate providers.
               </div>
             </div>
@@ -154,10 +154,10 @@ export default function LandingPage() {
       <section className="py-20 border-t border-white/[0.08]">
         <div className="mx-auto max-w-5xl px-6">
           <div className="max-w-2xl mb-12">
-            <h2 className="text-[28px] sm:text-[38px] font-semibold tracking-[-0.03em] text-white mb-4">
+            <h2 className="text-[26px] sm:text-[34px] font-semibold tracking-[-0.025em] text-white mb-3">
               Never trust an AI summary without a page number.
             </h2>
-            <p className="text-[16px] text-white/65 leading-relaxed">
+            <p className="text-[15px] sm:text-[16px] text-white/65 leading-[1.65] max-w-[65ch]">
               In medicine, a hallucinated dosage or misattributed date carries real danger. CareNote refuses black-box generation. Every asserted fact carries a direct audit anchor.
             </p>
           </div>
@@ -166,21 +166,21 @@ export default function LandingPage() {
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               <div className="space-y-2">
                 <div className="text-[14px] font-semibold text-white">1. Fact Extraction</div>
-                <p className="text-[13px] text-white/60 leading-relaxed">
+                <p className="text-[13px] text-white/60 leading-[1.6]">
                   Gemini reads the PDF visually — extracting values, units, reference intervals, and physical page numbers directly from the document.
                 </p>
               </div>
 
               <div className="space-y-2">
                 <div className="text-[14px] font-semibold text-white">2. Graph Synthesis</div>
-                <p className="text-[13px] text-white/60 leading-relaxed">
+                <p className="text-[13px] text-white/60 leading-[1.6]">
                   Facts accumulate into the patient graph, connecting changes across visits and detecting discrepancies between different specialists.
                 </p>
               </div>
 
               <div className="space-y-2">
                 <div className="text-[14px] font-semibold text-white">3. Direct Audit Trail</div>
-                <p className="text-[13px] text-white/60 leading-relaxed">
+                <p className="text-[13px] text-white/60 leading-[1.6]">
                   Every claim in the final briefing links directly to its source PDF. Click the citation to inspect the original doctor&apos;s note and page.
                 </p>
               </div>
@@ -194,22 +194,22 @@ export default function LandingPage() {
         <div className="mx-auto max-w-5xl px-6">
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 items-center">
             <div className="lg:col-span-5">
-              <h2 className="text-[26px] sm:text-[36px] font-semibold tracking-[-0.03em] text-white mb-4">
+              <h2 className="text-[26px] sm:text-[34px] font-semibold tracking-[-0.025em] text-white mb-3">
                 Ask your records anything.
               </h2>
-              <p className="text-[15px] text-white/65 leading-relaxed mb-6">
+              <p className="text-[15px] sm:text-[16px] text-white/65 leading-[1.65] mb-6 max-w-[50ch]">
                 Query across years of accumulated documents in plain language. Receive grounded answers with direct citations back to the source records.
               </p>
 
-              <div className="space-y-2 font-mono text-[11px] text-white/70">
-                <div className="p-3 rounded bg-white/[0.02] border border-white/[0.06]">
-                  → &quot;What medications were changed after her hospital discharge?&quot;
+              <div className="space-y-2.5 text-[13px] text-white/80">
+                <div className="p-3 rounded-lg bg-white/[0.02] border border-white/[0.06] hover:border-white/20 transition-colors">
+                  &ldquo;What medications were changed after her hospital discharge?&rdquo;
                 </div>
-                <div className="p-3 rounded bg-white/[0.02] border border-white/[0.06]">
-                  → &quot;How has her kidney function trended over the past 12 months?&quot;
+                <div className="p-3 rounded-lg bg-white/[0.02] border border-white/[0.06] hover:border-white/20 transition-colors">
+                  &ldquo;How has her kidney function trended over the past 12 months?&rdquo;
                 </div>
-                <div className="p-3 rounded bg-white/[0.02] border border-white/[0.06]">
-                  → &quot;Did cardiology and nephrology order any conflicting drugs?&quot;
+                <div className="p-3 rounded-lg bg-white/[0.02] border border-white/[0.06] hover:border-white/20 transition-colors">
+                  &ldquo;Did cardiology and nephrology order any conflicting drugs?&rdquo;
                 </div>
               </div>
             </div>
