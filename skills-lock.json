@@ -13,6 +13,12 @@
       "skillPath": "skills/expose-localhost/SKILL.md",
       "computedHash": "23bb658284f387e0d9d52fd4cca61a68ce7a571d96f00c893c6d3509e56c015a"
     },
+    "impeccable": {
+      "source": "pbakaus/impeccable",
+      "sourceType": "github",
+      "skillPath": ".agents/skills/impeccable/SKILL.md",
+      "computedHash": "ec48c58ca973b42c826d5d3be9069b7023d2361ebf7f89ee56b0bae7eb92390a"
+    },
     "neon": {
       "source": "neondatabase/agent-skills",
       "sourceType": "github",

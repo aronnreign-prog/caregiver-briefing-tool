@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import type { Metadata } from 'next'
+import { HeroClinicalProof } from '@/components/clinical'
 
 export const metadata: Metadata = {
   title: 'CareNote — Graph Memory & Verifiable PaperTrail for Medical Records',
@@ -85,96 +86,8 @@ export default function LandingPage() {
             </div>
           </div>
 
-          {/* ━━━ Product Canvas: The Briefing + PaperTrail Inspector ━━━ */}
-          <div className="border border-white/[0.1] rounded-xl bg-[#0F141C] shadow-2xl overflow-hidden">
-            <div className="border-b border-white/[0.08] bg-[#131924] px-4 py-3 flex items-center justify-between text-[11px] text-white/50">
-              <div className="flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full bg-emerald-400" />
-                <span className="text-white/80 font-medium">Patient Dossier · Margaret Thompson</span>
-              </div>
-              <span>Split-Screen Verification Mode</span>
-            </div>
-
-            <div className="grid grid-cols-1 lg:grid-cols-12 divide-y lg:divide-y-0 lg:divide-x divide-white/[0.08]">
-              {/* Left: The Briefing Output */}
-              <div className="lg:col-span-7 p-6 space-y-6">
-                <div>
-                  <h3 className="text-[14px] font-semibold text-white mb-2">
-                    Active Regimen &amp; Physiological Trajectory
-                  </h3>
-                  <p className="text-[13px] text-white/80 leading-relaxed mb-4">
-                    Serial metabolic monitoring across four separate clinic encounters reveals a steady decline in kidney filtration (eGFR: 65 → 58 → 51 → 47 mL/min).{' '}
-                    <span className="inline-flex items-center font-mono text-[10px] bg-white/10 text-white/90 px-1.5 py-0.5 rounded border border-white/15 cursor-pointer hover:bg-white/20">
-                      ↗ Quest_Labs.pdf #p.1
-                    </span>
-                  </p>
-
-                  <div className="p-4 rounded-lg bg-amber-500/10 border border-amber-500/20 text-[12px] space-y-2">
-                    <div className="text-amber-300 font-semibold flex items-center gap-2">
-                      <span>⚡ Cross-Provider Discrepancy</span>
-                    </div>
-                    <p className="text-white/80 leading-relaxed">
-                      Metformin 1000mg BID was maintained from the March hospital discharge, but current eGFR is now documented at 47 mL/min. Clinical protocol requires dosage reduction at eGFR &lt;45 to prevent lactic acidosis.{' '}
-                      <span className="inline-flex items-center font-mono text-[10px] bg-amber-500/20 text-amber-200 px-1.5 py-0.5 rounded border border-amber-500/30 cursor-pointer">
-                        ↗ StJude_Discharge.pdf #p.3
-                      </span>
-                    </p>
-                  </div>
-                </div>
-
-                <div>
-                  <h4 className="text-[11px] font-semibold text-white/50 uppercase tracking-wider mb-2">
-                    Reconciled Medication Schedule
-                  </h4>
-                  <div className="space-y-2 font-mono text-[11px]">
-                    <div className="flex items-center justify-between p-2.5 rounded bg-white/[0.02] border border-white/[0.06]">
-                      <span className="text-white/90">Lisinopril 20mg Daily</span>
-                      <span className="text-emerald-300 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
-                        Discharge_Summary.pdf #p.2
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between p-2.5 rounded bg-white/[0.02] border border-white/[0.06]">
-                      <span className="text-white/90">Metformin 1000mg BID</span>
-                      <span className="text-amber-300 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
-                        Endo_Clinic.pdf #p.2
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Right: The PaperTrail Inspector */}
-              <div className="lg:col-span-5 p-6 bg-black/20 flex flex-col justify-between space-y-4">
-                <div>
-                  <div className="flex items-center justify-between pb-3 border-b border-white/[0.08] mb-3 text-[11px] text-white/50">
-                    <span className="font-semibold text-white/70">The PaperTrail Anchor</span>
-                    <span className="font-mono text-emerald-400">Page 3 of 4</span>
-                  </div>
-
-                  <div className="border border-white/[0.08] rounded bg-white/[0.02] p-4 text-[11px] leading-relaxed space-y-3 font-mono text-white/60">
-                    <div className="border-b border-white/[0.06] pb-2 text-white/40">
-                      DOCUMENT: StJude_Discharge.pdf
-                      <br />
-                      PROVIDER: Dept. of General Internal Medicine
-                    </div>
-                    <p className="text-white/40">
-                      ...DISCHARGE MEDICATIONS: Continue home regimen with modifications as noted below...
-                    </p>
-                    <div className="bg-emerald-500/15 border border-emerald-500/30 p-2.5 rounded text-white font-medium">
-                      &quot;Metformin 1000 mg tablet by mouth twice daily with meals. Follow up with primary endocrinologist in 3 months.&quot;
-                    </div>
-                    <p className="text-white/40">
-                      Signed: Dr. R. Patel, MD (Staff Physician)
-                    </p>
-                  </div>
-                </div>
-
-                <div className="p-3 bg-white/[0.02] border border-white/[0.08] rounded text-[11px] text-white/60">
-                  <span className="text-white font-semibold">Zero Blind Trust:</span> Clicking any citation in the briefing immediately displays the physical document, page, and exact quoted excerpt.
-                </div>
-              </div>
-            </div>
-          </div>
+          {/* ━━━ Product Proof: Grounded Clinical Briefing + PaperTrail Inspector ━━━ */}
+          <HeroClinicalProof />
         </div>
       </section>
 
