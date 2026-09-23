@@ -12,10 +12,14 @@ export async function POST(request: Request): Promise<NextResponse> {
       body,
       request,
       onBeforeGenerateToken: async () => {
+        const caregiver = await getCaregiver()
+        if (!caregiver) {
+          throw new Error('Unauthorized: You must be logged in to upload documents.')
+        }
         return {
           allowedContentTypes: ['application/pdf'],
           maximumSizeInBytes: 10 * 1024 * 1024,
-          tokenPayload: JSON.stringify({ authorized: true }),
+          tokenPayload: JSON.stringify({ caregiverId: caregiver.id }),
         }
       },
       onUploadCompleted: async () => {

@@ -23,6 +23,20 @@ export async function createDocumentRecord(patientId: string, filename: string, 
     .limit(1)
   if (!patient) return { error: 'Patient not found or unauthorized' }
   
+  // Strictly validate blobUrl origin to prevent SSRF
+  try {
+    const parsed = new URL(blobUrl)
+    const isVercelBlob =
+      parsed.protocol === 'https:' &&
+      (parsed.hostname.endsWith('.blob.vercel-storage.com') ||
+        parsed.hostname === 'blob.vercel-storage.com')
+    if (!isVercelBlob) {
+      return { error: 'Invalid document storage URL origin.' }
+    }
+  } catch {
+    return { error: 'Malformed document storage URL.' }
+  }
+
   try {
     const [inserted] = await db.insert(documents).values({
       patient_id: patientId,
@@ -50,6 +64,16 @@ export async function ingestDocument(documentId: string): Promise<{ error?: stri
     .limit(1)
   if (!doc) return { error: 'Document not found or unauthorized' }
   if (!doc.blob_url) return { error: 'Document has no blob URL' }
+
+  // Validate blob URL protocol and hostname before server fetch
+  try {
+    const parsed = new URL(doc.blob_url)
+    if (parsed.protocol !== 'https:' || !parsed.hostname.endsWith('.blob.vercel-storage.com')) {
+      return { error: 'Untrusted document storage URL.' }
+    }
+  } catch {
+    return { error: 'Malformed document storage URL.' }
+  }
 
   await db
     .update(documents)

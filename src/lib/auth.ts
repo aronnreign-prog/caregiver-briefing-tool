@@ -4,6 +4,11 @@ import { admin } from 'better-auth/plugins'
 import { db } from '@/lib/db'
 import * as schema from '@/lib/db/schema'
 
+const authSecret = process.env.BETTER_AUTH_SECRET
+if (!authSecret && process.env.NODE_ENV === 'production') {
+  throw new Error('FATAL: BETTER_AUTH_SECRET environment variable is required in production.')
+}
+
 export const auth = betterAuth({
   baseURL:
     process.env.BETTER_AUTH_URL ||
@@ -26,7 +31,7 @@ export const auth = betterAuth({
       adminRoles: ['admin'],
     }),
   ],
-  secret: process.env.BETTER_AUTH_SECRET || 'fallback-secret',
+  secret: authSecret || 'dev-only-secret-for-local-testing-only',
 })
 
 export type Session = typeof auth.$Infer.Session

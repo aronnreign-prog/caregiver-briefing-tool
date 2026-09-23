@@ -32,8 +32,25 @@ export async function proxy(request: NextRequest) {
     return NextResponse.redirect(url)
   }
 
-  // Protect /dashboard and /admin from unauthenticated users
-  if (!session?.user && (isDashboardPage || isAdminPage)) {
+  // Protect /admin: require authenticated session with admin privileges
+  if (isAdminPage) {
+    if (!session?.user) {
+      const url = request.nextUrl.clone()
+      url.pathname = '/login'
+      return NextResponse.redirect(url)
+    }
+    const user = session.user as { role?: string; email?: string }
+    const adminEmail = process.env.ADMIN_EMAIL?.toLowerCase()
+    const isUserAdmin = user.role === 'admin' || (adminEmail && user.email?.toLowerCase() === adminEmail)
+    if (!isUserAdmin) {
+      const url = request.nextUrl.clone()
+      url.pathname = '/dashboard'
+      return NextResponse.redirect(url)
+    }
+  }
+
+  // Protect /dashboard from unauthenticated users
+  if (!session?.user && isDashboardPage) {
     const url = request.nextUrl.clone()
     url.pathname = '/login'
     return NextResponse.redirect(url)
