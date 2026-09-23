@@ -17,6 +17,19 @@ function initials(name: string) {
   return name.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase()
 }
 
+function Logo({ size = 18 }: { size?: number }) {
+  return (
+    <div
+      className="bg-white text-black rounded flex items-center justify-center shrink-0 font-bold"
+      style={{ width: size, height: size }}
+    >
+      <svg width={size * 0.55} height={size * 0.55} viewBox="0 0 11 11" fill="none">
+        <path d="M1.5 2.5h8M1.5 5.5h5.5M1.5 8.5h3.5" stroke="#0A0E14" strokeWidth="1.6" strokeLinecap="round" />
+      </svg>
+    </div>
+  )
+}
+
 export default async function DashboardPage() {
   const session = await getSession()
   const user = session?.user
@@ -73,27 +86,25 @@ export default async function DashboardPage() {
   })
 
   return (
-    <div className="min-h-[100dvh] md:h-screen bg-background flex flex-col md:flex-row overflow-x-hidden md:overflow-hidden">
+    <div className="min-h-[100dvh] md:h-screen bg-[#0A0E14] text-[#EDEDED] flex flex-col md:flex-row overflow-x-hidden md:overflow-hidden">
 
       {/* Desktop Sidebar (hidden on mobile) */}
-      <aside className="hidden md:flex w-64 shrink-0 border-r border-border bg-surface flex-col">
+      <aside className="hidden md:flex w-64 shrink-0 border-r border-[#1F2937] bg-[#0D1117] flex-col">
 
-        <div className="px-5 py-4 border-b border-border flex items-center gap-2.5">
-          <div className="w-5 h-5 bg-accent rounded-sm flex items-center justify-center shrink-0">
-            <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
-              <path d="M1.5 2.5h8M1.5 5.5h5.5M1.5 8.5h3.5" stroke="#0A0E14" strokeWidth="1.4" strokeLinecap="round"/>
-            </svg>
-          </div>
-          <span className="font-mono text-[11px] font-bold tracking-widest text-foreground uppercase">CareNote</span>
-          <span className="ml-auto font-mono text-[9px] text-muted-foreground border border-border px-1.5 py-0.5 rounded">v0.1</span>
+        <div className="px-5 py-4 border-b border-[#1F2937] flex items-center justify-between">
+          <Link href="/" className="flex items-center gap-2.5 hover:opacity-90 transition-opacity">
+            <Logo size={18} />
+            <span className="text-[13px] font-semibold tracking-tight text-white">CareNote</span>
+          </Link>
+          <span className="font-mono text-[9px] text-white/40 border border-white/10 px-1.5 py-0.5 rounded">v0.1</span>
         </div>
 
         {isUserAdmin && (
-          <div className="px-4 py-2 border-b border-border bg-accent/5 flex items-center justify-between">
-            <span className="font-mono text-[9px] text-accent font-semibold tracking-wider">ADMIN</span>
+          <div className="px-4 py-2 border-b border-[#1F2937] bg-white/[0.02] flex items-center justify-between">
+            <span className="font-mono text-[9px] text-emerald-400 font-semibold tracking-wider">ADMIN</span>
             <Link
               href="/admin"
-              className="font-mono text-[10px] text-muted-foreground hover:text-foreground underline decoration-muted-foreground/40 underline-offset-2"
+              className="font-mono text-[10px] text-white/50 hover:text-white underline decoration-white/20 underline-offset-2 transition-colors"
             >
               Demo Accounts →
             </Link>
@@ -101,20 +112,20 @@ export default async function DashboardPage() {
         )}
 
         <div className="flex-1 overflow-y-auto px-2 py-4">
-          <p className="font-mono text-[9px] tracking-widest text-muted-foreground uppercase px-3 mb-2">Patients</p>
+          <p className="font-mono text-[9px] tracking-widest text-white/40 uppercase px-3 mb-2">Patients</p>
           {patients.map((p) => (
-            <div key={p.id} className="group relative flex items-center rounded-md hover:bg-surface-raised transition-colors">
+            <div key={p.id} className="group relative flex items-center rounded-lg hover:bg-white/[0.04] transition-colors">
               <Link href={`/dashboard/patients/${p.id}`}
-                className="flex items-center gap-3 px-3 py-3 flex-1 min-w-0">
-                <div className="w-8 h-8 rounded-md bg-accent-dim border border-accent/25 flex items-center justify-center shrink-0 font-mono text-[11px] font-bold text-accent">
+                className="flex items-center gap-3 px-3 py-2.5 flex-1 min-w-0">
+                <div className="w-8 h-8 rounded-md bg-white/[0.06] border border-white/10 flex items-center justify-center shrink-0 font-mono text-[11px] font-bold text-white">
                   {initials(p.name)}
                 </div>
                 <div className="min-w-0 flex-1">
-                  <p className="text-[13px] font-medium text-foreground truncate">{p.name}</p>
-                  <p className="font-mono text-[10px] text-muted-foreground">{p.relationship} · {calcAge(p.date_of_birth)}y</p>
+                  <p className="text-[13px] font-medium text-white truncate">{p.name}</p>
+                  <p className="font-mono text-[10px] text-white/50">{p.relationship} · {calcAge(p.date_of_birth)}y</p>
                 </div>
                 {(p.flagCount ?? 0) > 0 && (
-                  <div className="w-1.5 h-1.5 rounded-full bg-alert shrink-0" />
+                  <div className="w-1.5 h-1.5 rounded-full bg-red-400 shrink-0" />
                 )}
               </Link>
               <div className="pr-2">
@@ -123,11 +134,11 @@ export default async function DashboardPage() {
             </div>
           ))}
           {patients.length === 0 && (
-            <p className="px-3 py-4 text-xs text-muted-foreground">No patients yet.</p>
+            <p className="px-3 py-4 text-xs text-white/40">No patients yet.</p>
           )}
         </div>
 
-        <div className="border-t border-border p-4">
+        <div className="border-t border-[#1F2937] p-4 bg-[#0A0E14]/40">
           <AddPatientForm />
         </div>
       </aside>
@@ -135,15 +146,13 @@ export default async function DashboardPage() {
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
 
-        <header className="shrink-0 border-b border-border bg-surface/80 backdrop-blur flex items-center justify-between px-4 sm:px-6 py-3 sticky top-0 z-20">
+        <header className="shrink-0 border-b border-[#1F2937] bg-[#0A0E14]/80 backdrop-blur-xl flex items-center justify-between px-4 sm:px-6 py-3 sticky top-0 z-20">
           <div className="flex items-center gap-3">
             <div className="md:hidden flex items-center gap-2">
-              <div className="w-5 h-5 bg-accent rounded-sm flex items-center justify-center shrink-0">
-                <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
-                  <path d="M1.5 2.5h8M1.5 5.5h5.5M1.5 8.5h3.5" stroke="#0A0E14" strokeWidth="1.4" strokeLinecap="round"/>
-                </svg>
-              </div>
-              <span className="font-mono text-[11px] font-bold tracking-widest text-foreground uppercase">CareNote</span>
+              <Link href="/" className="flex items-center gap-2">
+                <Logo size={18} />
+                <span className="text-[13px] font-semibold tracking-tight text-white">CareNote</span>
+              </Link>
             </div>
             <div>
               <h1 className="text-[12px] sm:text-[13px] font-semibold text-foreground">
@@ -169,58 +178,58 @@ export default async function DashboardPage() {
 
         <main className="flex-1 overflow-y-auto px-4 sm:px-6 py-5 sm:py-6">
           {/* Patient cards */}
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 mb-8">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3.5 mb-8">
             {patients.map((p) => (
               <div key={p.id} className="group relative block">
                 <Link href={`/dashboard/patients/${p.id}`} className="block h-full">
-                  <article className="border border-border bg-surface rounded-lg overflow-hidden hover:border-accent/40 hover:bg-surface-raised transition-all h-full flex flex-col">
-                    {(p.flagCount ?? 0) > 0 && <div className="h-0.5 bg-alert w-full" />}
+                  <article className="border border-[#1F2937] bg-[#0D1117] rounded-xl overflow-hidden hover:border-white/20 hover:bg-[#0F141C] transition-all h-full flex flex-col shadow-sm">
+                    {(p.flagCount ?? 0) > 0 && <div className="h-0.5 bg-red-500 w-full" />}
                     <div className="p-5 flex-1">
                       <div className="flex items-start gap-3">
-                        <div className="w-10 h-10 rounded-lg bg-accent-dim border border-accent/20 flex items-center justify-center shrink-0 font-mono text-[13px] font-bold text-accent">
+                        <div className="w-10 h-10 rounded-lg bg-white/[0.06] border border-white/10 flex items-center justify-center shrink-0 font-mono text-[13px] font-bold text-white">
                           {initials(p.name)}
                         </div>
                         <div className="flex-1 min-w-0">
-                          <h2 className="text-[13px] font-semibold text-foreground truncate">{p.name}</h2>
-                          <p className="font-mono text-[10px] text-muted-foreground mt-0.5">
+                          <h2 className="text-[13px] font-semibold text-white truncate">{p.name}</h2>
+                          <p className="font-mono text-[10px] text-white/50 mt-0.5">
                             {p.relationship} · DOB {p.date_of_birth} · Age {calcAge(p.date_of_birth)}
                           </p>
                         </div>
                       </div>
 
-                      <div className="mt-4 flex items-center gap-4 flex-wrap">
+                      <div className="mt-4 flex items-center gap-3.5 flex-wrap">
                         <div className="flex items-center gap-1.5">
-                          <svg width="11" height="11" viewBox="0 0 11 11" fill="none" className="text-muted-foreground">
+                          <svg width="11" height="11" viewBox="0 0 11 11" fill="none" className="text-white/40">
                             <rect x="1" y="1.5" width="9" height="8" rx="1" stroke="currentColor" strokeWidth="1.1"/>
                             <path d="M3.5 4.5h4M3.5 6.5h2.5" stroke="currentColor" strokeWidth="1" strokeLinecap="round"/>
                           </svg>
-                          <span className="font-mono text-[10px] text-muted-foreground">{p.docCount ?? '0'} docs</span>
+                          <span className="font-mono text-[10px] text-white/60">{p.docCount ?? '0'} docs</span>
                         </div>
                         {(p.flagCount ?? 0) > 0 ? (
-                          <div className="flex items-center gap-1.5">
-                            <div className="w-1.5 h-1.5 rounded-full bg-alert" />
-                            <span className="font-mono text-[10px] text-alert">{p.flagCount} concern{(p.flagCount ?? 0) !== 1 ? 's' : ''}</span>
+                          <div className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-red-500/10 border border-red-500/20">
+                            <div className="w-1.5 h-1.5 rounded-full bg-red-400" />
+                            <span className="font-mono text-[10px] text-red-300">{p.flagCount} concern{(p.flagCount ?? 0) !== 1 ? 's' : ''}</span>
                           </div>
                         ) : (
                           <div className="flex items-center gap-1.5">
-                            <div className="w-1.5 h-1.5 rounded-full bg-success" />
-                            <span className="font-mono text-[10px] text-muted-foreground">No flags</span>
+                            <div className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                            <span className="font-mono text-[10px] text-white/40">0 flags</span>
                           </div>
                         )}
                         {p.briefingStatus && (
-                          <span className={`ml-auto font-mono text-[9px] px-1.5 py-0.5 rounded border ${
+                          <span className={`ml-auto font-mono text-[9px] px-2 py-0.5 rounded border ${
                             p.briefingStatus === 'complete'
-                              ? 'text-success border-success/30 bg-success-dim'
-                              : 'text-muted-foreground border-border'
+                              ? 'text-emerald-400 border-emerald-500/30 bg-emerald-500/10 font-medium'
+                              : 'text-white/40 border-white/10 bg-white/[0.02]'
                           }`}>
                             {p.briefingStatus === 'complete' ? 'BRIEFING READY' : 'NO BRIEFING'}
                           </span>
                         )}
                       </div>
                     </div>
-                    <div className="border-t border-border px-5 py-2.5 flex items-center justify-between">
-                      <span className="font-mono text-[10px] text-muted-foreground">Open record</span>
-                      <svg width="12" height="12" viewBox="0 0 12 12" fill="none" className="text-muted-foreground group-hover:text-accent group-hover:translate-x-0.5 transition-all">
+                    <div className="border-t border-[#1F2937] px-5 py-2.5 flex items-center justify-between bg-[#0A0E14]/30">
+                      <span className="font-mono text-[10px] text-white/50 group-hover:text-white transition-colors">Open dossier</span>
+                      <svg width="12" height="12" viewBox="0 0 12 12" fill="none" className="text-white/40 group-hover:text-white group-hover:translate-x-0.5 transition-all">
                         <path d="M2.5 6h7M6 2.5l3.5 3.5L6 9.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
                       </svg>
                     </div>
@@ -234,34 +243,39 @@ export default async function DashboardPage() {
             ))}
 
             {patients.length === 0 && (
-              <div className="col-span-full border border-dashed border-border rounded-lg p-8 sm:p-12 text-center">
-                <p className="font-mono text-[9px] tracking-widest text-muted-foreground uppercase mb-2">No patients yet</p>
-                <p className="text-[12px] text-muted-foreground">Add your first patient using the form below or on the left.</p>
+              <div className="col-span-full border border-dashed border-[#1F2937] rounded-xl p-8 sm:p-12 text-center bg-[#0D1117]/30">
+                <p className="font-mono text-[9px] tracking-widest text-white/40 uppercase mb-2">No patients yet</p>
+                <p className="text-[12px] text-white/50">Add your first patient profile to begin indexing clinical records.</p>
               </div>
             )}
           </div>
 
           {/* Mobile Add Patient Form */}
-          <div className="md:hidden border border-border rounded-lg bg-surface p-4 mb-8">
+          <div className="md:hidden border border-[#1F2937] rounded-xl bg-[#0D1117] p-5 mb-8 shadow-sm">
             <AddPatientForm />
           </div>
 
-          {/* How it works */}
-          <div className="border-t border-border pt-6">
-            <p className="font-mono text-[9px] tracking-widest text-muted-foreground uppercase mb-4">How it works</p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2 sm:gap-px bg-border rounded-lg overflow-hidden border border-border">
-              {[
-                { n: '01', title: 'Upload', body: 'Lab reports, discharge summaries, prescriptions — any PDF from any provider.' },
-                { n: '02', title: 'Extract', body: 'AI reads every page. Every fact is dated and tagged to its exact source quote.' },
-                { n: '03', title: 'Analyse', body: 'Trends detected across months. Contraindications & drug interactions flagged.' },
-                { n: '04', title: 'Briefing', body: 'One document. Every claim cited to source, page number, and date.' },
-              ].map(s => (
-                <div key={s.n} className="bg-surface px-4 sm:px-5 py-3.5 sm:py-4">
-                  <p className="font-mono text-[10px] text-accent mb-2">{s.n}</p>
-                  <p className="text-[12px] font-semibold text-foreground mb-1">{s.title}</p>
-                  <p className="text-[11px] text-muted-foreground leading-relaxed">{s.body}</p>
-                </div>
-              ))}
+          {/* Clinical Architecture Assurance */}
+          <div className="border-t border-[#1F2937] pt-6">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="border border-[#1F2937] rounded-xl bg-[#0D1117] p-4 space-y-1.5">
+                <p className="text-[12px] font-semibold text-white">Temporal Graph Memory</p>
+                <p className="text-[11px] text-white/50 leading-relaxed">
+                  Clinical entities are connected across encounters to maintain true active regimens and prevent vector chunk amnesia.
+                </p>
+              </div>
+              <div className="border border-[#1F2937] rounded-xl bg-[#0D1117] p-4 space-y-1.5">
+                <p className="text-[12px] font-semibold text-white">PaperTrail Provenance</p>
+                <p className="text-[11px] text-white/50 leading-relaxed">
+                  Every extracted lab and synthesized claim links to an exact quote and page number in the original PDF.
+                </p>
+              </div>
+              <div className="border border-[#1F2937] rounded-xl bg-[#0D1117] p-4 space-y-1.5">
+                <p className="text-[12px] font-semibold text-white">Contraindication Auditing</p>
+                <p className="text-[11px] text-white/50 leading-relaxed">
+                  Automated checks cross-reference new prescriptions against renal function and multi-provider regimens.
+                </p>
+              </div>
             </div>
           </div>
 

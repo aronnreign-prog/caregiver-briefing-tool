@@ -58,19 +58,19 @@
 
 /* Clinical dark workstation — single theme, always dark */
 :root {
-  --background:         oklch(0.10 0.012 250);
-  --surface:            oklch(0.14 0.010 250);
-  --surface-raised:     oklch(0.18 0.010 250);
-  --border:             oklch(0.24 0.008 250);
-  --border-subtle:      oklch(0.18 0.008 250);
-  --foreground:         oklch(0.93 0.005 250);
-  --muted:              oklch(0.16 0.008 250);
-  --muted-foreground:   oklch(0.55 0.008 250);
-  --input:              oklch(0.18 0.010 250);
+  --background:         #0A0E14;
+  --surface:            #0D1117;
+  --surface-raised:     #0F141C;
+  --border:             #1F2937;
+  --border-subtle:      rgba(255, 255, 255, 0.08);
+  --foreground:         #EDEDED;
+  --muted:              #161B22;
+  --muted-foreground:   #8B949E;
+  --input:              #0A0E14;
 
-  /* Clinical blue — citations, progress, primary actions */
-  --primary:            oklch(0.65 0.18 250);
-  --primary-foreground: oklch(0.10 0.012 250);
+  /* Primary white action button / high-contrast CTA */
+  --primary:            #FFFFFF;
+  --primary-foreground: #0A0E14;
   --accent:             oklch(0.65 0.18 250);
   --accent-dim:         oklch(0.18 0.06 250);
   --accent-foreground:  oklch(0.93 0.010 250);
@@ -83,29 +83,29 @@
   /* Caution amber */
   --warning:            oklch(0.75 0.18 70);
   --warning-dim:        oklch(0.17 0.06 70);
-  --warning-foreground: oklch(0.93 0.010 70);
+  --warning-foreground:  oklch(0.93 0.010 70);
 
   /* Ready / extracted green */
   --success:            oklch(0.68 0.15 155);
   --success-dim:        oklch(0.15 0.05 155);
-  --success-foreground: oklch(0.93 0.010 155);
+  --success-foreground:  oklch(0.93 0.010 155);
 
-  --radius: 0.375rem;
+  --radius: 0.5rem;
 }
 
 /* Keep shadcn dark vars in sync */
 .dark {
-  --background:         oklch(0.10 0.012 250);
-  --surface:            oklch(0.14 0.010 250);
-  --surface-raised:     oklch(0.18 0.010 250);
-  --border:             oklch(0.24 0.008 250);
-  --border-subtle:      oklch(0.18 0.008 250);
-  --foreground:         oklch(0.93 0.005 250);
-  --muted:              oklch(0.16 0.008 250);
-  --muted-foreground:   oklch(0.55 0.008 250);
-  --input:              oklch(0.18 0.010 250);
-  --primary:            oklch(0.65 0.18 250);
-  --primary-foreground: oklch(0.10 0.012 250);
+  --background:         #0A0E14;
+  --surface:            #0D1117;
+  --surface-raised:     #0F141C;
+  --border:             #1F2937;
+  --border-subtle:      rgba(255, 255, 255, 0.08);
+  --foreground:         #EDEDED;
+  --muted:              #161B22;
+  --muted-foreground:   #8B949E;
+  --input:              #0A0E14;
+  --primary:            #FFFFFF;
+  --primary-foreground: #0A0E14;
   --accent:             oklch(0.65 0.18 250);
   --accent-dim:         oklch(0.18 0.06 250);
   --accent-foreground:  oklch(0.93 0.010 250);

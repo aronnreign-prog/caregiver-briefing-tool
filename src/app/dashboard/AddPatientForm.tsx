@@ -43,10 +43,12 @@ export default function AddPatientForm() {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-2">
-      <p className="font-mono text-[9px] tracking-widest text-muted-foreground uppercase mb-3">Add patient</p>
+    <form onSubmit={handleSubmit} className="space-y-2.5">
+      <p className="font-mono text-[9px] tracking-widest text-white/40 uppercase mb-3">Add patient profile</p>
       {error && (
-        <p className="font-mono text-[10px] text-alert border border-alert/30 bg-alert-dim px-2 py-1 rounded">{error}</p>
+        <div aria-live="polite" className="font-mono text-[10px] text-red-400 border border-red-500/30 bg-red-500/10 px-2.5 py-1.5 rounded-lg">
+          {error}
+        </div>
       )}
       <input
         name="name"
@@ -54,7 +56,7 @@ export default function AddPatientForm() {
         onChange={(e) => setName(e.target.value)}
         placeholder="Full name"
         required
-        className="w-full bg-background border border-border rounded px-3 py-2 text-[16px] sm:text-[12px] text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-accent"
+        className="w-full bg-[#0A0E14] border border-[#1F2937] rounded-lg px-3 py-2 text-[16px] sm:text-[12px] text-white placeholder:text-white/30 focus:outline-none focus:border-white/40 focus:ring-1 focus:ring-white/30 transition-colors"
       />
       <input
         name="relationship"
@@ -62,7 +64,7 @@ export default function AddPatientForm() {
         onChange={(e) => setRelationship(e.target.value)}
         placeholder="Relationship (e.g. Mother, Father)"
         required
-        className="w-full bg-background border border-border rounded px-3 py-2 text-[16px] sm:text-[12px] text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-accent"
+        className="w-full bg-[#0A0E14] border border-[#1F2937] rounded-lg px-3 py-2 text-[16px] sm:text-[12px] text-white placeholder:text-white/30 focus:outline-none focus:border-white/40 focus:ring-1 focus:ring-white/30 transition-colors"
       />
       <input
         name="date_of_birth"
@@ -70,14 +72,14 @@ export default function AddPatientForm() {
         value={dob}
         onChange={(e) => setDob(e.target.value)}
         required
-        className="w-full bg-background border border-border rounded px-3 py-2 text-[16px] sm:text-[12px] text-foreground font-mono focus:outline-none focus:border-accent"
+        className="w-full bg-[#0A0E14] border border-[#1F2937] rounded-lg px-3 py-2 text-[16px] sm:text-[12px] text-white font-mono focus:outline-none focus:border-white/40 focus:ring-1 focus:ring-white/30 transition-colors"
       />
       <button
         type="submit"
         disabled={loading}
-        className="w-full bg-accent text-background font-mono text-[11px] font-semibold py-2.5 rounded hover:opacity-90 transition-opacity disabled:opacity-50 cursor-pointer touch-manipulation"
+        className="w-full min-h-[38px] bg-white text-black font-medium text-[12px] py-2 rounded-lg hover:bg-white/90 transition-all disabled:opacity-50 cursor-pointer touch-manipulation focus-visible:ring-2 focus-visible:ring-white/60 outline-none"
       >
-        {loading ? 'Adding…' : 'Add patient'}
+        {loading ? 'Adding…' : 'Add patient profile'}
       </button>
     </form>
   )

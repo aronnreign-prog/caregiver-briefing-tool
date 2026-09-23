@@ -528,7 +528,9 @@ export default function PatientDetailClient({ patient, initialDocuments, initial
           </button>
           {isDemo && <span className="font-mono text-[9px] border border-border text-muted-foreground px-2 py-0.5 rounded">DEMO RECORD</span>}
           {(isGuest || isDemo) && (
-            <Link href="/signup" className="font-mono text-[10px] bg-accent text-background px-2.5 py-1 rounded hover:opacity-90 transition-opacity font-semibold">Save record</Link>
+            <Link href="/#demo" className="font-mono text-[10px] bg-white text-black px-2.5 py-1 rounded hover:bg-white/90 transition-all font-semibold">
+              Request access
+            </Link>
           )}
         </div>
       </header>
@@ -592,12 +594,12 @@ export default function PatientDetailClient({ patient, initialDocuments, initial
                 setActiveView('briefing')
               }}
               disabled={generating || documents.length === 0 || documents.some(d => d.status === 'uploaded' || d.status === 'extracting')}
-              className="w-full bg-accent text-background font-mono text-[11px] font-semibold py-2.5 px-3 rounded hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5 cursor-pointer touch-manipulation"
+              className="w-full min-h-[40px] bg-white text-black font-mono text-[11px] font-semibold py-2.5 px-3 rounded-lg hover:bg-white/90 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5 cursor-pointer touch-manipulation focus-visible:ring-2 focus-visible:ring-white/60 outline-none shadow-sm"
             >
               {generating
-                ? 'Generating briefing...'
+                ? 'Generating briefing…'
                 : documents.some(d => d.status === 'uploaded' || d.status === 'extracting')
-                ? 'Extracting records...'
+                ? 'Extracting records…'
                 : 'Generate Specialist Briefing'}
             </button>
           </div>
@@ -639,12 +641,12 @@ export default function PatientDetailClient({ patient, initialDocuments, initial
                   setActiveView('briefing')
                 }}
                 disabled={generating || documents.length === 0 || documents.some(d => d.status === 'uploaded' || d.status === 'extracting')}
-                className="w-full bg-accent text-background font-mono text-[11px] font-semibold py-2.5 px-3 rounded hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5 cursor-pointer touch-manipulation"
+                className="w-full min-h-[40px] bg-white text-black font-mono text-[11px] font-semibold py-2.5 px-3 rounded-lg hover:bg-white/90 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5 cursor-pointer touch-manipulation focus-visible:ring-2 focus-visible:ring-white/60 outline-none shadow-sm"
               >
                 {generating
-                  ? 'Generating briefing...'
+                  ? 'Generating briefing…'
                   : documents.some(d => d.status === 'uploaded' || d.status === 'extracting')
-                  ? 'Extracting records...'
+                  ? 'Extracting records…'
                   : 'Generate Specialist Briefing'}
               </button>
             </div>

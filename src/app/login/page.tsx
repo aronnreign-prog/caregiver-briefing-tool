@@ -4,6 +4,19 @@ import { useState } from 'react'
 import Link from 'next/link'
 import { authClient } from '@/lib/auth-client'
 
+function Logo({ size = 20 }: { size?: number }) {
+  return (
+    <div
+      className="bg-white text-black rounded flex items-center justify-center shrink-0 font-bold"
+      style={{ width: size, height: size }}
+    >
+      <svg width={size * 0.55} height={size * 0.55} viewBox="0 0 11 11" fill="none">
+        <path d="M1.5 2.5h8M1.5 5.5h5.5M1.5 8.5h3.5" stroke="#0A0E14" strokeWidth="1.6" strokeLinecap="round" />
+      </svg>
+    </div>
+  )
+}
+
 export default function LoginPage() {
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
@@ -37,24 +50,20 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen bg-background flex">
+    <div className="min-h-screen bg-[#0A0E14] text-[#EDEDED] flex">
 
       {/* Left panel */}
-      <div className="hidden lg:flex w-[440px] shrink-0 flex-col bg-surface border-r border-border px-10 py-12">
-        <div className="flex items-center gap-2.5 mb-16">
-          <div className="w-5 h-5 bg-accent rounded-sm flex items-center justify-center">
-            <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
-              <path d="M1.5 2.5h8M1.5 5.5h5.5M1.5 8.5h3.5" stroke="#0A0E14" strokeWidth="1.4" strokeLinecap="round"/>
-            </svg>
-          </div>
-          <span className="font-mono text-[11px] font-bold tracking-widest text-foreground uppercase">CareNote</span>
-        </div>
+      <div className="hidden lg:flex w-[440px] shrink-0 flex-col bg-[#0D1117] border-r border-[#1F2937] px-10 py-12">
+        <Link href="/" className="flex items-center gap-2.5 mb-16 hover:opacity-90 transition-opacity">
+          <Logo size={20} />
+          <span className="text-[13px] font-semibold tracking-tight text-white">CareNote</span>
+        </Link>
 
         <div className="flex-1">
-          <h1 className="text-[28px] font-semibold text-foreground leading-tight tracking-tight mb-4">
+          <h1 className="text-[28px] font-semibold text-white leading-tight tracking-tight mb-4">
             Medical records<br />your doctor can<br />actually use.
           </h1>
-          <p className="text-[13px] text-muted-foreground leading-relaxed mb-12">
+          <p className="text-[13px] text-white/60 leading-relaxed mb-12">
             Upload your parent&apos;s documents. Get a verified briefing with every claim traced to its exact source — ready for any appointment.
           </p>
 
@@ -79,73 +88,83 @@ export default function LoginPage() {
               <div key={item.label} className="flex items-start gap-3">
                 <div className={`w-1.5 h-1.5 rounded-full ${item.color} mt-1.5 shrink-0`} />
                 <div>
-                  <p className="text-[12px] font-semibold text-foreground mb-0.5">{item.label}</p>
-                  <p className="text-[11px] text-muted-foreground leading-relaxed">{item.desc}</p>
+                  <p className="text-[12px] font-semibold text-white mb-0.5">{item.label}</p>
+                  <p className="text-[11px] text-white/50 leading-relaxed">{item.desc}</p>
                 </div>
               </div>
             ))}
           </div>
         </div>
 
-        <div className="border-t border-border pt-6">
-          <p className="font-mono text-[9px] text-muted-foreground tracking-widest">v0.1 · Private beta</p>
+        <div className="border-t border-[#1F2937] pt-6 flex items-center justify-between">
+          <span className="font-mono text-[10px] text-white/40 tracking-wider">v0.1 · Curated Access</span>
+          <Link href="/" className="font-mono text-[10px] text-white/50 hover:text-white transition-colors">
+            ← Product Overview
+          </Link>
         </div>
       </div>
 
       {/* Right panel — form */}
-      <div className="flex-1 flex items-center justify-center px-6">
+      <div className="flex-1 flex flex-col justify-center items-center px-6 py-12">
         <div className="w-full max-w-sm">
 
           {/* Mobile brand */}
-          <div className="flex items-center gap-2 mb-8 lg:hidden">
-            <div className="w-5 h-5 bg-accent rounded-sm flex items-center justify-center">
-              <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
-                <path d="M1.5 2.5h8M1.5 5.5h5.5M1.5 8.5h3.5" stroke="#0A0E14" strokeWidth="1.4" strokeLinecap="round"/>
-              </svg>
-            </div>
-            <span className="font-mono text-[11px] font-bold tracking-widest text-foreground uppercase">CareNote</span>
-          </div>
+          <Link href="/" className="flex items-center gap-2 mb-8 lg:hidden hover:opacity-90 transition-opacity">
+            <Logo size={18} />
+            <span className="text-[13px] font-semibold tracking-tight text-white">CareNote</span>
+          </Link>
 
-          <h2 className="text-[22px] font-semibold text-foreground mb-1">Sign in</h2>
-          <p className="text-[12px] text-muted-foreground mb-8">Access your caregiving dashboard.</p>
+          <div className="bg-[#0D1117] border border-[#1F2937] rounded-xl p-7 shadow-2xl">
+            <h2 className="text-[20px] font-semibold text-white mb-1 tracking-tight">Sign in</h2>
+            <p className="text-[12px] text-white/50 mb-6">Access your clinical caregiving workspace.</p>
 
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
-              <label className="font-mono text-[9px] tracking-widest text-muted-foreground uppercase block mb-1.5">Email</label>
-              <input
-                name="email" type="email" required autoComplete="email"
-                placeholder="you@example.com"
-                className="w-full bg-surface border border-border rounded-md px-4 py-3 text-[13px] text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-accent transition-colors"
-              />
-            </div>
-            <div>
-              <label className="font-mono text-[9px] tracking-widest text-muted-foreground uppercase block mb-1.5">Password</label>
-              <input
-                name="password" type="password" required autoComplete="current-password"
-                placeholder="••••••••"
-                className="w-full bg-surface border border-border rounded-md px-4 py-3 text-[13px] text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-accent transition-colors"
-              />
-            </div>
-
-            {error && (
-              <div className="border border-alert/30 bg-alert-dim rounded-md px-4 py-3">
-                <p className="text-[12px] text-alert">{error}</p>
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div>
+                <label className="text-[11px] font-medium text-white/70 block mb-1.5">Email address</label>
+                <input
+                  name="email"
+                  type="email"
+                  required
+                  autoComplete="email"
+                  spellCheck={false}
+                  inputMode="email"
+                  placeholder="you@example.com"
+                  className="w-full min-h-[42px] bg-[#0A0E14] border border-[#1F2937] rounded-lg px-3.5 py-2 text-[13px] text-white placeholder:text-white/30 focus:outline-none focus:border-white/40 focus:ring-1 focus:ring-white/30 transition-colors"
+                />
               </div>
-            )}
+              <div>
+                <label className="text-[11px] font-medium text-white/70 block mb-1.5">Password</label>
+                <input
+                  name="password"
+                  type="password"
+                  required
+                  autoComplete="current-password"
+                  placeholder="••••••••"
+                  className="w-full min-h-[42px] bg-[#0A0E14] border border-[#1F2937] rounded-lg px-3.5 py-2 text-[13px] text-white placeholder:text-white/30 focus:outline-none focus:border-white/40 focus:ring-1 focus:ring-white/30 transition-colors"
+                />
+              </div>
 
-            <button
-              type="submit" disabled={loading}
-              className="w-full bg-accent text-background font-mono text-[12px] font-bold py-3 rounded-md hover:opacity-90 transition-opacity disabled:opacity-60 mt-2 cursor-pointer"
-            >
-              {loading ? 'Signing in…' : 'Sign in'}
-            </button>
-          </form>
+              {error && (
+                <div aria-live="polite" className="border border-red-500/30 bg-red-500/10 rounded-lg px-3.5 py-2.5">
+                  <p className="text-[12px] text-red-300">{error}</p>
+                </div>
+              )}
 
-          <div className="mt-6 space-y-2 text-center">
-            <p className="text-[12px] text-muted-foreground">
-              Demo access only.{' '}
-              <Link href="/#demo" className="text-accent hover:underline">Request access</Link>
-            </p>
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full min-h-[44px] bg-white text-black font-medium text-[13px] py-2.5 rounded-lg hover:bg-white/90 focus-visible:ring-2 focus-visible:ring-white/60 outline-none transition-all disabled:opacity-50 cursor-pointer shadow-sm mt-2"
+              >
+                {loading ? 'Signing in…' : 'Sign in'}
+              </button>
+            </form>
+
+            <div className="mt-6 pt-5 border-t border-[#1F2937] text-center">
+              <p className="text-[12px] text-white/50">
+                Demo access only.{' '}
+                <Link href="/#demo" className="text-white hover:underline font-medium">Request access →</Link>
+              </p>
+            </div>
           </div>
         </div>
       </div>
