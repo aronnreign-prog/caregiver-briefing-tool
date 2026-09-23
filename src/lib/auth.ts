@@ -5,6 +5,14 @@ import { db } from '@/lib/db'
 import * as schema from '@/lib/db/schema'
 
 export const auth = betterAuth({
+  baseURL:
+    process.env.BETTER_AUTH_URL ||
+    (process.env.NODE_ENV === 'production' ? 'https://carenote.in' : 'http://localhost:3000'),
+  trustedOrigins: [
+    'https://carenote.in',
+    'https://www.carenote.in',
+    'http://localhost:3000',
+  ],
   database: drizzleAdapter(db, {
     provider: 'pg',
     schema,
