@@ -49,7 +49,7 @@ export default function LandingPage() {
       <section className="relative pt-20 pb-16">
         <div className="mx-auto max-w-5xl px-6">
           <div className="max-w-3xl mb-12">
-            <h1 className="text-[38px] sm:text-[54px] font-semibold tracking-[-0.03em] leading-[1.1] text-white mb-5">
+            <h1 className="text-[38px] sm:text-[54px] font-semibold tracking-[-0.03em] leading-[1.1] text-white mb-5 text-balance">
               Medical history isn&apos;t a text chunk. <br />
               <span className="text-white/45">It&apos;s an evolving graph.</span>
             </h1>
@@ -60,13 +60,13 @@ export default function LandingPage() {
 
             <div className="flex items-center gap-3">
               <DemoRequestTrigger
-                className="text-[13px] font-medium bg-white text-black px-5 py-2.5 rounded hover:bg-white/90 transition-colors cursor-pointer"
+                className="text-[13px] font-medium bg-white text-black px-5 py-2.5 rounded hover:bg-white/90 transition-colors cursor-pointer focus-visible:ring-2 focus-visible:ring-white/60 outline-none"
               >
                 Register for Demo Access
               </DemoRequestTrigger>
               <a
                 href="#proof"
-                className="text-[13px] text-white/70 border border-white/[0.12] bg-white/[0.02] px-5 py-2.5 rounded hover:text-white hover:border-white/30 transition-colors"
+                className="text-[13px] text-white/70 border border-white/[0.12] bg-white/[0.02] px-5 py-2.5 rounded hover:text-white hover:border-white/30 transition-colors focus-visible:ring-2 focus-visible:ring-white/40 outline-none"
               >
                 Explore Live Proof ↓
               </a>
@@ -74,7 +74,7 @@ export default function LandingPage() {
           </div>
 
           {/* ━━━ Product Proof: Grounded Clinical Briefing + PaperTrail Inspector ━━━ */}
-          <div id="proof">
+          <div id="proof" className="scroll-mt-20">
             <HeroClinicalProof />
           </div>
         </div>
@@ -84,7 +84,7 @@ export default function LandingPage() {
       <section className="py-20 border-t border-white/[0.08]">
         <div className="mx-auto max-w-5xl px-6">
           <div className="max-w-2xl mb-12">
-            <h2 className="text-[26px] sm:text-[34px] font-semibold tracking-[-0.025em] text-white mb-3">
+            <h2 className="text-[26px] sm:text-[34px] font-semibold tracking-[-0.025em] text-white mb-3 text-balance">
               Vector databases have clinical amnesia.
             </h2>
             <p className="text-[15px] sm:text-[16px] text-white/65 leading-[1.65] max-w-[65ch]">
@@ -143,7 +143,7 @@ export default function LandingPage() {
       <section className="py-20 border-t border-white/[0.08]">
         <div className="mx-auto max-w-5xl px-6">
           <div className="max-w-2xl mb-12">
-            <h2 className="text-[26px] sm:text-[34px] font-semibold tracking-[-0.025em] text-white mb-3">
+            <h2 className="text-[26px] sm:text-[34px] font-semibold tracking-[-0.025em] text-white mb-3 text-balance">
               Never trust an AI summary without a page number.
             </h2>
             <p className="text-[15px] sm:text-[16px] text-white/65 leading-[1.65] max-w-[65ch]">
@@ -183,7 +183,7 @@ export default function LandingPage() {
         <div className="mx-auto max-w-5xl px-6">
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 items-center">
             <div className="lg:col-span-5">
-              <h2 className="text-[26px] sm:text-[34px] font-semibold tracking-[-0.025em] text-white mb-3">
+              <h2 className="text-[26px] sm:text-[34px] font-semibold tracking-[-0.025em] text-white mb-3 text-balance">
                 Ask your records anything.
               </h2>
               <p className="text-[15px] sm:text-[16px] text-white/65 leading-[1.65] mb-6 max-w-[50ch]">
@@ -239,9 +239,9 @@ export default function LandingPage() {
       </section>
 
       {/* ━━━ Call To Action ━━━ */}
-      <section id="demo" className="py-24 border-t border-white/[0.08]">
+      <section id="demo" className="py-24 border-t border-white/[0.08] scroll-mt-20">
         <div className="mx-auto max-w-5xl px-6 text-center">
-          <h2 className="text-[28px] sm:text-[42px] font-semibold tracking-[-0.03em] text-white mb-4">
+          <h2 className="text-[28px] sm:text-[42px] font-semibold tracking-[-0.03em] text-white mb-4 text-balance">
             Register for Demo Access
           </h2>
 
@@ -251,7 +251,7 @@ export default function LandingPage() {
 
           <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
             <DemoRequestTrigger
-              className="w-full sm:w-auto text-[13px] font-medium bg-white text-black px-6 py-3 rounded hover:bg-white/90 transition-colors cursor-pointer"
+              className="w-full sm:w-auto text-[13px] font-medium bg-white text-black px-6 py-3 rounded hover:bg-white/90 transition-colors cursor-pointer focus-visible:ring-2 focus-visible:ring-white/60 outline-none"
             >
               Request Demo Access
             </DemoRequestTrigger>

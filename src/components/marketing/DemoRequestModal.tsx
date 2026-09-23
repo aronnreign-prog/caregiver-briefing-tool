@@ -244,7 +244,7 @@ export function DemoRequestModal({
                   handleReset()
                   handleClose()
                 }}
-                className="w-full py-2.5 px-4 rounded-lg bg-white text-black font-medium text-[13px] hover:bg-white/90 transition-colors cursor-pointer"
+                className="w-full min-h-[44px] py-2.5 px-4 rounded-lg bg-white text-black font-medium text-[13px] hover:bg-white/90 focus-visible:ring-2 focus-visible:ring-white/60 outline-none transition-all cursor-pointer"
               >
                 Done
               </button>
@@ -271,7 +271,10 @@ export function DemoRequestModal({
 
               {/* Inline Error Alert Box */}
               {error && (
-                <div className="mb-5 p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-red-200 text-[12px] flex items-start gap-2.5 animate-in fade-in duration-150">
+                <div
+                  aria-live="polite"
+                  className="mb-5 p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-red-200 text-[12px] flex items-start gap-2.5 animate-in fade-in duration-150"
+                >
                   <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
                   <div className="flex-1 leading-relaxed">{error}</div>
                 </div>
@@ -290,10 +293,12 @@ export function DemoRequestModal({
                     id="demo-name"
                     type="text"
                     required
+                    autoComplete="name"
+                    autoCapitalize="words"
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                     placeholder="e.g. Dr. Sarah Jenkins or David Miller"
-                    className="w-full bg-[#0A0E14] border border-[#1F2937] focus:border-white/40 focus:ring-1 focus:ring-white/30 rounded-lg px-3.5 py-2 text-[13px] text-white placeholder:text-white/30 outline-none transition-colors"
+                    className="w-full min-h-[42px] bg-[#0A0E14] border border-[#1F2937] focus:border-white/40 focus:ring-1 focus:ring-white/30 rounded-lg px-3.5 py-2 text-[13px] text-white placeholder:text-white/30 outline-none transition-colors"
                   />
                 </div>
 
@@ -309,10 +314,13 @@ export function DemoRequestModal({
                     id="demo-email"
                     type="email"
                     required
+                    autoComplete="email"
+                    spellCheck={false}
+                    inputMode="email"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     placeholder="name@organization.com or personal email"
-                    className="w-full bg-[#0A0E14] border border-[#1F2937] focus:border-white/40 focus:ring-1 focus:ring-white/30 rounded-lg px-3.5 py-2 text-[13px] text-white placeholder:text-white/30 outline-none transition-colors"
+                    className="w-full min-h-[42px] bg-[#0A0E14] border border-[#1F2937] focus:border-white/40 focus:ring-1 focus:ring-white/30 rounded-lg px-3.5 py-2 text-[13px] text-white placeholder:text-white/30 outline-none transition-colors"
                   />
                 </div>
 
@@ -330,10 +338,10 @@ export function DemoRequestModal({
                         id="demo-role"
                         value={role}
                         onChange={(e) => setRole(e.target.value)}
-                        className="w-full bg-[#0A0E14] border border-[#1F2937] focus:border-white/40 focus:ring-1 focus:ring-white/30 rounded-lg px-3.5 py-2 text-[13px] text-white outline-none transition-colors appearance-none cursor-pointer"
+                        className="w-full min-h-[42px] bg-[#0A0E14] border border-[#1F2937] focus:border-white/40 focus:ring-1 focus:ring-white/30 rounded-lg px-3.5 py-2 text-[13px] text-white outline-none transition-colors appearance-none cursor-pointer"
                       >
                         <option value="" className="bg-[#0A0E14] text-white/50">
-                          Select your role...
+                          Select your role…
                         </option>
                         <option value="Family Caregiver" className="bg-[#0A0E14] text-white">
                           Family Caregiver
@@ -409,12 +417,12 @@ export function DemoRequestModal({
                   <button
                     type="submit"
                     disabled={loading}
-                    className="w-full py-2.5 px-4 rounded-lg bg-white text-black font-medium text-[13px] hover:bg-white/90 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 transition-all cursor-pointer shadow-sm"
+                    className="w-full min-h-[44px] py-2.5 px-4 rounded-lg bg-white text-black font-medium text-[13px] hover:bg-white/90 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 transition-all cursor-pointer shadow-sm focus-visible:ring-2 focus-visible:ring-white/60 outline-none"
                   >
                     {loading ? (
                       <>
                         <Loader2 className="w-4 h-4 animate-spin text-black" />
-                        <span>Submitting Request...</span>
+                        <span>Submitting Request…</span>
                       </>
                     ) : (
                       <span>Request Demo Access</span>

@@ -61,18 +61,18 @@ export default function LoginPage() {
           <div className="space-y-6">
             {[
               {
-                label: 'Source-cited claims',
-                desc: 'Every fact linked to an exact quote and page number from the original document.',
+                label: 'PaperTrail citations',
+                desc: 'Every clinical assertion links directly to an exact quote and page number in the original PDF.',
                 color: 'bg-accent',
               },
               {
-                label: 'Trend detection',
-                desc: 'GFR 65 → 58 → 51 → 47 across 18 months, flagged automatically across providers.',
+                label: 'Persistent graph memory',
+                desc: 'Entities connected across time to maintain true medication regimens and prevent RAG amnesia.',
                 color: 'bg-warning',
               },
               {
                 label: 'Contraindication alerts',
-                desc: 'Drug interactions and contraindications flagged with clinical reasoning.',
+                desc: 'Drug interactions and contradictions flagged with verifiable pharmacological rationale.',
                 color: 'bg-alert',
               },
             ].map(item => (

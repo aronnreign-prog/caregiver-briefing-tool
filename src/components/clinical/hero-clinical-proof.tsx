@@ -160,7 +160,7 @@ export function HeroClinicalProof() {
               <button
                 type="button"
                 onClick={() => handleSelectClaim('c1')}
-                className={`inline-flex items-center gap-1 font-mono text-[10px] border rounded px-1.5 py-0.5 transition-all cursor-pointer ${
+                className={`inline-flex items-center gap-1 font-mono text-[10px] border rounded px-1.5 py-0.5 transition-all cursor-pointer outline-none focus-visible:ring-1 focus-visible:ring-accent ${
                   selectedClaimId === 'c1'
                     ? 'border-accent text-accent bg-accent/20 ring-1 ring-accent'
                     : 'border-accent/40 text-accent bg-accent-dim hover:border-accent hover:bg-accent/20'
@@ -178,7 +178,7 @@ export function HeroClinicalProof() {
               <button
                 type="button"
                 onClick={() => handleSelectClaim('c2')}
-                className={`inline-flex items-center gap-1 font-mono text-[10px] border rounded px-1.5 py-0.5 transition-all cursor-pointer ${
+                className={`inline-flex items-center gap-1 font-mono text-[10px] border rounded px-1.5 py-0.5 transition-all cursor-pointer outline-none focus-visible:ring-1 focus-visible:ring-accent ${
                   selectedClaimId === 'c2'
                     ? 'border-accent text-accent bg-accent/20 ring-1 ring-accent'
                     : 'border-accent/40 text-accent bg-accent-dim hover:border-accent hover:bg-accent/20'
@@ -191,7 +191,7 @@ export function HeroClinicalProof() {
               <button
                 type="button"
                 onClick={() => handleSelectClaim('c3')}
-                className={`inline-flex items-center gap-1 font-mono text-[10px] border rounded px-1.5 py-0.5 transition-all cursor-pointer ${
+                className={`inline-flex items-center gap-1 font-mono text-[10px] border rounded px-1.5 py-0.5 transition-all cursor-pointer outline-none focus-visible:ring-1 focus-visible:ring-warning ${
                   selectedClaimId === 'c3'
                     ? 'border-warning text-warning bg-warning/20 ring-1 ring-warning'
                     : 'border-warning/40 text-warning bg-warning-dim hover:border-warning'
@@ -214,9 +214,10 @@ export function HeroClinicalProof() {
             </div>
 
             <div className="space-y-2">
-              <div
+              <button
+                type="button"
                 onClick={() => handleSelectClaim('c2')}
-                className={`flex items-center justify-between p-2.5 rounded border transition-colors cursor-pointer ${
+                className={`w-full text-left flex items-center justify-between p-2.5 rounded border transition-colors cursor-pointer outline-none focus-visible:ring-1 focus-visible:ring-accent ${
                   selectedClaimId === 'c2'
                     ? 'bg-accent-dim/40 border-accent/50'
                     : 'bg-surface-raised/40 border-border hover:border-border-subtle'
@@ -231,11 +232,12 @@ export function HeroClinicalProof() {
                 <span className="font-mono text-[10px] text-accent shrink-0">
                   ↗ Clinic Note · p.2
                 </span>
-              </div>
+              </button>
 
-              <div
+              <button
+                type="button"
                 onClick={() => handleSelectClaim('c4')}
-                className={`flex items-center justify-between p-2.5 rounded border transition-colors cursor-pointer ${
+                className={`w-full text-left flex items-center justify-between p-2.5 rounded border transition-colors cursor-pointer outline-none focus-visible:ring-1 focus-visible:ring-accent ${
                   selectedClaimId === 'c4'
                     ? 'bg-accent-dim/40 border-accent/50'
                     : 'bg-surface-raised/40 border-border hover:border-border-subtle'
@@ -250,11 +252,12 @@ export function HeroClinicalProof() {
                 <span className="font-mono text-[10px] text-accent shrink-0">
                   ↗ Clinic Note · p.1
                 </span>
-              </div>
+              </button>
 
-              <div
+              <button
+                type="button"
                 onClick={() => handleSelectClaim('c5')}
-                className={`flex items-center justify-between p-2.5 rounded border transition-colors cursor-pointer ${
+                className={`w-full text-left flex items-center justify-between p-2.5 rounded border transition-colors cursor-pointer outline-none focus-visible:ring-1 focus-visible:ring-accent ${
                   selectedClaimId === 'c5'
                     ? 'bg-accent-dim/40 border-accent/50'
                     : 'bg-surface-raised/40 border-border hover:border-border-subtle'
@@ -269,7 +272,7 @@ export function HeroClinicalProof() {
                 <span className="font-mono text-[10px] text-accent shrink-0">
                   ↗ Clinic Note · p.1
                 </span>
-              </div>
+              </button>
             </div>
           </div>
         </div>
