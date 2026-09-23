@@ -32,3 +32,13 @@ export const getCaregiver = cache(async () => {
 
   return caregiver ?? null
 })
+
+export const isAdmin = cache(async () => {
+  const session = await getSession()
+  if (!session?.user) return false
+  const user = session.user as { role?: string; email?: string }
+  if (user.role === 'admin') return true
+  const adminEmail = process.env.ADMIN_EMAIL
+  if (adminEmail && user.email?.toLowerCase() === adminEmail.toLowerCase()) return true
+  return false
+})

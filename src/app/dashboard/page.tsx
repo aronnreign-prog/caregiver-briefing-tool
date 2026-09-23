@@ -6,7 +6,7 @@ import DeletePatientButton from './DeletePatientButton'
 import { db } from '@/lib/db'
 import { patients as patientsTable, documents as documentsTable, briefings as briefingsTable } from '@/lib/db/schema'
 import { eq } from 'drizzle-orm'
-import { getSession, getCaregiver } from '@/lib/auth-session'
+import { getSession, getCaregiver, isAdmin } from '@/lib/auth-session'
 
 function calcAge(dob: string) {
   const diff = Date.now() - new Date(dob).getTime()
@@ -29,6 +29,8 @@ export default async function DashboardPage() {
   if (!caregiver?.id) {
     redirect('/login')
   }
+
+  const isUserAdmin = await isAdmin()
 
   const [patientRows, docRows, briefingRows] = await Promise.all([
     db.select({
@@ -86,6 +88,18 @@ export default async function DashboardPage() {
           <span className="ml-auto font-mono text-[9px] text-muted-foreground border border-border px-1.5 py-0.5 rounded">v0.1</span>
         </div>
 
+        {isUserAdmin && (
+          <div className="px-4 py-2 border-b border-border bg-accent/5 flex items-center justify-between">
+            <span className="font-mono text-[9px] text-accent font-semibold tracking-wider">ADMIN</span>
+            <Link
+              href="/admin"
+              className="font-mono text-[10px] text-muted-foreground hover:text-foreground underline decoration-muted-foreground/40 underline-offset-2"
+            >
+              Demo Accounts →
+            </Link>
+          </div>
+        )}
+
         <div className="flex-1 overflow-y-auto px-2 py-4">
           <p className="font-mono text-[9px] tracking-widest text-muted-foreground uppercase px-3 mb-2">Patients</p>
           {patients.map((p) => (
@@ -140,7 +154,17 @@ export default async function DashboardPage() {
               </p>
             </div>
           </div>
-          <SignOutButton />
+          <div className="flex items-center gap-2">
+            {isUserAdmin && (
+              <Link
+                href="/admin"
+                className="font-mono text-[10px] border border-accent/40 bg-accent/10 text-accent px-2.5 py-1.5 rounded hover:bg-accent/20 transition-colors"
+              >
+                Admin
+              </Link>
+            )}
+            <SignOutButton />
+          </div>
         </header>
 
         <main className="flex-1 overflow-y-auto px-4 sm:px-6 py-5 sm:py-6">

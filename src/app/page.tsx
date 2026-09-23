@@ -36,12 +36,6 @@ export default function LandingPage() {
 
           <div className="flex items-center gap-4">
             <Link
-              href="/login"
-              className="text-[12px] text-white/60 hover:text-white transition-colors"
-            >
-              Sign in
-            </Link>
-            <Link
               href="#demo"
               className="text-[12px] font-medium bg-white text-black px-3.5 py-1.5 rounded hover:bg-white/90 transition-colors"
             >
@@ -276,10 +270,7 @@ export default function LandingPage() {
             <span className="text-[10px] border border-white/[0.1] px-1.5 py-0.5 rounded">v0.1</span>
           </div>
 
-          <div className="flex items-center gap-5">
-            <Link href="/login" className="hover:text-white transition-colors">
-              Sign In
-            </Link>
+          <div className="flex items-center gap-5 text-white/40">
             <span>© {new Date().getFullYear()} CareNote</span>
           </div>
         </div>

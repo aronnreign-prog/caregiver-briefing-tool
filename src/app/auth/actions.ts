@@ -19,30 +19,8 @@ export async function login(formData: FormData) {
   }
 }
 
-export async function signup(formData: FormData) {
-  const email = formData.get('email') as string
-  const password = formData.get('password') as string
-  const name = formData.get('name') as string
-
-  try {
-    const result = await auth.api.signUpEmail({
-      body: { email, password, name },
-      headers: await headers(),
-    })
-
-    if (!result?.user?.id) return { error: 'Signup failed: no user returned' }
-
-    await db.insert(caregivers).values({
-      user_id: result.user.id,
-      email: result.user.email,
-      name: name,
-    })
-
-    return { success: true }
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : 'Signup failed'
-    return { error: msg }
-  }
+export async function signup() {
+  return { error: 'Public registration is closed. Please register for demo access.' }
 }
 
 export async function logout() {
