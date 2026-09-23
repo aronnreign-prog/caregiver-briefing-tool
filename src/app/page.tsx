@@ -252,7 +252,7 @@ export default function LandingPage() {
 
           <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
             <a
-              href="mailto:contact@carenote.health?subject=CareNote%20Demo%20Request"
+              href="mailto:contact@carenote.in?subject=CareNote%20Demo%20Request"
               className="w-full sm:w-auto text-[13px] font-medium bg-white text-black px-6 py-3 rounded hover:bg-white/90 transition-colors"
             >
               Request Demo Access

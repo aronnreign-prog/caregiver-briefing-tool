@@ -198,7 +198,7 @@ export function AdminClient({ currentUserEmail, users }: Props) {
               <button
                 onClick={() =>
                   copyToClipboard(
-                    `CareNote Demo Access:\nURL: https://carenote.health/login\nEmail: ${createdCredentials.email}\nPassword: ${createdCredentials.password}`
+                    `CareNote Demo Access:\nURL: https://carenote.in/login\nEmail: ${createdCredentials.email}\nPassword: ${createdCredentials.password}`
                   )
                 }
                 className="px-3 py-1.5 rounded bg-white text-black font-medium text-[11px] hover:bg-white/90 transition-colors cursor-pointer self-start sm:self-center"
