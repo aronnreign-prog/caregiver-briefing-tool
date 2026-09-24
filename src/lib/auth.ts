@@ -16,7 +16,7 @@ export const auth = betterAuth({
   trustedOrigins: [
     'https://carenote.in',
     'https://www.carenote.in',
-    'http://localhost:3000',
+    ...(process.env.NODE_ENV === 'production' ? [] : ['http://localhost:3000']),
   ],
   database: drizzleAdapter(db, {
     provider: 'pg',

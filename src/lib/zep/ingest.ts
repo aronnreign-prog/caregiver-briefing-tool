@@ -23,12 +23,19 @@ function zepUserId(caregiverId: string, patientId: string): string {
   return 'caregiver-' + caregiverId + '-patient-' + patientId
 }
 
+function escapeXmlContent(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+}
+
 async function ensureZepUser(userId: string): Promise<void> {
   const client = getZepClient()
   try {
-    await client.user.add({ userId })
+    await client.user.add({ userId }, { timeoutInSeconds: 15 })
   } catch {
-    // User likely already exists — idempotent
+    // User likely already exists: idempotent
   }
 }
 
@@ -184,13 +191,16 @@ export async function ingestDocumentFacts(
 
     // Ingest each chunk sharing the same documentId and createdAt per Zep documentation
     for (const chunk of chunks) {
-      await client.graph.add({
-        data: chunk,
-        type: 'text',
-        userId,
-        createdAt,
-        metadata: { documentId },
-      })
+      await client.graph.add(
+        {
+          data: chunk,
+          type: 'text',
+          userId,
+          createdAt,
+          metadata: { documentId },
+        },
+        { timeoutInSeconds: 30 }
+      )
     }
 
     return { success: true }
@@ -217,16 +227,19 @@ export async function queryPatientMemory(
     const cleanQuery = query.trim().slice(0, 380) || 'longitudinal clinical trajectory medications lab trends'
 
     const [nodesRes, episodesRes, searchRes] = await Promise.allSettled([
-      client.graph.node.getByUserId(userId, { limit: 50 }),
-      client.graph.episode.getByUserId(userId, { lastn: 30 }),
-      client.graph.search({
-        userId,
-        query: cleanQuery,
-        scope: 'edges',
-        limit: 45,
-        reranker: 'mmr',
-        mmrLambda: 0.6,
-      }),
+      client.graph.node.getByUserId(userId, { limit: 50 }, { timeoutInSeconds: 15 }),
+      client.graph.episode.getByUserId(userId, { lastn: 30 }, { timeoutInSeconds: 15 }),
+      client.graph.search(
+        {
+          userId,
+          query: cleanQuery,
+          scope: 'edges',
+          limit: 45,
+          reranker: 'mmr',
+          mmrLambda: 0.6,
+        },
+        { timeoutInSeconds: 15 }
+      ),
     ])
 
     // Layer 1: Entity Summaries
@@ -293,19 +306,19 @@ export async function queryPatientMemory(
     const sections: string[] = []
 
     if (entitySummaries.length > 0) {
-      sections.push(`<ENTITIES>\n# Key clinical entities and summaries:\n${entitySummaries.map((s) => `- ${s}`).join('\n')}\n</ENTITIES>`)
+      sections.push(`<ENTITIES>\n# Key clinical entities and summaries:\n${entitySummaries.map((s) => `- ${escapeXmlContent(s)}`).join('\n')}\n</ENTITIES>`)
     }
 
     if (edgeList.length > 0) {
-      sections.push(`<FACTS>\n# Longitudinal facts and valid date ranges (facts ending in "present" are currently active; past end dates are superseded):\n${edgeList.join('\n')}\n</FACTS>`)
+      sections.push(`<FACTS>\n# Longitudinal facts and valid date ranges (facts ending in "present" are currently active; past end dates are superseded):\n${edgeList.map((f) => escapeXmlContent(f)).join('\n')}\n</FACTS>`)
     }
 
     if (episodesContent.length > 0) {
-      sections.push(`<CHRONOLOGICAL_EVIDENCE>\n# Source clinical records with exact [doc_id: <uuid>] and [page: <number>] anchors for citations:\n${episodesContent.join('\n\n---\n\n')}\n</CHRONOLOGICAL_EVIDENCE>`)
+      sections.push(`<CHRONOLOGICAL_EVIDENCE>\n# Source clinical records with exact [doc_id: <uuid>] and [page: <number>] anchors for citations:\n${episodesContent.map((c) => escapeXmlContent(c)).join('\n\n---\n\n')}\n</CHRONOLOGICAL_EVIDENCE>`)
     }
 
     const context = sections.join('\n\n')
-    console.log('[Zep Retrieval] Context built — Entities:', entitySummaries.length, '| Facts:', edgeList.length, '| Episodes:', episodesContent.length, '| Chars:', context.length)
+    console.log('[Zep Retrieval] Context built: Entities:', entitySummaries.length, '| Facts:', edgeList.length, '| Episodes:', episodesContent.length, '| Chars:', context.length)
     return context
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
@@ -314,11 +327,38 @@ export async function queryPatientMemory(
   }
 }
 
+export async function deleteDocumentMemory(caregiverId: string, patientId: string, documentId: string): Promise<void> {
+  try {
+    const client = getZepClient()
+    const userId = zepUserId(caregiverId, patientId)
+    const response = await client.graph.episode.getByUserId(userId, { lastn: 100 }, { timeoutInSeconds: 15 })
+
+    if (response?.episodes && Array.isArray(response.episodes)) {
+      const matchingEpisodes = response.episodes.filter((ep) => {
+        const matchesMeta = ep.metadata && (ep.metadata as Record<string, unknown>).documentId === documentId
+        const matchesContent = ep.content && (ep.content.includes(`document_id: ${documentId}`) || ep.content.includes(`[doc_id: ${documentId}]`))
+        return Boolean(matchesMeta || matchesContent)
+      })
+
+      for (const ep of matchingEpisodes) {
+        if (ep.uuid) {
+          await client.graph.episode.delete(ep.uuid, { timeoutInSeconds: 15 }).catch((err) => {
+            console.warn(`[Zep] Failed to delete episode ${ep.uuid}:`, err)
+          })
+        }
+      }
+      console.log(`[Zep] Successfully pruned ${matchingEpisodes.length} episodes for document:`, documentId)
+    }
+  } catch (err) {
+    console.warn(`[Zep] Could not prune document episodes for ${documentId}:`, err)
+  }
+}
+
 export async function deletePatientMemory(caregiverId: string, patientId: string): Promise<void> {
   try {
     const client = getZepClient()
     const userId = zepUserId(caregiverId, patientId)
-    await client.user.delete(userId)
+    await client.user.delete(userId, { timeoutInSeconds: 15 })
     console.log('[Zep] Successfully deleted patient memory graph for user:', userId)
   } catch (err) {
     console.warn('[Zep] Could not delete patient memory graph:', err)

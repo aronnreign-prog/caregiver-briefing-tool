@@ -18,7 +18,7 @@ CareNote turns fragmented medical PDFs into a persistent patient graph with appo
 
 Two concrete technical bets that separate CareNote from generic chat wrappers and vector search tools:
 
-1. **Graph Memory Instead of Vector Search:** Standard RAG tools chop PDFs into isolated text chunks in a vector database—losing the concept of time, doctor relationships, and changing dosages. CareNote models the patient's medical history as an evolving knowledge graph where entities (medications, conditions, labs, providers) connect across time.
+1. **Graph Memory Instead of Vector Search:** Standard RAG tools chop PDFs into isolated text chunks in a vector database: losing the concept of time, doctor relationships, and changing dosages. CareNote models the patient's medical history as an evolving knowledge graph where entities (medications, conditions, labs, providers) connect across time.
 2. **The PaperTrail:** AI summaries are dangerous in medicine without verification. CareNote embeds interactive source anchors for every factual claim, linking directly to the exact page and excerpt of the original medical PDF.
 
 ## Operating Context

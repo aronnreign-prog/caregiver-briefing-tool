@@ -55,7 +55,7 @@ export const verification = pgTable('verification', {
 
 export const caregivers = pgTable('caregivers', {
   id: uuid('id').defaultRandom().primaryKey(),
-  user_id: text('user_id').notNull().unique(), // Better Auth user.id (text type)
+  user_id: text('user_id').notNull().unique().references(() => user.id, { onDelete: 'cascade' }), // Better Auth user.id (text type)
   email: text('email').notNull().unique(),
   name: text('name').notNull(),
   created_at: timestamp('created_at').defaultNow().notNull(),

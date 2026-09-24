@@ -27,10 +27,32 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
     if (!patient) return NextResponse.json({ error: 'Patient not found' }, { status: 404 })
 
+    const [briefing] = await db
+      .select()
+      .from(briefings)
+      .where(
+        and(
+          eq(briefings.id, briefingId),
+          eq(briefings.patient_id, patientId),
+          eq(briefings.caregiver_id, caregiver.id)
+        )
+      )
+      .limit(1)
+
+    if (!briefing) {
+      return NextResponse.json({ error: 'Briefing not found or unauthorized' }, { status: 404 })
+    }
+
     await db
       .update(briefings)
       .set({ status: 'processing' })
-      .where(and(eq(briefings.id, briefingId), eq(briefings.caregiver_id, caregiver.id)))
+      .where(
+        and(
+          eq(briefings.id, briefingId),
+          eq(briefings.patient_id, patientId),
+          eq(briefings.caregiver_id, caregiver.id)
+        )
+      )
 
     const zepQuery = 'longitudinal clinical trajectory medications lab trends psychiatric management'
     const context = await queryPatientMemory(caregiver.id, patientId, zepQuery)
@@ -42,7 +64,13 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
           status: 'failed',
           error_message: 'No clinical facts found in graph memory. Please ensure documents are extracted.',
         })
-        .where(and(eq(briefings.id, briefingId), eq(briefings.caregiver_id, caregiver.id)))
+        .where(
+          and(
+            eq(briefings.id, briefingId),
+            eq(briefings.patient_id, patientId),
+            eq(briefings.caregiver_id, caregiver.id)
+          )
+        )
 
       return NextResponse.json({ error: 'Clinical memory unavailable.' }, { status: 400 })
     }
@@ -51,7 +79,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     const model = getClinicalModel()
 
     const SYSTEM_PROMPT = `You are a clinical AI assistant generating a structured specialist medical briefing.
-Write for a medical specialist — include longitudinal trends, exact medication dosages, drug interactions, clinical reasoning, and notable absences.
+Write for a medical specialist: include longitudinal trends, exact medication dosages, drug interactions, clinical reasoning, and notable absences.
 
 Use ONLY the clinical facts provided in the context. Do not hallucinate or invent clinical findings.
 For each claim, mark it:
@@ -82,6 +110,7 @@ PaperTrail Citation Requirement:
         },
       ],
       schema: BriefingOutputSchema,
+      abortSignal: req.signal,
       onError: async ({ error }) => {
         // Log full technical stack trace to server logs for developers
         const technicalError = error instanceof Error ? (error.stack || error.message) : String(error)
@@ -90,31 +119,43 @@ PaperTrail Citation Requirement:
         // Store clean, user-friendly message for the UI
         const userFacingMessage = 'Unable to complete briefing synthesis. Please retry in a moment.'
         try {
-          await db
-            .update(briefings)
-            .set({
-              status: 'failed',
-              error_message: userFacingMessage,
-            })
-            .where(and(eq(briefings.id, briefingId), eq(briefings.caregiver_id, caregiver.id)))
-        } catch (dbErr) {
-          console.error('[Briefing Stream DB Error on failure update]:', dbErr)
-        }
-      },
-      onFinish: async ({ object }) => {
-        if (object) {
-          try {
-            const cleanedBriefingText = object.briefing_text.replace(/^[0-9]+\s+/, '').trim()
             await db
               .update(briefings)
               .set({
-                status: 'complete',
-                briefing_text: cleanedBriefingText,
-                claims: object.claims,
-                flagged_concerns: object.flagged_concerns,
-                completed_at: new Date(),
+                status: 'failed',
+                error_message: userFacingMessage,
               })
-              .where(and(eq(briefings.id, briefingId), eq(briefings.caregiver_id, caregiver.id)))
+              .where(
+                and(
+                  eq(briefings.id, briefingId),
+                  eq(briefings.patient_id, patientId),
+                  eq(briefings.caregiver_id, caregiver.id)
+                )
+              )
+          } catch (dbErr) {
+            console.error('[Briefing Stream DB Error on failure update]:', dbErr)
+          }
+        },
+        onFinish: async ({ object }) => {
+          if (object) {
+            try {
+              const cleanedBriefingText = object.briefing_text.replace(/^[0-9]+\s+/, '').trim()
+              await db
+                .update(briefings)
+                .set({
+                  status: 'complete',
+                  briefing_text: cleanedBriefingText,
+                  claims: object.claims,
+                  flagged_concerns: object.flagged_concerns,
+                  completed_at: new Date(),
+                })
+                .where(
+                  and(
+                    eq(briefings.id, briefingId),
+                    eq(briefings.patient_id, patientId),
+                    eq(briefings.caregiver_id, caregiver.id)
+                  )
+                )
           } catch (dbErr) {
             console.error('[Briefing Stream DB Error on complete update]:', dbErr)
           }

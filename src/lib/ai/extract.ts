@@ -16,7 +16,7 @@ export const ClinicalExtractionSchema = z.object({
   documentDate: z
     .string()
     .optional()
-    .describe('Primary date of this document (ISO 8601, e.g. 2024-03-14). Use encounter date, test date, or issue date — whichever best represents when this document was created.'),
+    .describe('Primary date of this document (ISO 8601, e.g. 2024-03-14). Use encounter date, test date, or issue date - whichever best represents when this document was created.'),
   documentType: z
     .string()
     .optional()

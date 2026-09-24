@@ -2,12 +2,14 @@
 
 import { auth } from '@/lib/auth'
 import { db } from '@/lib/db'
-import { caregivers, demoRequests } from '@/lib/db/schema'
+import { caregivers, demoRequests, patients, documents } from '@/lib/db/schema'
 import { eq } from 'drizzle-orm'
 import { headers } from 'next/headers'
 import { revalidatePath } from 'next/cache'
 import { getSession, isAdmin } from '@/lib/auth-session'
 import { randomBytes } from 'crypto'
+import { del } from '@vercel/blob'
+import { deletePatientMemory } from '@/lib/zep/ingest'
 
 /**
  * Official Better Auth Admin Plugin User Creation
@@ -86,7 +88,42 @@ export async function deleteDemoUser(userId: string) {
   }
 
   try {
-    // Official Better Auth Admin API: removeUser
+    // 1. Fetch caregiver record for this user
+    const [caregiver] = await db
+      .select()
+      .from(caregivers)
+      .where(eq(caregivers.user_id, userId))
+      .limit(1)
+
+    if (caregiver) {
+      // 2. Fetch all patients for this caregiver
+      const caregiverPatients = await db
+        .select({ id: patients.id })
+        .from(patients)
+        .where(eq(patients.caregiver_id, caregiver.id))
+
+      // 3. Clean up external resources for each patient (Blobs and Zep graphs)
+      for (const p of caregiverPatients) {
+        const patientDocs = await db
+          .select({ blob_url: documents.blob_url })
+          .from(documents)
+          .where(eq(documents.patient_id, p.id))
+
+        const blobUrls = patientDocs.map((d) => d.blob_url).filter(Boolean) as string[]
+        if (blobUrls.length > 0) {
+          await del(blobUrls).catch((err) => console.warn('[Blob] Cleanup error on admin user delete:', err))
+        }
+
+        await deletePatientMemory(caregiver.id, p.id).catch((err) =>
+          console.warn('[Zep] Memory cleanup error on admin user delete:', err)
+        )
+      }
+
+      // 4. Delete caregiver record (which cascades to patients, documents, briefings in DB)
+      await db.delete(caregivers).where(eq(caregivers.id, caregiver.id))
+    }
+
+    // 5. Official Better Auth Admin API: removeUser
     await auth.api.removeUser({
       body: { userId },
       headers: await headers(),

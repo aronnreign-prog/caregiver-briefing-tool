@@ -12,6 +12,19 @@ import { z } from 'zod'
 import { revalidatePath } from 'next/cache'
 import { getCaregiver } from '@/lib/auth-session'
 
+function isValidVercelBlobUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url)
+    return (
+      parsed.protocol === 'https:' &&
+      (parsed.hostname.endsWith('.blob.vercel-storage.com') ||
+        parsed.hostname === 'blob.vercel-storage.com')
+    )
+  } catch {
+    return false
+  }
+}
+
 export async function createDocumentRecord(patientId: string, filename: string, blobUrl: string, fileSize: number, mimeType: string): Promise<{ id?: string; error?: string }> {
   const caregiver = await getCaregiver()
   if (!caregiver) return { error: 'Unauthorized' }
@@ -23,18 +36,8 @@ export async function createDocumentRecord(patientId: string, filename: string, 
     .limit(1)
   if (!patient) return { error: 'Patient not found or unauthorized' }
   
-  // Strictly validate blobUrl origin to prevent SSRF
-  try {
-    const parsed = new URL(blobUrl)
-    const isVercelBlob =
-      parsed.protocol === 'https:' &&
-      (parsed.hostname.endsWith('.blob.vercel-storage.com') ||
-        parsed.hostname === 'blob.vercel-storage.com')
-    if (!isVercelBlob) {
-      return { error: 'Invalid document storage URL origin.' }
-    }
-  } catch {
-    return { error: 'Malformed document storage URL.' }
+  if (!isValidVercelBlobUrl(blobUrl)) {
+    return { error: 'Invalid document storage URL origin.' }
   }
 
   try {
@@ -65,14 +68,8 @@ export async function ingestDocument(documentId: string): Promise<{ error?: stri
   if (!doc) return { error: 'Document not found or unauthorized' }
   if (!doc.blob_url) return { error: 'Document has no blob URL' }
 
-  // Validate blob URL protocol and hostname before server fetch
-  try {
-    const parsed = new URL(doc.blob_url)
-    if (parsed.protocol !== 'https:' || !parsed.hostname.endsWith('.blob.vercel-storage.com')) {
-      return { error: 'Untrusted document storage URL.' }
-    }
-  } catch {
-    return { error: 'Malformed document storage URL.' }
+  if (!isValidVercelBlobUrl(doc.blob_url)) {
+    return { error: 'Untrusted document storage URL.' }
   }
 
   await db
@@ -169,27 +166,35 @@ export async function generateBriefing(
     .where(and(eq(patients.id, patientId), eq(patients.caregiver_id, caregiver.id)))
     .limit(1)
   if (!patient) {
-    await db
-      .update(briefings)
-      .set({ status: 'failed', error_message: 'Unauthorized or patient not found' })
-      .where(and(eq(briefings.id, briefingId), eq(briefings.caregiver_id, caregiver.id)))
     return { error: 'Unauthorized or patient not found' }
   }
 
   const [briefing] = await db
     .select()
     .from(briefings)
-    .where(and(eq(briefings.id, briefingId), eq(briefings.caregiver_id, caregiver.id)))
+    .where(
+      and(
+        eq(briefings.id, briefingId),
+        eq(briefings.patient_id, patientId),
+        eq(briefings.caregiver_id, caregiver.id)
+      )
+    )
     .limit(1)
   if (!briefing) return { error: 'Briefing not found or unauthorized' }
 
   await db
     .update(briefings)
     .set({ status: 'processing' })
-    .where(and(eq(briefings.id, briefingId), eq(briefings.caregiver_id, caregiver.id)))
+    .where(
+      and(
+        eq(briefings.id, briefingId),
+        eq(briefings.patient_id, patientId),
+        eq(briefings.caregiver_id, caregiver.id)
+      )
+    )
 
   try {
-    // 1. Query Zep with clinical intent query — the single source of truth for clinical memory
+    // 1. Query Zep with clinical intent query - the single source of truth for clinical memory
     const zepQuery = buildZepQuery()
     const context = await queryPatientMemory(caregiver.id, patientId, zepQuery)
 
@@ -198,7 +203,13 @@ export async function generateBriefing(
       await db.update(briefings).set({
         status: 'failed',
         error_message: 'No clinical facts found in graph memory. Please ensure documents are extracted.',
-      }).where(and(eq(briefings.id, briefingId), eq(briefings.caregiver_id, caregiver.id)))
+      }).where(
+        and(
+          eq(briefings.id, briefingId),
+          eq(briefings.patient_id, patientId),
+          eq(briefings.caregiver_id, caregiver.id)
+        )
+      )
       return { error: 'Clinical memory unavailable.' }
     }
 
@@ -206,15 +217,15 @@ export async function generateBriefing(
 
     const model = getClinicalModel()
 
-    // ── Diagnostics Context ────────────────────────────────────────────────
+    // -- Diagnostics Context ------------------------------------------------
     console.log('=== [ZEP RETRIEVAL CONTEXT TO GEMINI] ===')
     console.log(patientHeader)
     console.log('--- context length: ' + context.length + ' chars ---')
     console.log('=== [END CONTEXT HEADER] ===')
-    // ───────────────────────────────────────────────────────────────────────
+    // -----------------------------------------------------------------------
 
     const SYSTEM_PROMPT = `You are a clinical AI assistant generating a structured specialist medical briefing.
-Write for a medical specialist — include longitudinal trends, exact medication dosages, drug interactions, clinical reasoning, and notable absences.
+Write for a medical specialist: include longitudinal trends, exact medication dosages, drug interactions, clinical reasoning, and notable absences.
 
 Use ONLY the clinical facts provided in the context. Do not hallucinate or invent clinical findings.
 For each claim, mark it:
@@ -254,14 +265,26 @@ PaperTrail Citation Requirement:
       claims: object.claims,
       flagged_concerns: object.flagged_concerns,
       completed_at: new Date(),
-    }).where(and(eq(briefings.id, briefingId), eq(briefings.caregiver_id, caregiver.id)))
+    }).where(
+      and(
+        eq(briefings.id, briefingId),
+        eq(briefings.patient_id, patientId),
+        eq(briefings.caregiver_id, caregiver.id)
+      )
+    )
 
     revalidatePath('/dashboard/patients/' + patientId)
     return {}
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     console.error('[Briefing] Generation failed:', message)
-    await db.update(briefings).set({ status: 'failed', error_message: message }).where(and(eq(briefings.id, briefingId), eq(briefings.caregiver_id, caregiver.id)))
+    await db.update(briefings).set({ status: 'failed', error_message: message }).where(
+      and(
+        eq(briefings.id, briefingId),
+        eq(briefings.patient_id, patientId),
+        eq(briefings.caregiver_id, caregiver.id)
+      )
+    )
     return { error: message }
   }
 }
@@ -281,7 +304,7 @@ export async function askPatientClinicalQuery(
     .limit(1)
   if (!patient) return { error: 'Patient not found or unauthorized' }
 
-  const trimmedQuestion = question.trim()
+  const trimmedQuestion = question.trim().slice(0, 1000)
   if (!trimmedQuestion) return { error: 'Please enter a clinical question.' }
 
   try {
@@ -294,14 +317,14 @@ export async function askPatientClinicalQuery(
 
     // If Zep is empty, fallback to self-heal rebuild from PDF docs
     if (!context || context.trim().length === 0) {
-      console.log('[Clinical Query] Zep memory empty — attempting rebuild from Blob PDFs...')
+      console.log('[Clinical Query] Zep memory empty: attempting rebuild from Blob PDFs...')
       const patientDocs = await db
         .select()
         .from(documents)
         .where(and(eq(documents.patient_id, patientId), eq(documents.caregiver_id, caregiver.id), eq(documents.status, 'extracted')))
 
       for (const doc of patientDocs) {
-        if (doc.blob_url) {
+        if (doc.blob_url && isValidVercelBlobUrl(doc.blob_url)) {
           try {
             const res = await fetch(doc.blob_url)
             if (res.ok) {
@@ -324,13 +347,7 @@ export async function askPatientClinicalQuery(
     const patientHeader = `Patient: ${patient.name}, DOB: ${patient.date_of_birth}, Relationship: ${patient.relationship}`
     const model = getClinicalModel()
 
-    const conversationContext = previousTurn
-      ? `Prior Conversation Turn:\nUser asked: "${previousTurn.question}"\nAssistant answered: "${previousTurn.answer}"\n\n`
-      : ''
-
     const SYSTEM_PROMPT = `You are a clinical AI assistant answering a specific clinical question about patient ${patient.name} based ONLY on their uploaded medical records and knowledge graph.
-
-${conversationContext}Current Question to answer: "${trimmedQuestion}"
 
 Guidelines:
 1. Provide a direct, factual, and concise answer formatted cleanly in Markdown (with bullet points or bold text where appropriate).
@@ -343,15 +360,29 @@ Guidelines:
    - In the evidence array, extract source_doc_id from [doc_id: <uuid>] and source_page from [page: <number>].
    - If citing multiple documents or chronological changes, include an evidence item for each supporting document.`
 
+    type MessageItem = { role: 'user' | 'assistant'; content: string }
+    const messages: MessageItem[] = []
+
+    if (previousTurn && previousTurn.question?.trim() && previousTurn.answer?.trim()) {
+      messages.push({
+        role: 'user',
+        content: previousTurn.question.trim().slice(0, 1000),
+      })
+      messages.push({
+        role: 'assistant',
+        content: previousTurn.answer.trim().slice(0, 4000),
+      })
+    }
+
+    messages.push({
+      role: 'user',
+      content: `${patientHeader}\n\nClinical Record & Graph Memory Context:\n\n${context}\n\nQuestion to answer: ${trimmedQuestion}`,
+    })
+
     const { object } = await generateObject({
       model,
       system: SYSTEM_PROMPT,
-      messages: [
-        {
-          role: 'user',
-          content: `${patientHeader}\n\nClinical Record & Graph Memory Context:\n\n${context}\n\nQuestion to answer: ${trimmedQuestion}`,
-        },
-      ],
+      messages,
       schema: ClinicalQueryOutputSchema,
       abortSignal: AbortSignal.timeout(45000),
     })

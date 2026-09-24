@@ -3,13 +3,14 @@
 import { z } from 'zod'
 import { db } from '@/lib/db'
 import { demoRequests } from '@/lib/db/schema'
+import { eq, and } from 'drizzle-orm'
 
 const DemoRequestSchema = z.object({
-  name: z.string().trim().min(1, 'Name is required'),
-  email: z.string().trim().email('Valid email address is required'),
-  organization: z.string().trim().optional(),
-  role: z.string().trim().optional(),
-  useCase: z.string().trim().optional(),
+  name: z.string().trim().min(1, 'Name is required').max(100, 'Name must be 100 characters or less'),
+  email: z.string().trim().email('Valid email address is required').max(255, 'Email must be 255 characters or less'),
+  organization: z.string().trim().max(200, 'Organization must be 200 characters or less').optional(),
+  role: z.string().trim().max(100, 'Role must be 100 characters or less').optional(),
+  useCase: z.string().trim().max(2000, 'Use case must be 2000 characters or less').optional(),
 })
 
 export async function submitDemoRequest(
@@ -39,6 +40,17 @@ export async function submitDemoRequest(
     }
 
     const { name, email, organization, role, useCase } = parsed.data
+
+    // Deduplicate pending requests for the same email address
+    const [existing] = await db
+      .select({ id: demoRequests.id })
+      .from(demoRequests)
+      .where(and(eq(demoRequests.email, email.toLowerCase()), eq(demoRequests.status, 'pending')))
+      .limit(1)
+
+    if (existing) {
+      return { success: true }
+    }
 
     await db.insert(demoRequests).values({
       name,

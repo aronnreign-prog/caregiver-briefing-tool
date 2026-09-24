@@ -4,7 +4,7 @@ import { db } from '@/lib/db'
 import { patients, documents, briefings } from '@/lib/db/schema'
 import { eq, and } from 'drizzle-orm'
 import { revalidatePath } from 'next/cache'
-import { deletePatientMemory } from '@/lib/zep/ingest'
+import { deletePatientMemory, deleteDocumentMemory } from '@/lib/zep/ingest'
 import { getCaregiver } from '@/lib/auth-session'
 import { del } from '@vercel/blob'
 
@@ -73,6 +73,11 @@ export async function deleteDocument(patientId: string, documentId: string): Pro
     await del(doc.blob_url).catch(() => {})
   }
 
+  // Prune Zep Cloud memory graph episodes for this document
+  await deleteDocumentMemory(caregiver.id, patientId, documentId).catch((err) => {
+    console.warn('[Zep] Non-fatal document memory prune error:', err)
+  })
+
   revalidatePath(`/dashboard/patients/${patientId}`)
   return {}
 }
@@ -84,7 +89,13 @@ export async function deleteBriefing(patientId: string, briefingId: string): Pro
   try {
     await db
       .delete(briefings)
-      .where(and(eq(briefings.id, briefingId), eq(briefings.caregiver_id, caregiver.id)))
+      .where(
+        and(
+          eq(briefings.id, briefingId),
+          eq(briefings.patient_id, patientId),
+          eq(briefings.caregiver_id, caregiver.id)
+        )
+      )
 
     revalidatePath(`/dashboard/patients/${patientId}`)
     return {}

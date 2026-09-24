@@ -297,7 +297,7 @@ export function AdminClient({ currentUserEmail, users, pendingRequests = [] }: P
                   className="bg-black/40 border border-white/[0.08] hover:border-white/20 p-4 rounded-lg flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition-colors"
                 >
                   <div className="space-y-1">
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       <span className="font-medium text-sm text-white">{req.name}</span>
                       <span className="font-mono text-xs text-accent">{req.email}</span>
                       {req.role && (

@@ -58,7 +58,7 @@ If ANY answer is NO → do not declare complete. Fix it first.
 
 ---
 
-## Rule 6: DOCUMENTED MISTAKES — DO NOT REPEAT
+## Rule 6: DOCUMENTED MISTAKES - DO NOT REPEAT
 
 These are concrete errors already made on this project. Repeating any of them
 violates this rule. Before finishing a task, check your work against this list.
@@ -94,7 +94,7 @@ violates this rule. Before finishing a task, check your work against this list.
   (e.g. `'qwen/qwen-2-vl-7b-instruct:free'`) so model swaps require code edits.
 - **Right:** All runtime models are env-driven (see `.agents/MODELS.md`):
   `LAYER_1_VISION_MODEL` (process-document), `LLM_MODEL` (process-briefing).
-  To change a model, edit the env var — never the code.
+  To change a model, edit the env var - never the code.
 
 ### M6: MCP tool assumptions (project binding)
 - **Wrong:** Assuming the Supabase MCP `list_tables` / `execute_sql` tools reflect
@@ -106,7 +106,7 @@ violates this rule. Before finishing a task, check your work against this list.
 ### M7: Blind-retry loops + trusting wrong-version docs (the "context sink" anti-pattern)
 - **Wrong:** Re-ran `docker compose build` 4+ times against the SAME broken
   `requirements.txt` (`en_core_med7_lg==any`, then wrong `graphiti_core.driver.falkordb`
-  import, then `pydantic` `ResolutionImpossible` conflict) — with NO websearch and
+  import, then `pydantic` `ResolutionImpossible` conflict) - with NO websearch and
   NO package introspection between attempts. Trusted `main`-branch Graphiti docs
   that described a different version than the one pip resolved. Also hand-rolled an
   MCP SSE client in PowerShell instead of using the already-connected MCP tools.
@@ -117,7 +117,7 @@ violates this rule. Before finishing a task, check your work against this list.
   2. **websearch the EXACT error string on first failure.** `ResolutionImpossible`,
      `ModuleNotFoundError`, etc. are almost always documented with a one-line fix.
   3. **Hard stop after 2 identical failures.** If attempt 2 still fails the same
-     way, you are looping — use docs/search/introspection, never a 3rd blind build.
+     way, you are looping - use docs/search/introspection, never a 3rd blind build.
   4. **Use the connected tools.** MCP tools + `supabase` CLI already exist; never
      hand-roll an SSE/MCP client in PowerShell (type-name parsing & SSE streams fail).
   5. **Preserve session essence.** Before context fills, keep a concise project
@@ -126,7 +126,7 @@ violates this rule. Before finishing a task, check your work against this list.
 
 ---
 
-## Rule 7: USE YOUR TOOLS TO RESOLVE PROBLEMS — DON'T LOOP ON GUESSES
+## Rule 7: USE YOUR TOOLS TO RESOLVE PROBLEMS - DON'T LOOP ON GUESSES
 
 When a build/dependency/integration error appears, do NOT retry the same guess
 or hand-edit blindly. Use the tools available to you to find the real answer
@@ -135,7 +135,7 @@ BEFORE editing:
 1. **Version-grounded verification.** After pinning/installing a library, verify
    the actual installed version's API (e.g. `docker run --rm <img> python -c "import
    pkg; print(pkg.__file__)"` or introspect the module layout). Docs from `main`
-   / latest often describe a DIFFERENT version than what pip resolved — trust the
+   / latest often describe a DIFFERENT version than what pip resolved - trust the
    installed package, not the doc.
    - **Concrete (this project):** `graphiti-core` was pinned to `0.11.6` then
      `0.29.2`. The `main`-branch doc shows `graphiti_core.driver.falkordb`, but
@@ -151,18 +151,18 @@ BEFORE editing:
    pin to `>=2.11.5`". A single websearch prevents most of these loops.
 3. **Read the library's own docs/source** for the SPECIFIC version in use, not a
    generic latest-version doc. An import path valid in v0.29 may not exist in v0.11.
-4. **One diagnosis, then one fix — HARD STOP after 2 identical failures.** Never
+4. **One diagnosis, then one fix - HARD STOP after 2 identical failures.** Never
    do >2 blind retries of the same approach. If attempt 2 fails the same way,
    STOP and use docs/search/introspection. Re-running `docker compose build` with
-   no code change between attempts is a blind retry — do not do it.
+   no code change between attempts is a blind retry - do not do it.
 5. **Do NOT hand-roll tooling you already have.** This session wasted context
    building an MCP SSE client by hand in PowerShell (type-name parsing failures,
-   SSE stream issues). The MCP tools and `supabase` CLI were already connected —
+   SSE stream issues). The MCP tools and `supabase` CLI were already connected -
    use them. Never reinvent a connected tool.
 6. **Know your MCP scope before debugging DB state.** On this project the Supabase
    MCP splits scope by feature: `apply_migration` writes to the **branch** DB,
    while `execute_sql` / `list_tables` read **production/main**. Don't burn
-   context "discovering" that `public.jobs` "doesn't exist" in a branch context —
+   context "discovering" that `public.jobs` "doesn't exist" in a branch context -
    it exists in prod. See M6.
 
 **Penalty for violation:** repeated blind retries waste context and intelligence.
@@ -173,7 +173,7 @@ A single websearch or a one-line introspection command prevents most loops.
 ## Rule 8: KEEP THE USER INFORMED WHEN BLOCKED, STUCK, OR SLOW
 
 - **If an operation is taking long, looping, or stuck, tell the user what is
-  happening, the current stage, and the likely cause** — do NOT silently burn
+  happening, the current stage, and the likely cause** - do NOT silently burn
   many tool calls. Surface progress proactively (e.g. "tunnel died → function
   500ing; need you to restart cloudflared in your terminal").
 - **If you hit the same error 2+ times, STOP and report** the exact error + what
@@ -190,7 +190,7 @@ A single websearch or a one-line introspection command prevents most loops.
   `{"code":"WORKER_ERROR","message":"Function exited due to an error"}`. Wasted
   a full tool call per attempt with no new information. The generic body means
   the real error is ONLY in the function logs (MCP `get_logs` edge-function
-  returned empty on this project — use the dashboard Log Explorer instead).
+  returned empty on this project - use the dashboard Log Explorer instead).
 - **Right:**
   1. A bare `WORKER_ERROR` 500 with no custom message = an **unhandled throw**,
      usually at **module-load time** (bad `import`, or a top-level
@@ -200,7 +200,7 @@ A single websearch or a one-line introspection command prevents most loops.
   2. **Surface the error in the response.** Wrap the handler in try/catch that
      returns `error.message` / `error.stack` as JSON. Then ONE call reveals the
      real cause instead of a generic 500.
-  3. **Prefer local `supabase functions serve --debug`** to see the stack —
+  3. **Prefer local `supabase functions serve --debug`** to see the stack -
      but note it requires `supabase start` (a local stack), which this project
      does NOT run (cloud-only). So rely on error-surfacing + dashboard logs.
   4. **Never retry a 500 >2× without new info.** After 2 identical 500s, change
@@ -218,7 +218,7 @@ A single websearch or a one-line introspection command prevents most loops.
 ### Tooling notes (verified this session)
 - Python is at `C:\Users\Dell\AppData\Local\Programs\Python\Python313\python.exe`
   (3.13, `reportlab` 5.0.0, `requests` installed). The `python` on PATH is a
-  Windows Store alias stub — use the full path.
+  Windows Store alias stub - use the full path.
 - `supabase functions download` did not persist files on this CLI version;
   inspect deployed code via `supabase functions deploy` of known-local source
   instead.

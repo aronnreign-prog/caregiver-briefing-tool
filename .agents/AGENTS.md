@@ -1,10 +1,10 @@
-# Workspace Rules — Caregiver Briefing Tool
+# Workspace Rules: Caregiver Briefing Tool
 
 > These rules are scoped to this project. They extend (not replace) the project rules in `/AGENTS.md`.
 
 ---
 
-## ⛔ GATE ZERO — Read Before You Build (MANDATORY)
+## GATE ZERO: Read Before You Build (MANDATORY)
 
 Before writing ANY custom logic, regex, heuristic, workaround, or multi-step scaffolding:
 
@@ -13,37 +13,38 @@ Before writing ANY custom logic, regex, heuristic, workaround, or multi-step sca
 3. **If the SDK does NOT solve it:** State explicitly in a code comment WHY the SDK falls short and what gap the custom code fills.
 4. **Never assume based on naming conventions.** Read the actual method signatures, parameters, and return types.
 
-**This gate applies to every task — no exceptions.** Skipping it once created 150 lines of brittle regex heuristics that Zep's `scope="auto"` already handled natively.
+**This gate applies to every task: no exceptions.** Skipping it once created 150 lines of brittle regex heuristics that Zep's `scope="auto"` already handled natively.
 
 ---
 
 ## Architecture State (Updated 2026-08-20)
 
 The codebase has been fully migrated twice:
-1. **2026-08-19**: Python/Deno/Docker → TypeScript Next.js monolith
-2. **2026-08-20**: Supabase (Auth + Postgres + Storage) → Better Auth + Drizzle/Neon + Vercel Blob
+1. **2026-08-19**: Python/Deno/Docker -> TypeScript Next.js monolith
+2. **2026-08-20**: Supabase (Auth + Postgres + Storage) -> Better Auth + Drizzle/Neon + Vercel Blob
 
 ### Debugging Guide
 
 When a document or briefing fails:
-1. Query Neon DB — `SELECT id, status, error_message FROM documents ORDER BY uploaded_at DESC LIMIT 5;`
-2. Query Neon DB — `SELECT id, status, error_message FROM briefings ORDER BY created_at DESC LIMIT 5;`
+1. Query Neon DB: `SELECT id, status, error_message FROM documents ORDER BY uploaded_at DESC LIMIT 5;`
+2. Query Neon DB: `SELECT id, status, error_message FROM briefings ORDER BY created_at DESC LIMIT 5;`
 3. Next.js server logs: look for `[Pipeline]`, `[Briefing]`, `[Zep]` prefixes
 4. Zep Cloud dashboard for graph data issues
 
 ### Files to Not Touch Without Care
 
-- `src/lib/zep/ingest.ts` — uses Zep Cloud v2 graph API (`client.graph.add` / `client.graph.search`). The userId is a composite `caregiver-{id}-patient-{id}` — changing this breaks memory lookup.
-- `src/lib/ai/extract.ts` — `ClinicalExtractionSchema` is the source of truth for extracted shape. Changes here cascade to `pipeline-actions.ts` and `database.ts`.
-- `src/lib/auth-session.ts` — uses React `cache()`. Must return the same session per request.
-- `src/lib/db/schema.ts` — Drizzle schema is the source of truth. Changes require `npx drizzle-kit push` to sync Neon.
-- `src/app/dashboard/patients/[id]/pipeline-actions.ts` — contains the full ingestion + briefing pipeline. Keep `'use server'` at top.
-
-
+- `src/lib/zep/ingest.ts`: uses Zep Cloud v2 graph API (`client.graph.add` / `client.graph.search`). The userId is a composite `caregiver-{id}-patient-{id}`: changing this breaks memory lookup.
+- `src/lib/ai/extract.ts`: `ClinicalExtractionSchema` is the source of truth for extracted shape. Changes here cascade to `pipeline-actions.ts` and `database.ts`.
+- `src/lib/auth-session.ts`: uses React `cache()`. Must return the same session per request.
+- `src/lib/db/schema.ts`: Drizzle schema is the source of truth. Changes require `npx drizzle-kit push` to sync Neon.
+- `src/app/dashboard/patients/[id]/pipeline-actions.ts`: contains the full ingestion + briefing pipeline. Keep `'use server'` at top.
+- `src/app/api/documents/[id]/view/route.ts`: Authenticated document proxy enforcing tenant caregiver matching, Vercel Blob origin validation, and CSP sandbox headers.
+- `src/proxy.ts`: Edge session gating using canonical path normalization to prevent double-slash and encoding evasion.
+- `src/app/admin/page.tsx`: Scoped inArray DB queries preventing unbounded table scans.
 
 ---
 
-## Model Routing — When to Switch
+## Model Routing: When to Switch
 
 The user runs THREE tools: **ZCode (DeepSeek V4 Pro)**, **Claude Sonnet (Antigravity CLI)**, and **Gemini (Antigravity CLI)**.
 Each has different strengths and costs. The agent MUST recommend a switch at the start of any task where a different model would be more efficient.
@@ -56,7 +57,7 @@ Each has different strengths and costs. The agent MUST recommend a switch at the
 | Drizzle schema, Better Auth config, Vercel Blob wiring | **ZCode** | Fast and cheap for known patterns |
 | Novel/complex logic (Zep graph, Gemini schema, claim matching) | **Claude Sonnet** | Best reasoning for novel code |
 | Debugging (server action failures, Zep/Gemini API errors) | **Claude Sonnet** | Strong chain-of-thought for root cause |
-| Pipeline orchestration (ingest → extract → ingest flow) | **Claude Sonnet** | Complex async state |
+| Pipeline orchestration (ingest -> extract -> ingest flow) | **Claude Sonnet** | Complex async state |
 | Research (Zep Cloud API docs, AI SDK docs, Supabase internals) | **Gemini** | Web access, good at summarizing |
 | Planning / architecture review | **Gemini** | Structured analysis, cheap for long context |
 | UI components (shadcn/ui, Tailwind, React) | **ZCode** | Fast at component boilerplate |

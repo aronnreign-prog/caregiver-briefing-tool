@@ -477,9 +477,9 @@ export default function PatientDetailClient({ patient, initialDocuments, initial
     e.preventDefault()
     if (isDemo) return
     const doc = documents.find(d => d.id === docId)
-    if (!doc?.blob_url) { alert('Document not available.'); return }
-    const url = page ? `${doc.blob_url}#page=${page}` : doc.blob_url
-    window.open(url, '_blank')
+    if (!doc) { alert('Document not available.'); return }
+    const url = page ? `/api/documents/${doc.id}/view#page=${page}` : `/api/documents/${doc.id}/view`
+    window.open(url, '_blank', 'noopener,noreferrer')
   }
 
   const handleRemoveDocument = (id: string) => setDocuments(prev => prev.filter(d => d.id !== id))
@@ -811,6 +811,7 @@ export default function PatientDetailClient({ patient, initialDocuments, initial
                         <div className="p-4 text-[13px] text-foreground leading-relaxed">
                           <ReactMarkdown
                             components={{
+                              img: () => null,
                               h2: ({ children }) => (
                                 <h2 className="font-mono text-[9px] tracking-widest text-muted-foreground uppercase mt-4 mb-2 pb-1 border-b border-border">
                                   {renderContentWithClaims(children, claimsMap, handleDocClick, documents)}
@@ -998,6 +999,7 @@ export default function PatientDetailClient({ patient, initialDocuments, initial
 
                         return (
                           <ReactMarkdown components={{
+                            img: () => null,
                             h2: ({ children }) => <h2 className="font-mono text-[9px] tracking-widest text-muted-foreground uppercase mt-8 mb-3 pb-2 border-b border-border">{renderContentWithClaims(children, claimsMap, handleDocClick, documents)}</h2>,
                             p: ({ children }) => <p className="text-[13px] text-foreground leading-relaxed mb-4">{renderContentWithClaims(children, claimsMap, handleDocClick, documents)}</p>,
                             li: ({ children }) => (

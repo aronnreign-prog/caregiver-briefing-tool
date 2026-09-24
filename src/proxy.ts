@@ -1,11 +1,21 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { auth } from '@/lib/auth'
 
+export function normalizePath(rawPath: string): string {
+  try {
+    const decoded = decodeURIComponent(rawPath)
+    return decoded.replace(/\/+/g, '/').toLowerCase()
+  } catch {
+    return rawPath.replace(/\/+/g, '/').toLowerCase()
+  }
+}
+
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl
+  const normalizedPath = normalizePath(pathname)
 
-  // 1. Immediately block any attempt to sign up publicly
-  if (pathname.startsWith('/api/auth/sign-up')) {
+  // 1. Immediately block any attempt to sign up publicly (including path evasion variants)
+  if (normalizedPath.startsWith('/api/auth/sign-up') || normalizedPath.includes('/sign-up')) {
     return NextResponse.json(
       { error: 'Public registration is closed. Please register for demo access.' },
       { status: 403 }
@@ -13,7 +23,7 @@ export async function proxy(request: NextRequest) {
   }
 
   // 2. Redirect anyone navigating to /signup back to #demo
-  if (pathname.startsWith('/signup')) {
+  if (normalizedPath.startsWith('/signup')) {
     const url = request.nextUrl.clone()
     url.pathname = '/'
     url.hash = 'demo'
@@ -21,9 +31,9 @@ export async function proxy(request: NextRequest) {
   }
 
   const session = await auth.api.getSession({ headers: request.headers })
-  const isLoginPage = pathname.startsWith('/login')
-  const isDashboardPage = pathname.startsWith('/dashboard')
-  const isAdminPage = pathname.startsWith('/admin')
+  const isLoginPage = normalizedPath.startsWith('/login')
+  const isDashboardPage = normalizedPath.startsWith('/dashboard')
+  const isAdminPage = normalizedPath.startsWith('/admin')
 
   // If already logged in, redirect away from /login
   if (session?.user && isLoginPage) {
