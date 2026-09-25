@@ -7,6 +7,7 @@ import { db } from '@/lib/db'
 import { patients as patientsTable, documents as documentsTable, briefings as briefingsTable } from '@/lib/db/schema'
 import { eq } from 'drizzle-orm'
 import { getSession, getCaregiver, isAdmin } from '@/lib/auth-session'
+import { Logo } from '@/components/ui/Logo'
 
 function calcAge(dob: string) {
   const diff = Date.now() - new Date(dob).getTime()
@@ -15,19 +16,6 @@ function calcAge(dob: string) {
 
 function initials(name: string) {
   return name.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase()
-}
-
-function Logo({ size = 18 }: { size?: number }) {
-  return (
-    <div
-      className="bg-white text-black rounded flex items-center justify-center shrink-0 font-bold"
-      style={{ width: size, height: size }}
-    >
-      <svg width={size * 0.55} height={size * 0.55} viewBox="0 0 11 11" fill="none">
-        <path d="M1.5 2.5h8M1.5 5.5h5.5M1.5 8.5h3.5" stroke="#0A0E14" strokeWidth="1.6" strokeLinecap="round" />
-      </svg>
-    </div>
-  )
 }
 
 export default async function DashboardPage() {
@@ -93,7 +81,7 @@ export default async function DashboardPage() {
 
         <div className="px-5 py-4 border-b border-[#1F2937] flex items-center justify-between">
           <Link href="/" className="flex items-center gap-2.5 hover:opacity-90 transition-opacity">
-            <Logo size={18} />
+            <Logo size={20} priority />
             <span className="text-[13px] font-semibold tracking-tight text-white">CareNote</span>
           </Link>
         </div>
@@ -149,7 +137,7 @@ export default async function DashboardPage() {
           <div className="flex items-center gap-3">
             <div className="md:hidden flex items-center gap-2">
               <Link href="/" className="flex items-center gap-2">
-                <Logo size={18} />
+                <Logo size={20} />
                 <span className="text-[13px] font-semibold tracking-tight text-white">CareNote</span>
               </Link>
             </div>

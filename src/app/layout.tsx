@@ -23,6 +23,15 @@ export const viewport: Viewport = {
 export const metadata: Metadata = {
   title: "CareNote: AI Briefing for Caregivers",
   description: "Upload your parent's medical prescriptions and notes. Get a verified, source-cited briefing ready for their next appointment.",
+  icons: {
+    icon: [
+      { url: "/icon.png", sizes: "32x32", type: "image/png" },
+      { url: "/logo.png", sizes: "512x512", type: "image/png" },
+    ],
+    apple: [
+      { url: "/apple-icon.png", sizes: "180x180", type: "image/png" },
+    ],
+  },
 };
 
 export default function RootLayout({

@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react'
 import Link from 'next/link'
+import { Logo } from '@/components/ui/Logo'
 import {
   createDemoUser,
   deleteDemoUser,
@@ -210,9 +211,12 @@ export function AdminClient({ currentUserEmail, users, pendingRequests = [] }: P
                 BETTER AUTH ADMIN PLUGIN
               </span>
             </div>
-            <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight text-white">
-              Demo Account Manager
-            </h1>
+            <div className="flex items-center gap-3">
+              <Logo size={28} priority />
+              <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight text-white">
+                Demo Account Manager
+              </h1>
+            </div>
             <p className="text-xs text-white/60 mt-1">
               Powered natively by Better Auth Admin Plugin. Public signup is closed.
             </p>

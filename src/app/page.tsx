@@ -2,24 +2,12 @@ import Link from 'next/link'
 import type { Metadata } from 'next'
 import { HeroClinicalProof } from '@/components/clinical'
 import { DemoRequestModal, DemoRequestTrigger } from '@/components/marketing/DemoRequestModal'
+import { Logo } from '@/components/ui/Logo'
 
 export const metadata: Metadata = {
   title: 'CareNote: Graph Memory & Verifiable PaperTrail for Medical Prescriptions and Notes',
   description:
     'Medical prescriptions and notes form an interconnected timeline, not disconnected text chunks. CareNote builds a persistent patient knowledge graph with an instant PaperTrail linking every claim to its original PDF page.',
-}
-
-function Logo({ size = 18 }: { size?: number }) {
-  return (
-    <div
-      className="bg-white text-black rounded flex items-center justify-center shrink-0 font-bold"
-      style={{ width: size, height: size }}
-    >
-      <svg width={size * 0.55} height={size * 0.55} viewBox="0 0 11 11" fill="none">
-        <path d="M1.5 2.5h8M1.5 5.5h5.5M1.5 8.5h3.5" stroke="#0A0E14" strokeWidth="1.6" strokeLinecap="round" />
-      </svg>
-    </div>
-  )
 }
 
 export default function LandingPage() {
@@ -29,7 +17,7 @@ export default function LandingPage() {
       <header className="sticky top-0 z-50 border-b border-white/[0.08] bg-[#0A0E14]/80 backdrop-blur-xl">
         <div className="mx-auto max-w-5xl flex items-center justify-between px-6 h-14">
           <Link href="/" className="flex items-center gap-2.5">
-            <Logo size={18} />
+            <Logo size={22} priority />
             <span className="text-[13px] font-semibold tracking-tight text-white">
               CareNote
             </span>
@@ -263,7 +251,7 @@ export default function LandingPage() {
       <footer className="border-t border-white/[0.08] py-8">
         <div className="mx-auto max-w-5xl px-6 flex flex-col sm:flex-row items-center justify-between gap-4 text-[12px] text-white/50">
           <div className="flex items-center gap-2">
-            <Logo size={14} />
+            <Logo size={18} />
             <span className="font-semibold text-white/80">CareNote</span>
           </div>
 

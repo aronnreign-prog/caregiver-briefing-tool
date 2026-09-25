@@ -3,19 +3,7 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { authClient } from '@/lib/auth-client'
-
-function Logo({ size = 20 }: { size?: number }) {
-  return (
-    <div
-      className="bg-white text-black rounded flex items-center justify-center shrink-0 font-bold"
-      style={{ width: size, height: size }}
-    >
-      <svg width={size * 0.55} height={size * 0.55} viewBox="0 0 11 11" fill="none">
-        <path d="M1.5 2.5h8M1.5 5.5h5.5M1.5 8.5h3.5" stroke="#0A0E14" strokeWidth="1.6" strokeLinecap="round" />
-      </svg>
-    </div>
-  )
-}
+import { Logo } from '@/components/ui/Logo'
 
 export default function LoginPage() {
   const [error, setError] = useState<string | null>(null)
@@ -55,7 +43,7 @@ export default function LoginPage() {
       {/* Left panel */}
       <div className="hidden lg:flex w-[440px] shrink-0 flex-col bg-[#0D1117] border-r border-[#1F2937] px-10 py-12">
         <Link href="/" className="flex items-center gap-2.5 mb-16 hover:opacity-90 transition-opacity">
-          <Logo size={20} />
+          <Logo size={22} priority />
           <span className="text-[13px] font-semibold tracking-tight text-white">CareNote</span>
         </Link>
 
@@ -110,7 +98,7 @@ export default function LoginPage() {
 
           {/* Mobile brand */}
           <Link href="/" className="flex items-center gap-2 mb-8 lg:hidden hover:opacity-90 transition-opacity">
-            <Logo size={18} />
+            <Logo size={20} />
             <span className="text-[13px] font-semibold tracking-tight text-white">CareNote</span>
           </Link>
 

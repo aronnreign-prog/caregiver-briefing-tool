@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useCallback, useId } from 'react'
 import { submitDemoRequest } from '@/app/actions/demo'
+import { Logo } from '@/components/ui/Logo'
 import {
   CheckCircle2,
   AlertCircle,
@@ -369,13 +370,16 @@ export function DemoRequestModal({
             /* Request Form State */
             <div>
               <div className="mb-5">
-                <h3
-                  id={titleId}
-                  className="text-xl sm:text-2xl font-semibold text-white tracking-tight"
-                >
-                  Request Demo Access
-                </h3>
-                <p id={descId} className="text-[13px] text-white/65 leading-relaxed mt-1">
+                <div className="flex items-center gap-3">
+                  <Logo size={24} priority />
+                  <h3
+                    id={titleId}
+                    className="text-xl sm:text-2xl font-semibold text-white tracking-tight"
+                  >
+                    Request Demo Access
+                  </h3>
+                </div>
+                <p id={descId} className="text-[13px] text-white/65 leading-relaxed mt-1.5">
                   Experience persistent patient knowledge graphs and source-grounded clinical briefings with clickable PaperTrail citations.
                 </p>
               </div>
